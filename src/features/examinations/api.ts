@@ -1,5 +1,5 @@
 import { getReceivedReservations } from "@/features/reservations/api";
-import { assertMockMode } from "@/lib/api/config";
+import { mockOnly } from "@/lib/api/config";
 import { MOCK_EXAMINATIONS } from "@/lib/dev/mockExaminations";
 
 import type { Examination } from "./types";
@@ -20,7 +20,7 @@ export const IS_MOCK_DATA = true;
  * 검사 기록이 없거나 기관이 다른 예약은 포함하지 않는다.
  */
 export async function getExaminations(organizationId: string): Promise<Examination[]> {
-  assertMockMode("examinations.getExaminations");
+  mockOnly("examinations.getExaminations");
   const reservations = await getReceivedReservations(organizationId);
   const recordById = new Map(
     MOCK_EXAMINATIONS.filter((record) => record.organizationId === organizationId).map((record) => [
