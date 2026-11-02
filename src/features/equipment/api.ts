@@ -1,7 +1,7 @@
 import { getFailedEquipmentIds } from "@/features/incidents/mockIncidentStore";
 import { applyEquipmentFailures } from "@/features/slots/availability";
 import type { ExamSlot } from "@/features/slots/types";
-import { assertMockMode } from "@/lib/api/config";
+import { mockOnly } from "@/lib/api/config";
 import { addDays, getSeoulNow, type DateKey } from "@/lib/date/seoulDate";
 import { getMockOrganizationId } from "@/lib/dev/mockSession";
 import {
@@ -35,7 +35,7 @@ export async function getCurrentExaminingOrganizationId(): Promise<string | null
  * TODO(api): 장비 조회 API의 장비·운영 시간·상태 값으로 교체한다.
  */
 export async function getEquipments(organizationId: string): Promise<Equipment[]> {
-  assertMockMode("equipment.getEquipments");
+  mockOnly("equipment.getEquipments");
   const failedEquipmentIds = getFailedEquipmentIds();
   return getEffectiveEquipments(organizationId).map((equipment) => ({
     id: equipment.id,
@@ -63,7 +63,7 @@ export async function getOrganizationSlots(
   from: DateKey,
   to: DateKey,
 ): Promise<ExamSlot[]> {
-  assertMockMode("equipment.getOrganizationSlots");
+  mockOnly("equipment.getOrganizationSlots");
   const { dateTime } = getSeoulNow();
   return applyEquipmentFailures(getAllMockSlots(), getFailedEquipmentIds(), dateTime)
     .filter((slot) => {
