@@ -14,6 +14,7 @@ import {
   summarizeExaminations,
   validateExaminationCriteria,
 } from "../query";
+import type { NextProgressStatus } from "../rules";
 import type { ExamResult, Examination, ExaminationSearchCriteria } from "../types";
 
 import { ProgressStatusBadge } from "./ExaminationBadges";
@@ -32,7 +33,7 @@ type ModalState = { type: "detail" | "register"; id: string } | null;
 
 /**
  * 검사 진행·결과의 클라이언트 경계: 요약 → 검사 목록(검색 툴바·테이블) → 상세·결과 등록 모달.
- * 결과 등록(Mock)은 이 컴포넌트 상태에만 반영하므로 목록·상세·요약이 같은 데이터를 본다.
+ * 결과 등록·진행 상태 변경(Mock)은 이 컴포넌트 상태에만 반영하므로 목록·상세·요약·필터가 같은 데이터를 본다.
  * 과거 검사 이력도 관리하므로 지난 날짜도 검색할 수 있다.
  */
 export default function ExaminationBoard({ examinations: initialExaminations }: ExaminationBoardProps) {
@@ -97,6 +98,14 @@ export default function ExaminationBoard({ examinations: initialExaminations }: 
     setExaminations((prev) => prev.map((item) => (item.id === examination.id ? { ...item, result } : item)));
     setSuccessMessage(`${examination.referralNumber} 검사 결과를 등록했습니다.`);
     closeModal();
+  };
+
+  /** 진행 상태 변경은 상세 모달을 닫지 않는다 (완료 후 바로 결과 등록으로 이어갈 수 있게) */
+  const handleProgressChanged = (examination: Examination, progressStatus: NextProgressStatus) => {
+    setExaminations((prev) => prev.map((item) => (item.id === examination.id ? { ...item, progressStatus } : item)));
+    setSuccessMessage(
+      `${examination.referralNumber} 검사를 ${progressStatus === "IN_PROGRESS" ? "시작" : "완료 처리"}했습니다.`,
+    );
   };
 
   const emptyMessage =
@@ -179,7 +188,13 @@ export default function ExaminationBoard({ examinations: initialExaminations }: 
         onClose={closeModal}
       >
         {modal?.type === "detail" && target && (
-          <ExaminationDetail examination={target} onRegister={() => setModal({ type: "register", id: target.id })} />
+          <ExaminationDetail
+            // 다른 검사를 열면 처리 중·오류 상태를 새로 시작한다
+            key={target.id}
+            examination={target}
+            onRegister={() => setModal({ type: "register", id: target.id })}
+            onProgressChanged={(status) => handleProgressChanged(target, status)}
+          />
         )}
       </Modal>
 
