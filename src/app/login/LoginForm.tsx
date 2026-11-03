@@ -4,6 +4,7 @@ import { useRef, useState, type FormEvent } from "react";
 
 import type { LoginResult } from "@/features/auth/types";
 import { getApiMode } from "@/lib/api/config";
+import { isDemoModeEnabled } from "@/lib/dev/demoMode";
 
 interface LoginFormValues {
   loginId: string;
@@ -69,7 +70,11 @@ export default function LoginForm() {
       return;
     }
     if (!isApiMode) {
-      setFormMessage("Mock 모드에서는 실제 로그인을 하지 않습니다. 아래 데모 체험 바로가기를 이용해 주세요.");
+      setFormMessage(
+        isDemoModeEnabled()
+          ? "Mock 모드에서는 실제 로그인을 하지 않습니다. 아래 데모 체험 바로가기를 이용해 주세요."
+          : "Mock 모드에서는 실제 로그인을 하지 않습니다. (데모 체험이 꺼져 있습니다)",
+      );
       return;
     }
 

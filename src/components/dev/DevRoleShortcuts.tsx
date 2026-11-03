@@ -1,17 +1,15 @@
 import { ArrowRight } from "lucide-react";
 import Link from "next/link";
 
+import { isDemoModeEnabled } from "@/lib/dev/demoMode";
+
 /**
  * ⚠️ 데모 체험 바로가기 (실제 인증 아님)
  *
- * 로그인 API 연동 전, 팀원이 역할별 Mock 화면을 확인하기 위한 링크다. 인증·세션을 만들지 않고 화면만 이동한다.
- * - 개발 환경(`next dev`, NODE_ENV=development): 항상 표시
- * - 배포 환경: NEXT_PUBLIC_ENABLE_DEMO_SHORTCUTS=true일 때만 표시
- *   (NEXT_PUBLIC_ 값은 빌드 시점에 들어가므로 값을 바꾸면 다시 배포해야 반영된다)
- * 인증 연동 후 제거한다.
+ * 역할(의뢰기관·검사기관)을 골라 그 역할의 Mock 화면으로 이동한다. 인증·세션·토큰을 만들지 않고 화면만 이동한다.
+ * 표시 조건은 isDemoModeEnabled (Mock 모드에서만, 배포 환경은 NEXT_PUBLIC_ENABLE_DEMO_SHORTCUTS=true 필요).
+ * API 모드에서는 표시하지 않는다 (JWT 로그인만 쓴다). 인증 연동 후 제거한다.
  */
-const IS_DEMO_SHORTCUTS_ENABLED =
-  process.env.NODE_ENV === "development" || process.env.NEXT_PUBLIC_ENABLE_DEMO_SHORTCUTS === "true";
 
 const DEMO_LINKS = [
   { href: "/examining/equipment", label: "검사기관 데모 체험하기" },
@@ -19,7 +17,7 @@ const DEMO_LINKS = [
 ] as const;
 
 export default function DevRoleShortcuts() {
-  if (!IS_DEMO_SHORTCUTS_ENABLED) return null;
+  if (!isDemoModeEnabled()) return null;
 
   return (
     <aside
