@@ -21,11 +21,15 @@ import type { ExaminingNotification, ExaminingNotificationType } from "../types"
 
 import { useExaminingNotificationRead } from "./ExaminingNotificationReadProvider";
 
+interface NotificationTypeMeta {
+  label: string;
+  icon: LucideIcon;
+  iconClass: string;
+  badgeClass: string;
+}
+
 /** 알림 유형별 아이콘·색상 (신규=파랑, 취소=회색, 변경=주황, 장애=빨강, 복구=초록) */
-const TYPE_META: Record<
-  ExaminingNotificationType,
-  { label: string; icon: LucideIcon; iconClass: string; badgeClass: string }
-> = {
+const TYPE_META: Record<ExaminingNotificationType, NotificationTypeMeta> = {
   RESERVATION_RECEIVED: {
     label: "신규 예약",
     icon: Bell,
@@ -58,7 +62,15 @@ const TYPE_META: Record<
   },
 };
 
-const TYPE_OPTIONS = Object.entries(TYPE_META) as [ExaminingNotificationType, (typeof TYPE_META)[ExaminingNotificationType]][];
+/** API 알림 표시. 백엔드 알림 유형 값 목록이 확정되지 않아 유형별 아이콘·문구를 붙이지 않는다 */
+export const API_NOTIFICATION_META: NotificationTypeMeta = {
+  label: "알림",
+  icon: Bell,
+  iconClass: "bg-primary-soft text-primary",
+  badgeClass: "bg-primary-soft text-primary",
+};
+
+const TYPE_OPTIONS =Object.entries(TYPE_META) as [ExaminingNotificationType, (typeof TYPE_META)[ExaminingNotificationType]][];
 
 /**
  * 관련 업무 화면. 예약·장애 화면은 URL로 특정 상세를 여는 기능이 없어 목록 화면으로만 이동한다.
@@ -232,7 +244,13 @@ export default function ExaminingNotificationBoard() {
         ) : (
           <ul ref={listRef} className="divide-y divide-line">
             {visible.map((item) => (
-              <NotificationRow key={item.id} item={item} onMarkAsRead={() => handleMarkAsRead(item)} />
+              <NotificationRow
+                key={item.id}
+                item={item}
+                meta={TYPE_META[item.type]}
+                link={TARGET_LINK[item.target.kind]}
+                onMarkAsRead={() => handleMarkAsRead(item)}
+              />
             ))}
           </ul>
         )}
@@ -245,14 +263,15 @@ export default function ExaminingNotificationBoard() {
   );
 }
 
-function FilterToggle({
+/** 읽음 상태 필터 버튼 (Mock·API 공통). count가 없으면 건수를 표시하지 않는다 */
+export function FilterToggle({
   label,
   count,
   pressed,
   onClick,
 }: {
   label: string;
-  count: number;
+  count?: number;
   pressed: boolean;
   onClick: () => void;
 }) {
@@ -265,14 +284,36 @@ function FilterToggle({
         pressed ? "border-primary bg-primary text-white" : "border-line bg-white text-gray-700 hover:bg-gray-50"
       }`}
     >
-      {label} <span className="tabular-nums">{count}</span>
+      {label}
+      {count !== undefined && (
+        <>
+          {" "}
+          <span className="tabular-nums">{count}</span>
+        </>
+      )}
     </button>
   );
 }
 
-function NotificationRow({ item, onMarkAsRead }: { item: ExaminingNotification; onMarkAsRead: () => void }) {
-  const { label, icon: Icon, iconClass, badgeClass } = TYPE_META[item.type];
-  const link = TARGET_LINK[item.target.kind];
+/**
+ * 알림 한 줄 (Mock·API 공통).
+ * - link가 null이면 관련 화면 이동 버튼을 두지 않는다 (API 응답에는 관련 화면 정보가 없다)
+ * - pending이면 읽음 처리 버튼을 잠근다
+ */
+export function NotificationRow({
+  item,
+  meta,
+  link,
+  onMarkAsRead,
+  pending,
+}: {
+  item: Pick<ExaminingNotification, "id" | "title" | "message" | "occurredAt" | "isRead">;
+  meta: NotificationTypeMeta;
+  link: { href: string; label: string } | null;
+  onMarkAsRead: () => void;
+  pending?: boolean;
+}) {
+  const { label, icon: Icon, iconClass, badgeClass } = meta;
 
   return (
     <li data-notification-id={item.id} className="flex gap-4 py-4">
@@ -307,19 +348,25 @@ function NotificationRow({ item, onMarkAsRead }: { item: ExaminingNotification; 
               <button
                 type="button"
                 onClick={onMarkAsRead}
+                disabled={pending}
+                aria-busy={pending}
                 aria-label={`'${item.title}' 읽음 처리`}
-                className="h-9 whitespace-nowrap rounded-md px-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100"
+                className={`h-9 whitespace-nowrap rounded-md px-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100${
+                  pending === undefined ? "" : " disabled:cursor-not-allowed disabled:text-gray-400 disabled:hover:bg-transparent"
+                }`}
               >
-                읽음 처리
+                {pending ? "처리 중" : "읽음 처리"}
               </button>
             )}
-            <Link
-              href={link.href}
-              data-focus-target
-              className="inline-flex h-9 items-center whitespace-nowrap rounded-md border border-primary bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
-            >
-              {link.label}
-            </Link>
+            {link && (
+              <Link
+                href={link.href}
+                data-focus-target
+                className="inline-flex h-9 items-center whitespace-nowrap rounded-md border border-primary bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
+              >
+                {link.label}
+              </Link>
+            )}
           </div>
         </div>
       </div>

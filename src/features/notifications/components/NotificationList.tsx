@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, CheckCircle2, FileCheck2, XCircle, type LucideIcon } from "lucide-react";
+import { AlertCircle, Bell, CheckCircle2, FileCheck2, XCircle, type LucideIcon } from "lucide-react";
 
 import { formatDateTimeWithWeekday, formatShortDateTime } from "@/lib/format/date";
 
@@ -8,12 +8,25 @@ import type { NotificationItem, NotificationType } from "../types";
 
 import { useNotificationRead } from "./NotificationReadProvider";
 
+interface NotificationTypeMeta {
+  label: string;
+  icon: LucideIcon;
+  className: string;
+}
+
 /** 알림 유형별 아이콘·색상 (재조정=빨강, 확정=초록, 취소=회색, 결과 등록=파랑) */
-const TYPE_META: Record<NotificationType, { label: string; icon: LucideIcon; className: string }> = {
+const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
   RESCHEDULE_REQUIRED: { label: "재조정 필요", icon: AlertCircle, className: "bg-red-50 text-red-600" },
   RESERVATION_CONFIRMED: { label: "예약 확정", icon: CheckCircle2, className: "bg-emerald-50 text-emerald-600" },
   RESERVATION_CANCELLED: { label: "예약 취소", icon: XCircle, className: "bg-gray-100 text-gray-500" },
   RESULT_REGISTERED: { label: "검사 결과 등록", icon: FileCheck2, className: "bg-primary-soft text-primary" },
+};
+
+/** API 알림 표시. 백엔드 알림 유형 값 목록이 확정되지 않아 유형별 아이콘·문구를 붙이지 않는다 */
+export const API_NOTIFICATION_META: NotificationTypeMeta = {
+  label: "알림",
+  icon: Bell,
+  className: "bg-primary-soft text-primary",
 };
 
 /**
@@ -54,7 +67,12 @@ export default function NotificationList() {
       ) : (
         <ul className="divide-y divide-line border-t border-line">
           {notifications.map((item) => (
-            <NotificationRow key={item.id} item={item} onMarkAsRead={() => markAsRead(item.id)} />
+            <NotificationRow
+              key={item.id}
+              item={item}
+              meta={TYPE_META[item.type]}
+              onMarkAsRead={() => markAsRead(item.id)}
+            />
           ))}
         </ul>
       )}
@@ -66,8 +84,19 @@ export default function NotificationList() {
   );
 }
 
-function NotificationRow({ item, onMarkAsRead }: { item: NotificationItem; onMarkAsRead: () => void }) {
-  const { label, icon: Icon, className } = TYPE_META[item.type];
+/** 알림 한 줄 (Mock 목록과 API 목록 공통). `pending`이면 읽음 처리 버튼을 잠근다 */
+export function NotificationRow({
+  item,
+  meta,
+  onMarkAsRead,
+  pending,
+}: {
+  item: Pick<NotificationItem, "title" | "message" | "occurredAt" | "isRead">;
+  meta: NotificationTypeMeta;
+  onMarkAsRead: () => void;
+  pending?: boolean;
+}) {
+  const { label, icon: Icon, className } = meta;
 
   return (
     <li className="flex gap-3 py-4">
@@ -98,9 +127,13 @@ function NotificationRow({ item, onMarkAsRead }: { item: NotificationItem; onMar
           <button
             type="button"
             onClick={onMarkAsRead}
-            className="mt-1.5 rounded text-sm font-medium text-primary hover:underline"
+            disabled={pending}
+            aria-busy={pending}
+            className={`mt-1.5 rounded text-sm font-medium text-primary hover:underline${
+              pending === undefined ? "" : " disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline"
+            }`}
           >
-            읽음 처리
+            {pending ? "처리 중" : "읽음 처리"}
           </button>
         )}
       </div>

@@ -36,3 +36,47 @@ export interface NotificationItem {
   /** RESCHEDULE_REQUIRED 알림의 원인 */
   rescheduleCause?: RescheduleCause;
 }
+
+// ── 알림 API 화면 타입 (의뢰기관·검사기관 공통) ──
+
+/**
+ * 알림 API 응답(NotificationResponse)을 화면에서 쓰는 형태로 옮긴 값.
+ * 백엔드에 없는 값(재조정 원인 장비·관련 화면 등)은 두지 않는다. 유형은 값 목록이 미확정이라 문자열 그대로다.
+ */
+export interface ApiNotificationItem {
+  id: string;
+  referralId: string;
+  type: string;
+  title: string;
+  message: string;
+  isRead: boolean;
+  /** 생성 시각 (Java LocalDateTime 문자열, 시간대 표기 없음) */
+  occurredAt: string;
+  readAt: string | null;
+}
+
+/**
+ * 알림 API 실패 원인.
+ * - SIGNED_OUT: 로그인 쿠키 없음 (요청하지 않음)
+ * - UNAUTHORIZED: 401 (토큰 만료·위조) → 다시 로그인
+ * - FORBIDDEN: 403 (알림을 쓸 수 없는 역할, 또는 본인 알림이 아님)
+ * - NOT_FOUND: 404 (읽음 처리할 알림이 없음)
+ * - NETWORK: 서버에 연결하지 못함·응답 시간 초과
+ * - ERROR: 그 밖의 실패 (400·5xx·응답 형식 오류·설정 오류)
+ */
+export type NotificationFailureReason = "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "NETWORK" | "ERROR";
+
+export interface NotificationFailure {
+  ok: false;
+  reason: NotificationFailureReason;
+  message: string;
+}
+
+/** 읽지 않은 알림 수 조회 결과 (레이아웃이 Promise로 넘겨 헤더·목록이 함께 쓴다) */
+export type UnreadNotificationCountResult = { ok: true; unreadCount: number } | NotificationFailure;
+
+/** 읽음 처리 Server Function 결과 */
+export type NotificationReadActionResult = { ok: true; notificationId: string; readAt: string } | NotificationFailure;
+
+/** API 알림 목록의 읽지 않음 필터 화면 주소 값 (`?filter=unread`) */
+export const NOTIFICATION_UNREAD_FILTER = "unread";
