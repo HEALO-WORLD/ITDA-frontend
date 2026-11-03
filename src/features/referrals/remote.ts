@@ -126,6 +126,26 @@ export async function fetchRescheduleReferralPage(
   return data;
 }
 
+/**
+ * 의뢰 단건 조회 `GET /api/v1/referrals/{referralId}` (Gateway: 로그인 사용자 전체).
+ * 범위는 서버가 정한다: 의뢰기관 소속(X-Institution-Id)이거나 관리자가 아니면 404 REFERRAL_NOT_FOUND (작성자 본인 여부는 보지 않는다).
+ * UUID가 아니면 요청하지 않고 설정 오류, 응답이 계약과 다르거나 다른 의뢰면 PARSE 오류로 던진다.
+ */
+export async function fetchReferral(
+  referralId: string,
+  options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
+): Promise<ReferralResponseDto> {
+  requireApiFeature("referrals");
+  if (!isUuid(referralId)) {
+    throw new ApiError("CONFIG", "의뢰 ID 형식이 올바르지 않습니다.");
+  }
+  const data = await apiRequestData<unknown>(`/api/v1/referrals/${referralId}`, options);
+  if (!isReferralResponse(data) || data.id.toLowerCase() !== referralId.toLowerCase()) {
+    throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
 /** 검사 유형 (백엔드 ExamTypeResponse). 기관과 무관한 전체 목록이다 */
 export interface ExamTypeDto {
   id: string;
@@ -455,6 +475,22 @@ const RESCHEDULE_LIST_ERROR_MESSAGES: Record<string, string> = {
   INVALID_INPUT: "재조정 목록 조회 조건이 올바르지 않습니다.",
   ACCESS_DENIED: "재조정 필요 목록은 의뢰기관 담당자만 조회할 수 있습니다.",
 };
+
+/** 의뢰 단건 조회 오류 코드별 안내 */
+const REFERRAL_DETAIL_ERROR_MESSAGES: Record<string, string> = {
+  REFERRAL_NOT_FOUND: "의뢰를 찾을 수 없거나 조회할 수 있는 기관의 의뢰가 아닙니다.",
+  INVALID_INPUT: "의뢰 ID가 올바르지 않습니다.",
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  ACCESS_DENIED: "의뢰 정보를 조회할 권한이 없습니다.",
+};
+
+export function getReferralDetailErrorMessage(error: unknown): string {
+  if (!isApiError(error)) return "의뢰 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && REFERRAL_DETAIL_ERROR_MESSAGES[error.code]) {
+    return REFERRAL_DETAIL_ERROR_MESSAGES[error.code];
+  }
+  return error.message;
+}
 
 /** 예약 단건 조회 오류 코드별 안내 */
 const RESERVATION_ERROR_MESSAGES: Record<string, string> = {

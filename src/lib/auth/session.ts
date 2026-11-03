@@ -146,9 +146,12 @@ export async function getExaminationAuthorizationHeaders(): Promise<HeadersInit 
  * - Gateway가 JWT 서명·만료를 검증하고 REQUESTER·ADMIN만 허용한다
  * - Referral Service가 Gateway의 X-User-Id·X-Role로 의뢰 작성자 본인 또는 ADMIN인지 확인한다
  *   (같은 기관의 다른 REQUESTER도 재예약할 수 없다: 404 REFERRAL_NOT_FOUND)
+ * 재예약 전 확인용 조회(features/referrals/rescheduleActions.ts)
+ * - `GET /api/v1/referrals/{id}` (기관 범위, 다른 기관 404), `GET /api/v1/slots/{id}` (범위 검사 없음),
+ *   `GET /api/v1/equipments/{id}` (REQUESTER는 ACTIVE 협약 검사기관만, ADMIN은 Gateway 403)
  * 반환값이 있다고 인증·인가가 성공한 것이 아니다. 실제 권한 확인은 Gateway와 Referral Service가 한다.
- * 호출 위치: 앞으로 만들 재예약 Server Action에서만 쓴다. 그 Action은 같은 출처 확인(isSameOriginHeaders)과
- * 입력값 검증(validateRescheduleRequest)을 통과한 뒤에만 이 헤더를 붙인다.
+ * 호출 위치: 재예약 Server Action(rescheduleActions.ts)에서만 쓴다. 같은 출처 확인(isSameOriginHeaders)을 통과한 뒤에만 붙이고,
+ * 재예약 POST는 입력값 검증(validateRescheduleRequest)까지 통과한 뒤에만 붙인다.
  *
  * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
  */
