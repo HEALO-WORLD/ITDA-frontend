@@ -3,6 +3,8 @@ import Link from "next/link";
 
 import type { ExaminationProgressItem } from "../remote";
 
+import ExaminationApiActions from "./ExaminationApiActions";
+
 interface ExaminationApiBoardProps {
   examinations: ExaminationProgressItem[];
   totalElements: number;
@@ -45,6 +47,7 @@ export default function ExaminationApiBoard({
                 <th className="p-3">진행 상태</th>
                 <th className="p-3">예약 상태</th>
                 <th className="p-3">결과 등록</th>
+                <th className="p-3">처리</th>
               </tr>
             </thead>
             <tbody>
@@ -62,6 +65,19 @@ export default function ExaminationApiBoard({
                   <td className="p-3">{exam.reservationStatus}</td>
                   <td className="p-3">
                     {exam.resultRegistered ? "등록 완료" : "미등록"}
+                  </td>
+                  <td className="p-3">
+                    <ExaminationApiActions
+                      examination={{
+                        examinationId: exam.examinationId,
+                        progressStatus: exam.progressStatus,
+                        reservationStatus: exam.reservationStatus,
+                        resultRegistered: exam.resultRegistered,
+                        examDate: exam.examDate,
+                        startTime: exam.startTime,
+                        endTime: exam.endTime,
+                      }}
+                    />
                   </td>
                 </tr>
               ))}

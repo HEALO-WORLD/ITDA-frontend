@@ -11,14 +11,14 @@ import { isApiFeature } from "@/lib/api/config";
  * 검사 진행·결과 (S08).
  * - Mock 모드: 현재 검사기관(개발용 세션 매핑)의 검사를 서버에서 기관 ID로 골라 넘기고,
  *   검색·상세·결과 등록(Mock)은 클라이언트에서 처리한다.
- * - API 모드(examinations 선택): 로그인 세션으로 검사 목록 API를 조회한다 (`?page=`, 1부터).
+ * - API 모드(examinations 선택): 로그인 세션으로 검사 목록 API를 조회하고 (`?page=`, 1부터), 행마다 상태 변경·결과 등록 API를 호출한다.
  *   세션·쿼리는 요청 시점 값이라 Suspense 안에서 렌더링한다. Mock 데이터·Mock 기관 ID를 쓰지 않는다.
  */
 export default async function ExaminationsPage({ searchParams }: PageProps<"/examining/examinations">) {
   if (isApiFeature("examinations")) {
     return (
       <>
-        <PageHeader title="검사 진행·결과" description="우리 기관에 배정된 검사의 진행 상태를 확인합니다." />
+        <PageHeader title="검사 진행·결과" description="우리 기관에 배정된 검사의 진행 상태를 바꾸고 결과를 등록합니다." />
         <Suspense
           fallback={
             <p role="status" className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500">

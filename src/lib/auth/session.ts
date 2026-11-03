@@ -91,7 +91,7 @@ export function toAuthorizationHeaders(state: Extract<AuthState, { status: "veri
  *
  * 제약
  * - 반환값이 있다고 로그인·권한이 확인된 것이 아니다. 화면 접근 허용·역할 판단에 쓰지 않는다 (그것은 getAuthState)
- * - 기관 단위 데이터·역할별 화면 데이터(검사 목록 등)에는 쓰지 않는다: 그런 API는 verified 상태의 toAuthorizationHeaders를 쓴다
+ * - 기관 단위 데이터·역할별 화면 데이터에는 쓰지 않는다: 그런 API는 verified 상태의 toAuthorizationHeaders나 해당 API 전용 함수를 쓴다
  * - 서버에서 Gateway 요청에만 붙인다. Client Component props·응답 JSON·로그로 내보내지 않는다
  */
 export async function getOwnerScopedAuthorizationHeaders(): Promise<HeadersInit | null> {
@@ -107,11 +107,29 @@ export async function getOwnerScopedAuthorizationHeaders(): Promise<HeadersInit 
  * - Gateway가 JWT 서명·만료와 역할을 검증한다 (Gateway 정책에 경로 규칙이 있다)
  * - 백엔드가 Gateway의 X-Institution-Id·X-Role로 범위를 정한다 (다른 기관 데이터는 403·404, 프론트는 기관 ID를 보내지 않는다)
  * 현재 대상: 장비 장애 조회 API (`GET /api/v1/equipment-incidents/**`, features/incidents/server.ts에서만 호출).
- * 검사 목록 등 다른 기관 단위 API는 대상이 아니다 (verified 상태의 toAuthorizationHeaders를 쓴다).
+ * 검사 API는 대상이 아니다 (getExaminationAuthorizationHeaders를 쓴다).
  *
  * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
  */
 export async function getInstitutionScopedAuthorizationHeaders(): Promise<HeadersInit | null> {
+  const token = await readAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : null;
+}
+
+/**
+ * 검사 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`). 토큰 쿠키가 없으면 null.
+ *
+ * 사용자 확인(getAuthState의 verified) 없이 토큰을 Gateway로 넘긴다. getAuthState는 바꾸지 않는다.
+ * 대상 API와 근거 (origin/dev 기준)
+ * - `GET /api/v1/examinations`, `PATCH /api/v1/examinations/{id}/status`, `POST /api/v1/examinations/{id}/results`
+ * - Gateway가 JWT 서명·만료를 검증하고 세 경로 모두 EXAMINER만 허용한다
+ * - 백엔드가 Gateway의 X-Institution-Id로 범위를 정한다 (다른 기관의 검사는 403, 프론트는 기관 ID를 보내지 않는다)
+ * 호출 위치: features/examinations의 ExaminationApiSection(목록)·actions.ts(상태 변경·결과 등록)에서만 쓴다.
+ * 변경 요청(PATCH·POST)은 Server Function에서 같은 출처 확인을 거친 뒤에만 이 헤더를 붙인다.
+ *
+ * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
+ */
+export async function getExaminationAuthorizationHeaders(): Promise<HeadersInit | null> {
   const token = await readAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : null;
 }

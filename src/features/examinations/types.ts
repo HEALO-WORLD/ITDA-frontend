@@ -94,3 +94,19 @@ export interface ExaminationSummaryCounts {
   /** 검사 완료 · 결과 미등록 */
   resultPending: number;
 }
+
+/**
+ * API 모드 검사 상태 변경·결과 등록 Server Function 결과 (토큰·서버 오류 본문은 담지 않는다).
+ * - SIGNED_OUT: 토큰 쿠키 없음 (요청하지 않음)
+ * - UNAUTHORIZED: 401 (토큰 만료·위조) → 다시 로그인
+ * - FORBIDDEN: 403 (역할·기관 불일치) 또는 같은 출처가 아닌 요청
+ * - NOT_FOUND: 404 / CONFLICT: 409 (상태 전이·결과 등록 조건 불일치, 화면을 서버 값으로 다시 불러온다)
+ * - INVALID: 400 또는 요청 전 입력 검증 실패 / NETWORK: 연결 실패·시간 초과 / ERROR: 그 밖의 실패
+ */
+export type ExaminationActionResult =
+  | { ok: true; message: string }
+  | {
+      ok: false;
+      reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "INVALID" | "NETWORK" | "ERROR";
+      message: string;
+    };

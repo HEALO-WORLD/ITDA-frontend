@@ -11,7 +11,7 @@ import {
 
 /**
  * 검사 목록 API 화면용 데이터 (서버 전용).
- * 인증 헤더는 호출한 쪽(서버 컴포넌트)이 검증된 세션에서 꺼내 넘긴다 (lib/auth/session의 toAuthorizationHeaders).
+ * 인증 헤더는 호출한 쪽(서버 컴포넌트)이 넘긴다 (lib/auth/session의 getExaminationAuthorizationHeaders).
  * 실패해도 Mock으로 대체하지 않고 실패 결과를 돌려준다. JSX는 만들지 않는다 (화면은 결과를 보고 렌더링한다).
  */
 
@@ -31,7 +31,7 @@ export type ExaminationPageLoadResult =
       ok: false;
       /**
        * - UNAUTHORIZED: 401 (토큰 없음·만료·위조) → 다시 로그인
-       * - FORBIDDEN: 403 (역할·기관 불일치, 또는 Gateway 정책에 경로 규칙이 없음)
+       * - FORBIDDEN: 403 (EXAMINER가 아님: Gateway ACCESS_DENIED 또는 백엔드 EXAMINATION_ACCESS_DENIED)
        * - ERROR: 그 밖의 실패 (400·404·5xx·연결 실패·응답 형식 오류·설정 오류)
        */
       reason: "UNAUTHORIZED" | "FORBIDDEN" | "ERROR";
