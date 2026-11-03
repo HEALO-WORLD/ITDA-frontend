@@ -6,6 +6,7 @@ import type { NavItem } from "@/types/navigation";
 /** 화면 라우트 (screen-spec 0.2). 백엔드 API 경로가 아니다. */
 export const ROUTES = {
   login: "/login",
+  signup: "/signup",
   referring: {
     slots: "/referring/slots",
     referrals: "/referring/referrals",
