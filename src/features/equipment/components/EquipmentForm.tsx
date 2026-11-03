@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { controlClass, fieldLabelClass, SelectInput, TextInput } from "@/components/ui/FormControls";
 import type { ExamType } from "@/features/slots/types";
 
+import { canEditSupportedExamTypes, getCompatibleExamTypeOptions, getExamTypeOptions, splitByModality } from "../supportedExamTypes";
 import {
   registerMockEquipmentWithOperatingHours,
   updateMockEquipment,
@@ -28,7 +29,7 @@ import { isOperatingDaysValid, OperatingHoursFields, toOperatingDayInputs } from
 interface EquipmentFormProps {
   organizationId: string;
   /** 수정할 장비. 없으면 등록(2단계: 기본 정보 → 운영 시간) */
-  equipment?: { id: string; name: string; examType: ExamType; slotMinutes: number };
+  equipment?: { id: string; name: string; examType: ExamType; slotMinutes: number; supportedExamTypeIds?: readonly string[] | null };
   /** 바꿀 수 없는 항목과 이유 (수정 시) */
   locks?: EquipmentEditLocks;
   /** 같은 기관의 다른 장비 이름 (중복 확인용) */
@@ -80,6 +81,10 @@ export default function EquipmentForm({
     examType: equipment?.examType ?? "",
     slotMinutes: equipment ? String(equipment.slotMinutes) : "30",
   });
+  const [supportedIds, setSupportedIds] = useState<string[]>(() => [...(equipment?.supportedExamTypeIds ?? [])]);
+  /** 장비 종류를 바꿔 해제한 지원 검사 유형 안내 */
+  const [removedNotice, setRemovedNotice] = useState<string | null>(null);
+  const supportedEditable = canEditSupportedExamTypes();
   const [days, setDays] = useState<OperatingDayInput[]>(() => toOperatingDayInputs([]));
   const [touched, setTouched] = useState<ReadonlySet<Field>>(() => new Set());
   const [showHoursErrors, setShowHoursErrors] = useState(false);
@@ -99,6 +104,21 @@ export default function EquipmentForm({
     setInput((prev) => ({ ...prev, ...patch }));
     setTouched((prev) => new Set(prev).add(field));
   };
+  /** 장비 종류 변경: 새 종류와 맞지 않는 지원 검사 유형은 해제하고 알린다 */
+  const changeExamType = (examType: ExamType | "") => {
+    change({ examType }, "examType");
+    const { kept, removed } = splitByModality(supportedIds, examType);
+    if (removed.length === 0) return;
+    const names = new Map(getExamTypeOptions().map(({ id, name }) => [id, name]));
+    setSupportedIds(kept);
+    setRemovedNotice(`장비 종류가 바뀌어 지원 검사 유형 ${removed.map((id) => names.get(id) ?? id).join(", ")} 선택을 해제했습니다.`);
+  };
+  const toggleSupported = (id: string, checked: boolean) => {
+    setRemovedNotice(null);
+    setSupportedIds((prev) => (checked ? (prev.includes(id) ? prev : [...prev, id]) : prev.filter((value) => value !== id)));
+  };
+  /** 저장할 지원 검사 유형 (API 모드처럼 편집할 수 없으면 보내지 않는다) */
+  const supportedToSave = supportedEditable ? supportedIds : undefined;
 
   // 단계를 옮기면 단계 제목으로 포커스를 옮겨 화면 읽기 프로그램이 바뀐 단계를 읽게 한다
   useEffect(() => {
@@ -133,7 +153,7 @@ export default function EquipmentForm({
   /** 등록 최종 저장: 장비 등록 → 운영 시간 설정. 실패하면 어느 단계까지 저장됐는지 구분해 안내한다 */
   const register = () =>
     runSubmit(async () => {
-      const result = await registerMockEquipmentWithOperatingHours(organizationId, input, days);
+      const result = await registerMockEquipmentWithOperatingHours(organizationId, input, days, supportedToSave);
       if (result.ok) {
         onRegistered?.(result.equipment);
         return;
@@ -167,7 +187,7 @@ export default function EquipmentForm({
     setTouched(new Set<Field>(["name", "examType", "slotMinutes"]));
     if (!isInfoValid) return;
     void runSubmit(async () => {
-      const result = await updateMockEquipment(organizationId, equipment.id, input);
+      const result = await updateMockEquipment(organizationId, equipment.id, input, supportedToSave);
       if (result.ok) {
         onSaved?.(`${input.name.trim()} 장비 정보를 수정했습니다.`);
         return;
@@ -252,7 +272,7 @@ export default function EquipmentForm({
                 disabled={Boolean(locks?.examType)}
                 aria-invalid={typeError ? true : undefined}
                 aria-describedby={typeError ? "equipment-form-type-error" : undefined}
-                onChange={(e) => change({ examType: e.target.value as ExamType | "" }, "examType")}
+                onChange={(e) => changeExamType(e.target.value as ExamType | "")}
               />
               {typeError && (
                 <p id="equipment-form-type-error" className="mt-1.5 text-sm text-red-600">
@@ -291,6 +311,14 @@ export default function EquipmentForm({
               {locks?.slotMinutes && <LockNote>{locks.slotMinutes}</LockNote>}
             </div>
           </div>
+
+          <SupportedExamTypesField
+            examType={input.examType}
+            selected={supportedIds}
+            editable={supportedEditable}
+            removedNotice={removedNotice}
+            onToggle={toggleSupported}
+          />
         </fieldset>
       ) : (
         <div className="flex flex-col gap-3">
@@ -350,6 +378,68 @@ export default function EquipmentForm({
         )}
       </div>
     </form>
+  );
+}
+
+/** 지원 검사 유형 다중 선택 (장비 종류와 같은 modality만, 선택하지 않으면 미설정) */
+function SupportedExamTypesField({
+  examType,
+  selected,
+  editable,
+  removedNotice,
+  onToggle,
+}: {
+  examType: ExamType | "";
+  selected: readonly string[];
+  editable: boolean;
+  removedNotice: string | null;
+  onToggle: (id: string, checked: boolean) => void;
+}) {
+  const options = getCompatibleExamTypeOptions(examType);
+  return (
+    <fieldset aria-describedby="equipment-form-supported-hint">
+      <legend className={fieldLabelClass}>
+        지원 검사 유형 <span className="font-normal text-gray-500">(선택)</span>
+      </legend>
+      {!examType ? (
+        <p className="text-sm text-gray-500">검사 유형(CT·MRI)을 먼저 선택하면 고를 수 있습니다.</p>
+      ) : (
+        <div className="flex flex-wrap gap-2">
+          {options.map((option) => {
+            const checked = selected.includes(option.id);
+            return (
+              <label
+                key={option.id}
+                className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[15px] has-[:disabled]:cursor-not-allowed has-[:disabled]:opacity-60 ${
+                  checked ? "border-primary bg-primary-soft text-primary" : "border-line bg-white text-gray-700"
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  name="supportedExamTypeIds"
+                  value={option.id}
+                  checked={checked}
+                  disabled={!editable}
+                  onChange={(e) => onToggle(option.id, e.target.checked)}
+                  className="size-4 accent-primary"
+                />
+                {option.name}
+              </label>
+            );
+          })}
+        </div>
+      )}
+      <p id="equipment-form-supported-hint" className="mt-1.5 text-sm text-gray-500">
+        {editable
+          ? `${examType || "장비"} 장비에서 할 수 있는 검사를 고릅니다. 고르지 않으면 '미설정'으로 표시됩니다.`
+          : "지원 검사 유형은 서버 저장 기능이 준비되지 않아 지금은 바꿀 수 없습니다 (저장되지 않습니다)."}
+      </p>
+      {removedNotice && (
+        <p role="status" className="mt-1.5 text-sm text-amber-800">
+          {removedNotice}
+        </p>
+      )}
+    </fieldset>
   );
 }
 
