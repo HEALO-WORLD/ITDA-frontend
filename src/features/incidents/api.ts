@@ -1,6 +1,6 @@
 import { getEquipments } from "@/features/equipment/api";
 import { getReceivedReservations } from "@/features/reservations/api";
-import { assertMockMode } from "@/lib/api/config";
+import { mockOnly } from "@/lib/api/config";
 import { MOCK_INCIDENTS } from "@/lib/dev/mockIncidents";
 
 import type { EquipmentIncident, IncidentRecord } from "./types";
@@ -20,7 +20,7 @@ export const IS_MOCK_DATA = true;
 
 /** 현재 검사기관의 장애 이력 (기관 ID 기준) */
 export async function getIncidents(organizationId: string): Promise<EquipmentIncident[]> {
-  assertMockMode("incidents.getIncidents");
+  mockOnly("incidents.getIncidents");
   return MOCK_INCIDENTS.filter((incident) => incident.organizationId === organizationId);
 }
 
@@ -29,7 +29,7 @@ export async function getIncidents(organizationId: string): Promise<EquipmentInc
  * 다른 기관 장비·예약은 조회 대상이 아니므로 섞이지 않는다.
  */
 export async function getIncidentRecords(organizationId: string): Promise<IncidentRecord[]> {
-  assertMockMode("incidents.getIncidentRecords");
+  mockOnly("incidents.getIncidentRecords");
   const [incidents, equipments, reservations] = await Promise.all([
     getIncidents(organizationId),
     getEquipments(organizationId),

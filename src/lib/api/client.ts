@@ -1,5 +1,6 @@
 import { DEFAULT_API_TIMEOUT_MS, getApiBaseUrl, getApiMode } from "./config";
-import { ApiError, getHttpErrorMessage } from "./errors";
+import { ApiError, getErrorCode, getHttpErrorMessage } from "./errors";
+import type { ApiResponseDto } from "./types";
 
 /**
  * Gateway HTTP 요청 (서버·브라우저 공통).
@@ -89,9 +90,11 @@ export async function apiRequest<T = unknown>(path: string, options: ApiRequestO
 
     const isJson = (response.headers.get("Content-Type") ?? "").toLowerCase().includes("json");
     if (!response.ok) {
+      const errorBody = parseErrorBody(text, isJson);
       throw new ApiError("HTTP", getHttpErrorMessage(response.status), {
         status: response.status,
-        body: parseErrorBody(text, isJson),
+        code: getErrorCode(errorBody),
+        body: errorBody,
       });
     }
     if (text.trim() === "") return undefined as T;
@@ -107,6 +110,18 @@ export async function apiRequest<T = unknown>(path: string, options: ApiRequestO
     clearTimeout(timer);
     signal?.removeEventListener("abort", abortFromCaller);
   }
+}
+
+/**
+ * 백엔드 공통 응답(`ApiResponse { success, message, data, timestamp }`)을 받아 `data`만 돌려준다.
+ * 감싼 형태가 아니거나 success가 true가 아니면 응답 형식 오류로 본다 (실패는 보통 HTTP 오류로 먼저 걸러진다).
+ */
+export async function apiRequestData<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const body = await apiRequest<unknown>(path, options);
+  if (typeof body !== "object" || body === null || !("data" in body) || (body as ApiResponseDto<unknown>).success !== true) {
+    throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body });
+  }
+  return (body as ApiResponseDto<T>).data;
 }
 
 /** 오류 응답 본문: JSON이면 해석하고, 아니거나 해석할 수 없으면 문자열 그대로 */

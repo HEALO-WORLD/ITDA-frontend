@@ -25,6 +25,9 @@ const WIDTH_CLASS = {
  * 공통 모달. 네이티브 <dialog>의 showModal()을 사용한다.
  * - 열려 있는 동안 배경은 비활성(inert)이라 포커스가 모달 안에 머문다
  * - Esc로 닫히고, 닫히면 연 요소로 포커스가 돌아간다
+ * - onClose는 사용자가 닫을 때(Esc·닫기 버튼·바깥 클릭)만 부른다.
+ *   open이 false가 되어 프로그램으로 닫을 때 뒤늦게 오는 close 이벤트는 무시한다
+ *   (부르면 그사이 열린 다른 모달까지 닫힌다. 예: 상세 → 결과 등록 전환)
  * - 처음 포커스는 data-autofocus가 있는 요소, 없으면 첫 포커스 가능 요소
  *   (React의 autoFocus는 모달이 열리기 전에 실행되어 동작하지 않으므로 data-autofocus를 쓴다)
  * - 제목 영역은 고정하고, 내용이 길면 본문만 스크롤한다
@@ -59,7 +62,10 @@ export default function Modal({
       ref={dialogRef}
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
-      onClose={onClose}
+      onClose={() => {
+        // 이 시점의 open은 최신 값이다. Esc로 닫혔으면 아직 true, 부모가 닫았으면 이미 false
+        if (open) onClose();
+      }}
       onClick={(event) => {
         if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}

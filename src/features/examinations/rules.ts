@@ -1,4 +1,4 @@
-import type { Examination, ExamResultInput, ExamResultStatus, ResultRegistrationStatus } from "./types";
+import type { Examination, ExamProgressStatus, ExamResultInput, ExamResultStatus, ResultRegistrationStatus } from "./types";
 
 /** 결과 텍스트 최대 길이 (서버 제한 확인 필요) */
 export const RESULT_TEXT_MAX_LENGTH = 1000;
@@ -23,6 +23,36 @@ export function getRegistrationBlockReason(examination: Examination): string | n
   if (examination.reservationStatus === "CANCELLED") return "취소된 예약은 결과를 등록할 수 없습니다.";
   if (examination.result) return "이미 결과가 등록된 검사입니다.";
   if (examination.progressStatus !== "COMPLETED") return "검사가 완료된 뒤에 결과를 등록할 수 있습니다.";
+  return null;
+}
+
+/** 상태 변경 버튼으로 바꿀 수 있는 다음 진행 상태 */
+export type NextProgressStatus = Extract<ExamProgressStatus, "IN_PROGRESS" | "COMPLETED">;
+
+export const PROGRESS_ACTION_LABELS: Record<NextProgressStatus, string> = {
+  IN_PROGRESS: "검사 시작",
+  COMPLETED: "검사 완료",
+};
+
+/**
+ * 다음 진행 상태. 대기 → 진행 중 → 완료 순서로 한 단계씩만 바꾼다 (서버 ExaminationStatus 규칙과 같다).
+ * 완료·미실시이거나 예약이 취소된 검사는 바꿀 수 없어 null이다.
+ */
+export function getNextProgressStatus(examination: Examination): NextProgressStatus | null {
+  if (examination.reservationStatus === "CANCELLED") return null;
+  if (examination.progressStatus === "WAITING") return "IN_PROGRESS";
+  if (examination.progressStatus === "IN_PROGRESS") return "COMPLETED";
+  return null;
+}
+
+/**
+ * 다음 단계로 바꿀 수 없는 이유 (버튼은 보이지만 막는 경우). 바꿀 수 있으면 null.
+ * 서버도 확정된 예약일 때만 검사 시작을 허용한다 (EXAMINATION_START_NOT_ALLOWED).
+ */
+export function getProgressChangeBlockReason(examination: Examination, next: NextProgressStatus): string | null {
+  if (next === "IN_PROGRESS" && examination.reservationStatus !== "CONFIRMED") {
+    return "예약이 확정된 검사만 시작할 수 있습니다.";
+  }
   return null;
 }
 

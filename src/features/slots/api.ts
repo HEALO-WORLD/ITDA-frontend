@@ -1,5 +1,5 @@
 import { getFailedEquipmentIds } from "@/features/incidents/mockIncidentStore";
-import { assertMockMode } from "@/lib/api/config";
+import { mockOnly } from "@/lib/api/config";
 import { getSeoulNow } from "@/lib/date/seoulDate";
 import { getAllMockSlots } from "@/features/equipment/mockEquipmentStore";
 import { MOCK_PARTNER_ORGANIZATIONS } from "@/lib/dev/mockSlots";
@@ -53,7 +53,7 @@ function getQueryableSlots({ excludedEquipmentIds = [] }: SlotQueryOptions): Exa
 }
 
 export async function getPartnerOrganizations(): Promise<PartnerOrganization[]> {
-  assertMockMode("slots.getPartnerOrganizations");
+  mockOnly("slots.getPartnerOrganizations");
   return MOCK_PARTNER_ORGANIZATIONS;
 }
 
@@ -66,7 +66,7 @@ export async function searchSlots(
   criteria: SlotSearchCriteria,
   options: SlotQueryOptions = {},
 ): Promise<ExamSlot[]> {
-  assertMockMode("slots.searchSlots");
+  mockOnly("slots.searchSlots");
   await new Promise((resolve) => setTimeout(resolve, MOCK_DELAY_MS));
   const { dateTime } = getSeoulNow();
 
@@ -84,7 +84,7 @@ export async function searchSlots(
  * 지난 시간·마감 여부는 걸러내지 않는다 (호출하는 쪽에서 판단).
  */
 export async function getSlotById(slotId: string): Promise<ExamSlot | null> {
-  assertMockMode("slots.getSlotById");
+  mockOnly("slots.getSlotById");
   // 예약 요청 직전 재검증에 쓰이므로 장애 장비 차단도 함께 반영한다
   return getMockSlotsWithFailures().find((slot) => slot.id === slotId) ?? null;
 }
@@ -94,6 +94,6 @@ export async function getDateAvailability(
   filter: AvailabilityFilter,
   options: SlotQueryOptions = {},
 ): Promise<DateAvailability> {
-  assertMockMode("slots.getDateAvailability");
+  mockOnly("slots.getDateAvailability");
   return buildDateAvailability(getQueryableSlots(options), filter, getSeoulNow().dateTime);
 }

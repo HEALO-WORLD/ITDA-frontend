@@ -8,6 +8,12 @@ import { ApiError } from "./errors";
  *
  * 환경변수 (NEXT_PUBLIC_* 값은 빌드할 때 번들에 들어가므로 바꾸면 다시 빌드·배포해야 한다)
  * - NEXT_PUBLIC_API_MODE: "mock"(기본) | "api"
+ * - NEXT_PUBLIC_API_FEATURES: API 모드에서 실제 API를 쓸 기능 목록 (쉼표 구분, 예: "referrals,notifications").
+ *   비어 있으면 모든 기능이 API 대상이다. 목록에 없는 기능은 Mock을 명시적으로 고른 것으로 본다 (API_FEATURES 참고)
+ *
+ * 함수별 API 연결 여부는 각 데이터 접근 함수가 첫 줄에서 직접 밝힌다.
+ * - API 연결: `requireApiFeature("기능")` (API 대상 기능이 아니면 설정 오류). 호출 실패는 Mock으로 대체하지 않는다
+ * - API 미연결: `mockOnly("기능.함수")` (기능을 선택했어도 Mock을 쓴다)
  * - NEXT_PUBLIC_API_BASE_URL: 브라우저가 호출할 Gateway 주소 (공개 값. 예: https://gateway.example.com 또는 /api 경유 경로)
  * - API_BASE_URL: 서버에서만 쓰는 Gateway 주소 (선택. 컨테이너 내부 주소 등). 없으면 NEXT_PUBLIC_API_BASE_URL을 쓴다
  */
@@ -30,23 +36,90 @@ export function getApiMode(): ApiMode {
 }
 
 /**
- * Mock 구현만 있는 기능을 API 모드에서 호출했을 때의 오류. Mock 모드면 null.
- * Mock 데이터로 대신 응답하지 않는다 (연동 실패를 숨기지 않기 위해).
- * 결과 객체({ ok: false, message })를 돌려주는 변경 함수에서 쓴다.
+ * 기능 단위 전환 키. 데이터 접근 함수의 기능 이름(`referrals.getRecentReferrals`)에서 `.` 앞부분과 같다.
+ * ⚠️ equipment·slots·incidents는 서로의 Mock(장애 → 슬롯 차단 등)을 계산에 쓰므로 함께 전환해야 한다.
  */
-export function getMockOnlyError(feature: string): ApiError | null {
+export const API_FEATURES = [
+  "referrals",
+  "reservations",
+  "slots",
+  "equipment",
+  "incidents",
+  "examinations",
+  "notifications",
+  "examining-notifications",
+] as const;
+
+export type ApiFeature = (typeof API_FEATURES)[number];
+
+/**
+ * API 모드에서 실제 API를 쓸 기능. null = 전체.
+ * 알 수 없는 이름이 있으면 설정 오류를 낸다 (오타로 Mock이 쓰이는 것을 모르고 지나가지 않도록).
+ */
+function getEnabledApiFeatures(): ReadonlySet<ApiFeature> | null {
+  const raw = process.env.NEXT_PUBLIC_API_FEATURES?.trim();
+  if (!raw) return null;
+  const names = raw.split(",").map((name) => name.trim()).filter(Boolean);
+  const unknown = names.filter((name) => !(API_FEATURES as readonly string[]).includes(name));
+  if (unknown.length > 0) {
+    throw new ApiError(
+      "CONFIG",
+      `NEXT_PUBLIC_API_FEATURES에 알 수 없는 기능이 있습니다: ${unknown.join(", ")} (사용 가능: ${API_FEATURES.join(", ")})`,
+    );
+  }
+  return new Set(names as ApiFeature[]);
+}
+
+/** 이 기능이 실제 API 대상인지. Mock 모드면 항상 false */
+export function isApiFeature(feature: ApiFeature): boolean {
+  if (getApiMode() === "mock") return false;
+  return getEnabledApiFeatures()?.has(feature) ?? true;
+}
+
+/**
+ * API 연결 함수용: 이 기능이 API 대상이 아니면 설정 오류를 던진다.
+ * Mock 구현이 따로 없는 실제 API 호출 함수가 Mock 모드에서 불리는 것을 막는다.
+ */
+export function requireApiFeature(feature: ApiFeature): void {
+  if (isApiFeature(feature)) return;
+  throw new ApiError(
+    "CONFIG",
+    `${feature} 기능이 실제 API 대상이 아닙니다. (NEXT_PUBLIC_API_MODE=api, NEXT_PUBLIC_API_FEATURES에 ${feature} 포함)`,
+  );
+}
+
+/** 개발 중 같은 안내를 한 번만 띄우기 위한 기록 */
+const warnedMockOnlyNames = new Set<string>();
+
+/**
+ * API 미연결 함수용: 이 함수는 Mock을 쓴다고 밝힌다. `name`은 `기능.함수` 형식이다.
+ * 기능을 API 대상으로 골랐어도 이 함수는 Mock을 쓴다 (API 호출 실패를 대신하는 것이 아니라 아직 연결하지 않은 함수다).
+ * 설정이 잘못됐거나(모드·기능 이름 오타) 기능 이름을 알 수 없으면 설정 오류를 던진다.
+ */
+export function mockOnly(name: string): void {
+  const feature = name.split(".")[0];
+  if (!(API_FEATURES as readonly string[]).includes(feature)) {
+    throw new ApiError("CONFIG", `알 수 없는 기능 이름입니다: "${name}"`);
+  }
+  if (!isApiFeature(feature as ApiFeature)) return;
+  // 기능은 API 대상인데 이 함수는 미연결임을 개발 중에만 한 번 알린다 (배포 빌드에서는 출력하지 않는다)
+  if (process.env.NODE_ENV === "development" && !warnedMockOnlyNames.has(name)) {
+    warnedMockOnlyNames.add(name);
+    console.warn(`[API 모드] ${name}: 아직 API에 연결하지 않은 함수라 Mock 데이터를 사용합니다.`);
+  }
+}
+
+/**
+ * 변경 함수용 mockOnly: 설정 오류를 던지지 않고 돌려준다 (Mock으로 처리하면 null).
+ * 결과 객체({ ok: false, message })를 돌려주는 함수에서 쓴다.
+ */
+export function getMockOnlyError(name: string): ApiError | null {
   try {
-    if (getApiMode() === "mock") return null;
+    mockOnly(name);
+    return null;
   } catch (error) {
     return error instanceof ApiError ? error : new ApiError("CONFIG", "API 설정을 확인해 주세요.", { cause: error });
   }
-  return new ApiError("NOT_IMPLEMENTED", `아직 실제 API로 연결하지 않은 기능입니다. (${feature})`);
-}
-
-/** 조회 함수용: API 모드(또는 설정 오류)면 ApiError를 던진다 */
-export function assertMockMode(feature: string): void {
-  const error = getMockOnlyError(feature);
-  if (error) throw error;
 }
 
 /**

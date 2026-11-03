@@ -8,6 +8,7 @@ import { RESCHEDULE_QUERY_KEY } from "@/features/referrals/reschedule";
 import type { ReferralSummary } from "@/features/referrals/types";
 import { getPartnerOrganizations } from "@/features/slots/api";
 import SlotSearch from "@/features/slots/components/SlotSearch";
+import { isApiFeature } from "@/lib/api/config";
 
 /**
  * 검사 슬롯 검색 (S02).
@@ -42,7 +43,9 @@ async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/sl
   const [organizations, rescheduleTarget, notifications] = await Promise.all([
     getPartnerOrganizations(),
     resolveRescheduleTarget(rescheduleReferralId),
-    getNotifications(),
+    // API 모드(notifications)에서는 알림 응답에 재조정 원인(장애 장비)이 없어 장비를 확인할 수 없다.
+    // Mock 알림의 장비로 대신하지 않는다 (빈 목록 → 장애 장비 제외 없이 검색)
+    isApiFeature("notifications") ? [] : getNotifications(),
   ]);
   // 재조정 대상 의뢰의 재조정 알림에 기록된 장애 장비 (장비 ID 기준)
   const failedEquipments =
