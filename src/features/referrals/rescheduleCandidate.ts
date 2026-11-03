@@ -3,6 +3,7 @@ import { isEquipmentApiId } from "@/features/equipment/remote";
 import type { SlotDetailDto } from "@/features/slots/remote";
 import { isSlotApiId } from "@/features/slots/remote";
 
+import { compareInstants, instantFromEpochMilli, parseOffsetDateTime } from "./offsetDateTime";
 import { isReferralApiId, type ReferralResponseDto } from "./remote";
 
 /**
@@ -18,8 +19,9 @@ import { isReferralApiId, type ReferralResponseDto } from "./remote";
  * - 조회 권한(장비 조회의 협약 검사, ADMIN 403 등)은 조회 단계에서 이미 결정된다. 여기서 우회하지 않는다
  * - 슬롯의 검사기관과 장비의 검사기관은 비교할 수 없다 (슬롯 응답에 기관 ID가 없다)
  *
- * 시각: 슬롯의 startsAt·endsAt은 오프셋이 있는 OffsetDateTime이라 같은 실제 시각(instant)으로 바꿔 비교한다.
+ * 시각: 슬롯의 startsAt·endsAt은 오프셋이 있는 OffsetDateTime이라 같은 실제 시각(instant)으로 바꿔 나노초까지 비교한다 (offsetDateTime.ts).
  * 오프셋을 직접 계산하므로 서버 OS·브라우저 시간대는 쓰이지 않는다 (`Z`와 `+09:00`로 쓴 같은 시각은 같다).
+ * 기준 시각(now)은 밀리초 단위라 나노초로 정확히 바꿔 비교한다.
  * 재예약 요청용 LocalDateTime(Asia/Seoul 벽시계) 문자열은 여기서 만들지 않는다.
  */
 
@@ -78,14 +80,14 @@ export function checkRescheduleCandidate(input: {
 }): RescheduleCandidateCheckResult {
   const { referral, slot, equipment } = input;
   const nowMs = input.now instanceof Date ? input.now.getTime() : input.now;
-  const startMs = parseOffsetDateTime(slot?.startsAt);
-  const endMs = parseOffsetDateTime(slot?.endsAt);
+  const start = parseOffsetDateTime(slot?.startsAt);
+  const end = parseOffsetDateTime(slot?.endsAt);
 
   const formatFailures: RescheduleCandidateFailure[] = [];
   if (!isRecord(referral) || !isReferralApiId(referral.id) || !isReferralApiId(referral.examTypeId) || typeof referral.referralStatus !== "string") {
     formatFailures.push("INVALID_REFERRAL");
   }
-  if (!isRecord(slot) || !isSlotApiId(slot.id) || !isSlotApiId(slot.equipmentId) || !isSlotApiId(slot.examTypeId) || startMs === null || endMs === null || typeof slot.status !== "string") {
+  if (!isRecord(slot) || !isSlotApiId(slot.id) || !isSlotApiId(slot.equipmentId) || !isSlotApiId(slot.examTypeId) || start === null || end === null || typeof slot.status !== "string") {
     formatFailures.push("INVALID_SLOT");
   }
   if (!isRecord(equipment) || !isEquipmentApiId(equipment.id) || !isEquipmentApiId(equipment.institutionId) || typeof equipment.status !== "string") {
@@ -100,8 +102,8 @@ export function checkRescheduleCandidate(input: {
   if (equipment.status !== "OPERATIONAL") failures.push("EQUIPMENT_NOT_OPERATIONAL");
   if (!sameId(slot.equipmentId, equipment.id)) failures.push("EQUIPMENT_MISMATCH");
   if (!sameId(slot.examTypeId, referral.examTypeId)) failures.push("EXAM_TYPE_MISMATCH");
-  if (!(startMs! < endMs!)) failures.push("INVALID_TIME_RANGE");
-  if (!(startMs! > nowMs)) failures.push("START_NOT_IN_FUTURE");
+  if (!(compareInstants(start!, end!) < 0)) failures.push("INVALID_TIME_RANGE");
+  if (!(compareInstants(start!, instantFromEpochMilli(nowMs)) > 0)) failures.push("START_NOT_IN_FUTURE");
   if (failures.length > 0) return { ok: false, failures };
 
   return {
@@ -120,22 +122,3 @@ export function checkRescheduleCandidate(input: {
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
-
-/** OffsetDateTime(`YYYY-MM-DDTHH:mm[:ss[.fffffffff]](Z|±HH:mm)`) → epoch ms. 오프셋이 없거나 없는 날짜·시각이면 null */
-const OFFSET_DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|([+-])(\d{2}):(\d{2}))$/;
-
-function parseOffsetDateTime(value: unknown): number | null {
-  if (typeof value !== "string") return null;
-  const m = OFFSET_DATE_TIME.exec(value);
-  if (!m) return null;
-  const [year, month, day, hour, minute, second] = [m[1], m[2], m[3], m[4], m[5], m[6] ?? "0"].map(Number);
-  const millis = Number((m[7] ?? "").padEnd(3, "0").slice(0, 3));
-  const offsetHours = m[8] === "Z" ? 0 : Number(m[10]);
-  const offsetMinutes = m[8] === "Z" ? 0 : Number(m[11]);
-  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
-  if (month < 1 || month > 12 || day < 1 || day > daysInMonth || hour > 23 || minute > 59 || second > 59) return null;
-  if (offsetHours > 18 || offsetMinutes > 59 || (offsetHours === 18 && offsetMinutes > 0)) return null;
-  const sign = m[9] === "-" ? -1 : 1;
-  // 벽시계 값을 UTC로 계산한 뒤 오프셋을 빼 실제 시각을 얻는다 (로컬 시간대를 쓰는 Date 생성자·Date.parse를 쓰지 않는다)
-  return Date.UTC(year, month - 1, day, hour, minute, second, millis) - sign * (offsetHours * 60 + offsetMinutes) * 60_000;
-}
