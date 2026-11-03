@@ -25,6 +25,7 @@ import {
   type SlotGenerationInput,
   type SlotGenerationPreview,
 } from "./rules";
+import { normalizeSupportedExamTypeIds, splitByModality } from "./supportedExamTypes";
 import type { DailyOperatingHours } from "./types";
 
 /**
@@ -51,12 +52,15 @@ interface CreatedEquipment {
   name: string;
   examType: ExamType;
   slotMinutes: number;
+  /** 지원 검사 유형 (이전 버전 저장값에는 없다) */
+  supportedExamTypeIds?: string[];
 }
 
 interface EquipmentEdit {
   name?: string;
   examType?: ExamType;
   slotMinutes?: number;
+  supportedExamTypeIds?: string[];
 }
 
 /** 생성한 슬롯 (장비명·기관명은 저장하지 않고 장비 ID로 찾는다) */
@@ -90,6 +94,7 @@ const EMPTY_CHANGES: EquipmentChanges = Object.freeze({
 const isString = (value: unknown): value is string => typeof value === "string";
 const isExamType = (value: unknown): value is ExamType => value === "CT" || value === "MRI";
 const isTime = (value: unknown): value is string => isString(value) && /^\d{2}:\d{2}$/.test(value);
+const isStringArray = (value: unknown): value is string[] => Array.isArray(value) && value.every(isString);
 
 function parseHours(value: unknown): DailyOperatingHours[] | null {
   if (!Array.isArray(value)) return null;
@@ -116,7 +121,8 @@ function parseChanges(raw: unknown): EquipmentChanges {
           isString(item.name) &&
           isExamType(item.examType) &&
           Number.isInteger(item.slotMinutes) &&
-          item.slotMinutes > 0,
+          item.slotMinutes > 0 &&
+          (item.supportedExamTypeIds === undefined || isStringArray(item.supportedExamTypeIds)),
       )
     : [];
   const edits: Record<string, EquipmentEdit> = {};
@@ -126,6 +132,7 @@ function parseChanges(raw: unknown): EquipmentChanges {
         ...(isString(edit?.name) ? { name: edit.name } : {}),
         ...(isExamType(edit?.examType) ? { examType: edit.examType } : {}),
         ...(Number.isInteger(edit?.slotMinutes) ? { slotMinutes: edit.slotMinutes } : {}),
+        ...(isStringArray(edit?.supportedExamTypeIds) ? { supportedExamTypeIds: edit.supportedExamTypeIds } : {}),
       };
     }
   }
@@ -182,6 +189,8 @@ export interface EffectiveEquipment {
   examType: ExamType;
   slotMinutes: number;
   operatingHours: DailyOperatingHours[];
+  /** 지원 검사 유형 ID. 한 번도 설정하지 않은 장비(원본 Mock 등)는 null */
+  supportedExamTypeIds?: readonly string[] | null;
   /** 이 브라우저에서 등록한 장비 */
   isCreated: boolean;
 }
@@ -193,11 +202,17 @@ export function getEffectiveEquipmentsFrom(changes: EquipmentChanges, organizati
     ...equipment,
     slotMinutes: MOCK_SLOT_MINUTES,
     operatingHours: baseHours,
+    supportedExamTypeIds: null as string[] | null,
     isCreated: false,
   }));
   const created = changes.equipments
     .filter((equipment) => equipment.organizationId === organizationId)
-    .map((equipment) => ({ ...equipment, operatingHours: [] as DailyOperatingHours[], isCreated: true }));
+    .map((equipment) => ({
+      ...equipment,
+      operatingHours: [] as DailyOperatingHours[],
+      supportedExamTypeIds: equipment.supportedExamTypeIds ?? null,
+      isCreated: true,
+    }));
 
   return [...base, ...created].map((equipment) => ({
     ...equipment,
@@ -313,6 +328,8 @@ const firstError = (errors: object) => Object.values(errors).find(Boolean) as st
 export async function registerMockEquipment(
   organizationId: string,
   input: EquipmentInput,
+  /** 지원 검사 유형 (생략하면 미설정) */
+  supportedExamTypeIds?: readonly string[],
 ): Promise<MutationResult<EffectiveEquipment>> {
   const mockOnlyError = getMockOnlyError("equipment.registerEquipment");
   if (mockOnlyError) return { ok: false, message: mockOnlyError.message };
@@ -322,6 +339,8 @@ export async function registerMockEquipment(
   const current = getEffectiveEquipmentsFrom(changes, organizationId);
   const errors = validateEquipmentInput(input, current.map(({ name }) => name));
   if (hasErrors(errors)) return { ok: false, message: firstError(errors) ?? "입력값을 확인해 주세요." };
+  const supported = supportedExamTypeIds && normalizeSupportedExamTypeIds(supportedExamTypeIds, input.examType as ExamType);
+  if (supported && !supported.ok) return { ok: false, message: supported.message };
 
   const sequence =
     Math.max(0, ...changes.equipments.map(({ id }) => Number(id.split("-").pop()) || 0)) + 1;
@@ -331,6 +350,7 @@ export async function registerMockEquipment(
     name: input.name.trim(),
     examType: input.examType as ExamType,
     slotMinutes: Number(input.slotMinutes),
+    ...(supported ? { supportedExamTypeIds: supported.ids } : {}),
   };
   const next = { ...changes, equipments: [...changes.equipments, equipment] };
   equipmentChangeStore.write(next);
@@ -355,6 +375,7 @@ export async function registerMockEquipmentWithOperatingHours(
   organizationId: string,
   input: EquipmentInput,
   days: readonly OperatingDayInput[],
+  supportedExamTypeIds?: readonly string[],
 ): Promise<RegisterWithHoursResult> {
   const mockOnlyError = getMockOnlyError("equipment.registerEquipmentWithOperatingHours");
   if (mockOnlyError) return { ok: false, savedStage: "NONE", message: mockOnlyError.message };
@@ -362,7 +383,7 @@ export async function registerMockEquipmentWithOperatingHours(
   const invalidDay = days.map(validateOperatingDay).find(hasErrors);
   if (invalidDay) return { ok: false, savedStage: "NONE", message: firstError(invalidDay) ?? "운영 시간을 확인해 주세요." };
 
-  const registered = await registerMockEquipment(organizationId, input);
+  const registered = await registerMockEquipment(organizationId, input, supportedExamTypeIds);
   if (!registered.ok) return { ok: false, savedStage: "NONE", message: registered.message };
 
   const hours = await updateMockOperatingHours(organizationId, registered.value.id, days);
@@ -378,6 +399,8 @@ export async function updateMockEquipment(
   organizationId: string,
   equipmentId: string,
   input: EquipmentInput,
+  /** 지원 검사 유형 (생략하면 기존 값을 두되, 장비 종류와 맞지 않는 값은 지운다) */
+  supportedExamTypeIds?: readonly string[],
 ): Promise<MutationResult> {
   const mockOnlyError = getMockOnlyError("equipment.updateEquipment");
   if (mockOnlyError) return { ok: false, message: mockOnlyError.message };
@@ -401,10 +424,25 @@ export async function updateMockEquipment(
   }
   if (locks.examType && examType !== equipment.examType) return { ok: false, message: locks.examType };
   if (locks.slotMinutes && slotMinutes !== equipment.slotMinutes) return { ok: false, message: locks.slotMinutes };
+  const supported = normalizeSupportedExamTypeIds(
+    supportedExamTypeIds ?? splitByModality(equipment.supportedExamTypeIds ?? [], examType).kept,
+    examType,
+  );
+  if (!supported.ok) return { ok: false, message: supported.message };
+  const keepUnset = supportedExamTypeIds === undefined && equipment.supportedExamTypeIds == null;
 
   equipmentChangeStore.write({
     ...changes,
-    edits: { ...changes.edits, [equipmentId]: { ...changes.edits[equipmentId], name, examType, slotMinutes } },
+    edits: {
+      ...changes.edits,
+      [equipmentId]: {
+        ...changes.edits[equipmentId],
+        name,
+        examType,
+        slotMinutes,
+        ...(keepUnset ? {} : { supportedExamTypeIds: supported.ids }),
+      },
+    },
   });
   return { ok: true, value: undefined };
 }

@@ -3,6 +3,7 @@ import { Clock, Pencil } from "lucide-react";
 import { WEEKDAYS } from "@/lib/format/date";
 
 import { WEEK_ORDER } from "../operatingHours";
+import { getSupportedExamTypeNames } from "../supportedExamTypes";
 import type { Equipment } from "../types";
 
 import EquipmentStatusBadge from "./EquipmentStatusBadge";
@@ -23,13 +24,22 @@ export default function EquipmentScheduleDetail({
   onEditHours: () => void;
 }) {
   const byWeekday = new Map(equipment.operatingHours.map((item) => [item.weekday, item]));
+  const supportedNames = getSupportedExamTypeNames(equipment.supportedExamTypeIds);
 
   return (
     <>
-      <div className="mb-4 flex items-center gap-2 text-[15px]">
+      <div className="mb-2 flex items-center gap-2 text-[15px]">
         <span className="font-medium text-gray-500">장비 상태</span>
         <EquipmentStatusBadge status={equipment.status} />
       </div>
+      <p className="mb-4 flex flex-wrap items-baseline gap-x-2 text-[15px]">
+        <span className="font-medium text-gray-500">지원 검사 유형</span>
+        {supportedNames ? (
+          <span className="text-gray-900">{supportedNames.join(", ")}</span>
+        ) : (
+          <span className="text-gray-400">미설정</span>
+        )}
+      </p>
       <table className="w-full border-collapse overflow-hidden rounded-lg border border-line text-[15px]">
         <thead className="bg-gray-100/80">
           <tr>
