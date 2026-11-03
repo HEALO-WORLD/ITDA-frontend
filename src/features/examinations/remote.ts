@@ -1,6 +1,7 @@
 import { apiRequestData, type ApiRequestOptions } from "@/lib/api/client";
 import { requireApiFeature } from "@/lib/api/config";
 import { ApiError, isApiError } from "@/lib/api/errors";
+import type { PagedResponseDto } from "@/lib/api/types";
 
 import type { ExamProgressStatus } from "./types";
 
@@ -8,10 +9,13 @@ import type { ExamProgressStatus } from "./types";
  * 검사 실제 API (referral-service, Gateway 경유).
  *
  * 백엔드 ExaminationController·ExaminationStatusChangeRequest/Response를 기준으로 옮겼다 (ITDA 저장소 origin/dev 기준 확인).
+ * 검사 목록 조회는 백엔드 PR #49(feat/examination-list, 미병합)의 ExaminationListResponse 기준이다.
  * API 연결 상태 (NEXT_PUBLIC_API_FEATURES=examinations 기준)
- * - API 연결: 검사 상태 변경 `changeExaminationStatus` (`examinations`를 API 대상으로 골랐을 때만 호출할 수 있다)
- * - 화면은 아직 이 함수를 쓰지 않는다: 요청에 필요한 검사 ID(examinationId)를 얻을 공개 조회 API가 없어
- *   화면은 Mock 상태 변경(progress.ts)을 쓴다. 의뢰 ID나 Mock ID를 검사 ID 대신 보내지 않는다.
+ * - API 연결: 검사 목록 조회 `fetchExaminationPage`, 검사 상태 변경 `changeExaminationStatus`
+ *   (`examinations`를 API 대상으로 골랐을 때만 호출할 수 있다)
+ * - 화면은 아직 이 함수들을 쓰지 않는다: 목록 응답에 화면 표가 쓰는 의뢰번호·환자·검사 유형·장비·예약 일시·
+ *   예약 상태·결과 유무가 없어 목록은 Mock(api.ts), 상태 변경도 Mock(progress.ts)을 쓴다.
+ *   의뢰 ID나 Mock ID를 검사 ID 대신 보내지 않는다.
  *
  * 인증: Gateway가 `Authorization: Bearer <JWT>`를 검증하고 X-Institution-Id·X-Role을 붙인다.
  * 프론트는 이 X- 헤더들을 만들지 않는다. 토큰 전달은 로그인 연동 후 서버 전용 모듈에서 `headers`로 넘긴다.
@@ -63,8 +67,8 @@ export async function changeExaminationStatus(
   );
 }
 
-/** 백엔드 검사 상태 → 화면 진행 상태 */
-export function toExamProgressStatus(status: ExaminationStatusDto): ExamProgressStatus {
+/** 백엔드 검사 상태 → 화면 진행 상태 (NOT_PERFORMED는 백엔드에 없어 나오지 않는다) */
+export function toExamProgressStatus(status: ExaminationStatusDto): Exclude<ExamProgressStatus, "NOT_PERFORMED"> {
   switch (status) {
     case "SCHEDULED":
       return "WAITING";
@@ -91,6 +95,159 @@ export function toExaminationStatusDto(status: ExamProgressStatus): ExaminationS
       return null;
   }
 }
+
+// ── 검사 목록 조회 ──
+
+/**
+ * 검사 목록 항목 (백엔드 ExaminationListResponse, ID는 UUID 문자열).
+ * - examinationId: 검사 ID. 상태 변경·결과 등록·결과 조회(`/api/v1/examinations/{examinationId}/…`)에 쓴다
+ * - referralId: 이 검사의 의뢰 ID (의뢰 1건에 검사 1건). 의뢰 API에만 쓰고 검사 API에 넘기지 않는다
+ * - reservationId: 현재 예약 시도 ID. 재예약하면 바뀔 수 있다
+ */
+export interface ExaminationListItemDto {
+  examinationId: string;
+  referralId: string;
+  reservationId: string;
+  status: ExaminationStatusDto;
+  startedAt: string | null;
+  completedAt: string | null;
+
+  // 이번에 백엔드에 추가한 필드
+  examTypeId: string;
+  examDate: string;
+  startTime: string;
+  endTime: string;
+  reservationStatus: string;
+  equipmentId: string;
+  resultRegistered: boolean;
+}
+
+/** 검사 목록 조회 조건. 조회 범위(요청자 소속 검사기관)와 정렬(생성일 최신순)은 서버가 정한다 */
+export interface ExaminationListParams {
+  /** 0부터. 기본 0 */
+  page?: number;
+  /** 1~100. 기본 10 */
+  size?: number;
+}
+
+export const EXAMINATION_PAGE_SIZE_MAX = 100;
+const EXAMINATION_STATUSES: readonly ExaminationStatusDto[] = ["SCHEDULED", "IN_PROGRESS", "COMPLETED"];
+
+/**
+ * 검사 목록 조회 `GET /api/v1/examinations?page&size` (EXAMINER, 요청자 소속 검사기관의 검사만).
+ * Mock 구현으로 대신하지 않는다: examinations가 API 대상이 아니거나 page·size가 범위를 벗어나면 요청 없이 설정 오류,
+ * 호출 실패는 그대로 ApiError로 던지고, 응답 형태가 계약과 다르면 PARSE 오류로 본다 (화면 문구는 getExaminationListErrorMessage).
+ * ⚠️ origin/dev Gateway 정책에 이 경로 규칙이 없어 지금은 모든 역할이 403 ACCESS_DENIED를 받는다 (백엔드 확인 필요).
+ */
+export async function fetchExaminationPage(
+  { page = 0, size = 10 }: ExaminationListParams = {},
+  options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
+): Promise<PagedResponseDto<ExaminationListItemDto>> {
+  requireApiFeature("examinations");
+  // 서버도 400으로 거부하지만 코드가 UNSUPPORTED_REQUEST라 원인을 알 수 없어 보내기 전에 막는다
+  if (!Number.isInteger(page) || page < 0) {
+    throw new ApiError("CONFIG", `검사 목록 페이지 번호가 올바르지 않습니다: ${page}`);
+  }
+  if (!Number.isInteger(size) || size < 1 || size > EXAMINATION_PAGE_SIZE_MAX) {
+    throw new ApiError("CONFIG", `검사 목록 페이지 크기는 1~${EXAMINATION_PAGE_SIZE_MAX}이어야 합니다: ${size}`);
+  }
+  const data = await apiRequestData<unknown>("/api/v1/examinations", { ...options, query: { page, size } });
+  if (!isExaminationPage(data)) {
+    throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
+const isNullableString = (value: unknown) => value === null || typeof value === "string";
+
+/** 검사 ID 등이 UUID가 아니거나 모르는 상태값이면 계약과 다른 응답으로 본다 (모르는 값을 추측해 바꾸지 않는다) */
+function isExaminationListItem(
+  value: unknown,
+): value is ExaminationListItemDto {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+
+  const item = value as Record<string, unknown>;
+
+  const validIds = [
+    item.examinationId,
+    item.referralId,
+    item.reservationId,
+    item.examTypeId,
+    item.equipmentId,
+  ].every(
+    (id) => typeof id === "string" && UUID_PATTERN.test(id),
+  );
+
+  const validStatus = EXAMINATION_STATUSES.includes(
+    item.status as ExaminationStatusDto,
+  );
+
+  const validDates = [
+    item.examDate,
+    item.startTime,
+    item.endTime,
+  ].every(
+    (date) => typeof date === "string" && date.length > 0,
+  );
+
+  return (
+    validIds &&
+    validStatus &&
+    isNullableString(item.startedAt) &&
+    isNullableString(item.completedAt) &&
+    validDates &&
+    typeof item.reservationStatus === "string" &&
+    typeof item.resultRegistered === "boolean"
+  );
+}
+
+function isExaminationPage(value: unknown): value is PagedResponseDto<ExaminationListItemDto> {
+  if (typeof value !== "object" || value === null) return false;
+  const page = value as Record<string, unknown>;
+  return (
+    Array.isArray(page.contents) &&
+    page.contents.every(isExaminationListItem) &&
+    [page.totalElements, page.totalPages, page.size, page.number].every(Number.isInteger)
+  );
+}
+
+/** 검사 목록 항목을 화면 진행 상태로 바꾼 값 (화면 표시용 Examination이 아니다: 의뢰번호 등 표시 정보가 없다) */
+export interface ExaminationProgressItem
+  extends Omit<ExaminationListItemDto, "status"> {
+  progressStatus: Exclude<
+    ExamProgressStatus,
+    "NOT_PERFORMED"
+  >;
+}
+
+/** 목록 항목 → 화면 진행 상태 (SCHEDULED → WAITING). 응답에 없는 값은 만들지 않는다 */
+export function toExaminationProgressItem({ status, ...rest }: ExaminationListItemDto): ExaminationProgressItem {
+  return { ...rest, progressStatus: toExamProgressStatus(status) };
+}
+
+/** 검사 목록 조회 오류 코드별 안내 (PR #49 기준) */
+const LIST_ERROR_MESSAGES: Record<string, string> = {
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  INVALID_INPUT: "로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.",
+  /** 400일 때만: Spring 표준 오류(잘못된 page·size)에 붙는다. 404·405에도 같은 코드가 붙으므로 그때는 공통 문구를 쓴다 */
+  UNSUPPORTED_REQUEST: "검사 목록 조회 조건이 올바르지 않습니다.",
+  ACCESS_DENIED: "검사 목록은 검사기관 담당자만 조회할 수 있습니다.",
+  EXAMINATION_ACCESS_DENIED: "검사 목록은 검사기관 담당자만 조회할 수 있습니다.",
+};
+
+/** 검사 목록 조회 실패 안내 문구. 401과 모르는 코드는 공통 문구(ApiError.message)를 쓴다 */
+export function getExaminationListErrorMessage(error: unknown): string {
+  if (!isApiError(error)) return "검사 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (error.code === "UNSUPPORTED_REQUEST" && error.status !== 400) return error.message;
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && LIST_ERROR_MESSAGES[error.code]) {
+    return LIST_ERROR_MESSAGES[error.code];
+  }
+  return error.message;
+}
+
+// ── 검사 상태 변경 오류 안내 ──
 
 /** 백엔드 오류 코드별 안내 (코드가 없거나 모르는 코드면 상태 코드 기준 공통 문구) */
 const STATUS_CHANGE_ERROR_MESSAGES: Record<string, string> = {
