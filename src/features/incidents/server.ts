@@ -1,5 +1,7 @@
 import "server-only";
 
+import { unstable_rethrow } from "next/navigation";
+
 import type { PagedResponseDto } from "@/lib/api/types";
 import { isApiError } from "@/lib/api/errors";
 import { getInstitutionScopedAuthorizationHeaders } from "@/lib/auth/session";
@@ -57,6 +59,8 @@ export async function loadIncidentPage(page: number, equipmentId?: string): Prom
     const data = await fetchIncidentPage({ page, size: INCIDENT_API_PAGE_SIZE, equipmentId }, { headers });
     return toPageResult(data, pickIncident);
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     return toFailure(error, "list");
   }
 }
@@ -81,6 +85,8 @@ export async function loadIncidentDetail(
       },
     };
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     return toFailure(error, "detail");
   }
 }
@@ -96,6 +102,8 @@ export async function loadIncidentReferralPage(
     const data = await fetchIncidentReferralPage(incidentId, { page, size: INCIDENT_API_PAGE_SIZE, status }, { headers });
     return toPageResult(data, pickReferral);
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     return toFailure(error, "referrals");
   }
 }

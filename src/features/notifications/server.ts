@@ -1,5 +1,7 @@
 import "server-only";
 
+import { unstable_rethrow } from "next/navigation";
+
 import { isApiError } from "@/lib/api/errors";
 import { getOwnerScopedAuthorizationHeaders } from "@/lib/auth/session";
 
@@ -74,6 +76,8 @@ export async function loadNotificationPage(
       page: data.number,
     };
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     return toNotificationFailure(error, "list");
   }
 }
@@ -87,6 +91,8 @@ export async function loadUnreadNotificationCount(
   try {
     return { ok: true, unreadCount: await fetchUnreadNotificationCount(feature, { headers }) };
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     return toNotificationFailure(error, "count");
   }
 }

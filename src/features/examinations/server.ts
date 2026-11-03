@@ -1,5 +1,7 @@
 import "server-only";
 
+import { unstable_rethrow } from "next/navigation";
+
 import { isApiError } from "@/lib/api/errors";
 
 import {
@@ -59,6 +61,8 @@ export async function loadExaminationPage(page: number, headers: HeadersInit): P
       page: data.number,
     };
   } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
     const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
     const code = isApiError(error) ? error.code : null;
     if (status !== 401) console.error("[examinations] 검사 목록 조회 실패:", isApiError(error) ? `${error.kind} ${status ?? ""} ${code ?? ""}` : error);
