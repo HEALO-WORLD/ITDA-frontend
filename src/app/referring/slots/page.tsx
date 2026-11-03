@@ -1,6 +1,8 @@
+import Link from "next/link";
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
+import { ROUTES } from "@/constants/navigation";
 import { getNotifications } from "@/features/notifications/api";
 import { getFailedEquipments } from "@/features/notifications/reschedule";
 import { getReferralById } from "@/features/referrals/api";
@@ -13,6 +15,7 @@ import { isApiFeature } from "@/lib/api/config";
 /**
  * 검사 슬롯 검색 (S02).
  * `?rescheduleReferralId=`가 있으면 재조정 대체 슬롯 선택 모드로 동작한다.
+ * API 모드(referrals)에서는 재조정 모드 대신 준비 중 안내만 표시한다 (일반 검색은 그대로).
  * 쿼리는 요청 시점 값이므로 검색 영역을 Suspense 안에서 렌더링한다.
  */
 export default function SlotSearchPage({ searchParams }: PageProps<"/referring/slots">) {
@@ -40,6 +43,11 @@ export default function SlotSearchPage({ searchParams }: PageProps<"/referring/s
 
 async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/slots">, "searchParams">) {
   const rescheduleReferralId = (await searchParams)[RESCHEDULE_QUERY_KEY];
+  // API 모드(referrals)에서는 재조정 대상 의뢰를 Mock으로 찾지 않는다.
+  // 실제 슬롯 검색 API와 재예약 Gateway 규칙이 없어 재조정 모드 전체를 준비 중으로 안내한다 (Mock 슬롯도 표시하지 않음)
+  if (isApiFeature("referrals") && rescheduleReferralId !== undefined && rescheduleReferralId !== "") {
+    return <RescheduleUnavailableNotice />;
+  }
   const [organizations, rescheduleTarget, notifications] = await Promise.all([
     getPartnerOrganizations(),
     resolveRescheduleTarget(rescheduleReferralId),
@@ -62,6 +70,24 @@ async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/sl
       rescheduleTarget={rescheduleTarget}
       failedEquipments={failedEquipments}
     />
+  );
+}
+
+function RescheduleUnavailableNotice() {
+  return (
+    <div
+      role="status"
+      className="flex flex-col items-center gap-3 rounded-xl border border-line bg-white px-6 py-16 text-center"
+    >
+      <p className="text-[15px] font-semibold text-gray-900">재조정 슬롯 검색 기능은 준비 중입니다.</p>
+      <p className="text-sm text-gray-600">새 슬롯 선택과 예약 변경 요청은 서버 기능이 준비된 뒤 이용할 수 있습니다.</p>
+      <Link
+        href={ROUTES.referring.notifications}
+        className="inline-flex h-10 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50"
+      >
+        재조정·알림으로 이동
+      </Link>
+    </div>
   );
 }
 

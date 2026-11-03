@@ -4,11 +4,18 @@ import { Suspense } from "react";
 import PageHeader from "@/components/layout/PageHeader";
 import { getNotifications, IS_MOCK_DATA } from "@/features/notifications/api";
 import ApiNotificationSection from "@/features/notifications/components/ApiNotificationSection";
+import {
+  ApiRescheduleAlert,
+  ApiRescheduleTable,
+  RESCHEDULE_PAGE_PARAM,
+} from "@/features/notifications/components/ApiReschedule";
 import NotificationList from "@/features/notifications/components/NotificationList";
 import RescheduleAlert from "@/features/notifications/components/RescheduleAlert";
 import RescheduleTable from "@/features/notifications/components/RescheduleTable";
 import { getEquipmentFailureExamTypes } from "@/features/notifications/reschedule";
+import { parsePageParam } from "@/features/examinations/server";
 import { getRescheduleRequiredReferrals } from "@/features/referrals/api";
+import { loadRescheduleReferralPage } from "@/features/referrals/server";
 import { isApiFeature } from "@/lib/api/config";
 
 /**
@@ -18,11 +25,18 @@ import { isApiFeature } from "@/lib/api/config";
  *
  * API 모드(notifications): 알림 내역은 알림 API로 조회한다.
  * API 응답에는 재조정 원인(장애 장비)이 없으므로 원인을 표시하지 않는다 (Mock 알림의 장비로 대신하지 않는다).
+ *
+ * API 모드(referrals): 재조정 필요 목록·배너는 의뢰 목록 API(status=NEEDS_RESCHEDULE)로 조회한다.
+ * 조회는 여기서 한 번만 시작하고 배너·목록이 같은 결과를 기다린다 (쿠키·쿼리를 읽으므로 각자 Suspense 안에서 렌더링).
+ * 재조정 실행(슬롯 검색·재예약)은 서버 기능이 없어 준비 중으로 표시한다.
  */
 export default async function NotificationsPage({ searchParams }: PageProps<"/referring/notifications">) {
   const isApiMode = isApiFeature("notifications");
+  const rescheduleResult = isApiFeature("referrals")
+    ? searchParams.then((params) => loadRescheduleReferralPage(parsePageParam(params[RESCHEDULE_PAGE_PARAM])))
+    : null;
   const [rescheduleReferrals, notifications] = await Promise.all([
-    getRescheduleRequiredReferrals(),
+    rescheduleResult ? [] : getRescheduleRequiredReferrals(),
     isApiMode ? [] : getNotifications(),
   ]);
   const failureExamTypes = getEquipmentFailureExamTypes(rescheduleReferrals, notifications);
@@ -31,14 +45,32 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/re
     <>
       <PageHeader title="재조정·알림" />
       <div className="flex flex-col gap-6">
-        <RescheduleAlert
-          count={rescheduleReferrals.length}
-          failureExamTypes={failureExamTypes}
-          isMockData={IS_MOCK_DATA}
-        />
+        {rescheduleResult ? (
+          <Suspense fallback={null}>
+            <ApiRescheduleAlert result={rescheduleResult} />
+          </Suspense>
+        ) : (
+          <RescheduleAlert
+            count={rescheduleReferrals.length}
+            failureExamTypes={failureExamTypes}
+            isMockData={IS_MOCK_DATA}
+          />
+        )}
 
         <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,2fr)_minmax(340px,1fr)]">
-          <RescheduleTable referrals={rescheduleReferrals} isEquipmentFailure={failureExamTypes !== null} />
+          {rescheduleResult ? (
+            <Suspense
+              fallback={
+                <p role="status" className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500">
+                  재조정 필요 목록을 불러오고 있습니다.
+                </p>
+              }
+            >
+              <ApiRescheduleTable result={rescheduleResult} searchParams={searchParams} />
+            </Suspense>
+          ) : (
+            <RescheduleTable referrals={rescheduleReferrals} isEquipmentFailure={failureExamTypes !== null} />
+          )}
           {isApiMode ? (
             <Suspense
               fallback={
@@ -56,12 +88,16 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/re
 
         <p className="flex items-center gap-3 rounded-xl bg-primary-soft px-6 py-4 text-[15px] text-gray-700">
           <Info className="size-6 shrink-0 text-primary" aria-hidden="true" />
-          <span>
-            새 슬롯을 선택하면 예약 변경을 요청할 수 있습니다.
-            {IS_MOCK_DATA && (
-              <span className="text-gray-500"> (현재는 개발용 화면으로 실제 변경 요청은 처리되지 않습니다.)</span>
-            )}
-          </span>
+          {rescheduleResult ? (
+            <span>새 슬롯 선택과 예약 변경 요청은 서버 기능이 준비된 뒤 이용할 수 있습니다.</span>
+          ) : (
+            <span>
+              새 슬롯을 선택하면 예약 변경을 요청할 수 있습니다.
+              {IS_MOCK_DATA && (
+                <span className="text-gray-500"> (현재는 개발용 화면으로 실제 변경 요청은 처리되지 않습니다.)</span>
+              )}
+            </span>
+          )}
         </p>
       </div>
     </>

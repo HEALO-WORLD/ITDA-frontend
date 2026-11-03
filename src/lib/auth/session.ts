@@ -106,7 +106,10 @@ export async function getOwnerScopedAuthorizationHeaders(): Promise<HeadersInit 
  * - 조회(GET)만 한다
  * - Gateway가 JWT 서명·만료와 역할을 검증한다 (Gateway 정책에 경로 규칙이 있다)
  * - 백엔드가 Gateway의 X-Institution-Id·X-Role로 범위를 정한다 (다른 기관 데이터는 403·404, 프론트는 기관 ID를 보내지 않는다)
- * 현재 대상: 장비 장애 조회 API (`GET /api/v1/equipment-incidents/**`, features/incidents/server.ts에서만 호출).
+ * 현재 대상
+ * - 장비 장애 조회 API (`GET /api/v1/equipment-incidents/**`, features/incidents/server.ts에서만 호출)
+ * - 재조정 필요 의뢰 목록·검사 유형·기존 예약 단건 조회 (`GET /api/v1/referrals?status=NEEDS_RESCHEDULE`, `GET /api/v1/exam-types`,
+ *   `GET /api/v1/referrals/reservations/{id}`: 범위 밖 예약은 404, features/referrals/server.ts에서만 호출)
  * 검사 API는 대상이 아니다 (getExaminationAuthorizationHeaders를 쓴다).
  *
  * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
@@ -130,6 +133,26 @@ export async function getInstitutionScopedAuthorizationHeaders(): Promise<Header
  * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
  */
 export async function getExaminationAuthorizationHeaders(): Promise<HeadersInit | null> {
+  const token = await readAccessToken();
+  return token ? { Authorization: `Bearer ${token}` } : null;
+}
+
+/**
+ * 재예약 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`). 토큰 쿠키가 없으면 null.
+ *
+ * 사용자 확인(getAuthState의 verified) 없이 토큰을 Gateway로 넘긴다. getAuthState는 바꾸지 않는다.
+ * 대상 API와 근거 (origin/dev f6a0ad5 기준)
+ * - `POST /api/v1/referrals/{referralId}/reschedule` (features/referrals/remote.ts의 requestReschedule)
+ * - Gateway가 JWT 서명·만료를 검증하고 REQUESTER·ADMIN만 허용한다
+ * - Referral Service가 Gateway의 X-User-Id·X-Role로 의뢰 작성자 본인 또는 ADMIN인지 확인한다
+ *   (같은 기관의 다른 REQUESTER도 재예약할 수 없다: 404 REFERRAL_NOT_FOUND)
+ * 반환값이 있다고 인증·인가가 성공한 것이 아니다. 실제 권한 확인은 Gateway와 Referral Service가 한다.
+ * 호출 위치: 앞으로 만들 재예약 Server Action에서만 쓴다. 그 Action은 같은 출처 확인(isSameOriginHeaders)과
+ * 입력값 검증(validateRescheduleRequest)을 통과한 뒤에만 이 헤더를 붙인다.
+ *
+ * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
+ */
+export async function getRescheduleAuthorizationHeaders(): Promise<HeadersInit | null> {
   const token = await readAccessToken();
   return token ? { Authorization: `Bearer ${token}` } : null;
 }
