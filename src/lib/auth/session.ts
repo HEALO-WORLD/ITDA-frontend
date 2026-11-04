@@ -1,6 +1,11 @@
 import "server-only";
 
 import { cookies } from "next/headers";
+import { unstable_rethrow } from "next/navigation";
+import { cache } from "react";
+
+import { fetchMyInfo, type MyInfoDto, type UserRoleDto } from "@/features/auth/remote";
+import { isApiError } from "@/lib/api/errors";
 
 /**
  * 로그인 세션 (서버 전용).
@@ -43,35 +48,88 @@ async function readAccessToken(): Promise<string | null> {
 }
 
 /** 서버에서 확인한 사용자 역할 (백엔드 Role enum) */
-export type UserRole = "REQUESTER" | "EXAMINER" | "ADMIN";
+export type UserRole = UserRoleDto;
+
+/** 사용자 정보 API로 확인한 사용자 (화면 표시·역할 판단용. 토큰은 담지 않는다) */
+export type VerifiedUser = MyInfoDto;
+
+/**
+ * 사용자 확인 실패 구분
+ * - UNAUTHORIZED: 401 (토큰 만료·위조) → 다시 로그인
+ * - FORBIDDEN: 403 (Gateway가 사용자 정보 조회를 허용하지 않음)
+ * - NOT_FOUND: 404 (실행 중인 백엔드에 users/me가 없거나 사용자가 삭제됨)
+ * - NETWORK: 연결 실패·시간 초과 (다시 시도할 수 있음)
+ * - ERROR: 5xx·응답 형식 오류·설정 오류
+ */
+export type AuthFailureReason = "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "NETWORK" | "ERROR";
 
 /**
  * 현재 요청의 인증 상태.
  * - signed-out: 토큰 쿠키 없음
- * - unverified: 토큰은 있지만 사용자를 서버에서 확인하지 못함
- * - verified: 서버(사용자 정보 API)가 확인한 사용자
+ * - unverified: 토큰은 있지만 사용자 정보 API로 확인하지 못함 (권한을 허용하지 않는다)
+ * - verified: 사용자 정보 API(`GET /api/v1/users/me`)가 확인한 사용자
  */
 export type AuthState =
   | { status: "signed-out" }
-  | { status: "unverified"; reason: string }
-  | { status: "verified"; role: UserRole; authorization: string };
+  | { status: "unverified"; reason: AuthFailureReason; message: string }
+  | { status: "verified"; role: UserRole; authorization: string; user: VerifiedUser };
+
+const AUTH_FAILURE_MESSAGES: Record<AuthFailureReason, string> = {
+  UNAUTHORIZED: "로그인 정보가 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.",
+  FORBIDDEN: "사용자 정보를 확인할 권한이 없습니다. 관리자에게 문의해 주세요.",
+  NOT_FOUND:
+    "사용자 정보를 확인할 수 없습니다. 실행 중인 서버에 사용자 정보 확인 기능(GET /api/v1/users/me)이 아직 반영되지 않았을 수 있습니다.",
+  NETWORK: "사용자 정보 확인 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  ERROR: "사용자 정보를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+};
 
 /**
- * 현재 사용자 확인 (Server Component·Route Handler에서 호출. cookies()를 읽으므로 Suspense 안에서 부른다).
- *
- * ⚠️ 사용자 정보 API(`GET /api/v1/users/me`)가 백엔드에 아직 없다 (Gateway 정책에만 규칙이 있고 컨트롤러가 없음).
- * 토큰 내용으로 역할을 추정하지 않으므로, 그 API가 생기기 전까지 토큰이 있으면 항상 unverified를 돌려준다.
- * TODO(auth): users/me 응답 DTO가 확정되면 Authorization 헤더로 호출해 역할을 확인하고 verified를 돌려준다
- * (401이면 만료·위조 토큰이므로 signed-out으로 본다).
+ * 토큰으로 사용자 정보 API를 불러 사용자를 확인한다 (getAuthState·로그인 Route Handler 공용).
+ * 토큰을 해석해 역할을 추정하지 않는다. 확인에 실패하면 unverified이며, Mock 사용자로 대체하지 않는다.
  */
-export async function getAuthState(): Promise<AuthState> {
+export async function verifyAccessToken(token: string): Promise<Exclude<AuthState, { status: "signed-out" }>> {
+  const authorization = `Bearer ${token}`;
+  try {
+    const user = await fetchMyInfo({ Authorization: authorization });
+    return { status: "verified", role: user.role, authorization, user };
+  } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않는다
+    unstable_rethrow(error);
+    const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
+    const kind = isApiError(error) ? error.kind : null;
+    const reason: AuthFailureReason =
+      status === 401
+        ? "UNAUTHORIZED"
+        : status === 403
+          ? "FORBIDDEN"
+          : status === 404
+            ? "NOT_FOUND"
+            : kind === "NETWORK" || kind === "TIMEOUT"
+              ? "NETWORK"
+              : "ERROR";
+    // 토큰·응답 본문은 남기지 않는다
+    if (reason !== "UNAUTHORIZED") {
+      console.error("[auth] 사용자 정보 확인 실패:", kind ? `${kind} ${status ?? ""} ${isApiError(error) ? (error.code ?? "") : ""}`.trim() : "unknown");
+    }
+    // 404 중 USER_NOT_FOUND는 API는 있지만 계정이 없는 경우다 (그 밖의 404는 API 미반영 가능성)
+    const message =
+      reason === "NOT_FOUND" && isApiError(error) && error.code === "USER_NOT_FOUND"
+        ? "사용자 계정을 찾을 수 없습니다. 관리자에게 문의해 주세요."
+        : AUTH_FAILURE_MESSAGES[reason];
+    return { status: "unverified", reason, message };
+  }
+}
+
+/**
+ * 현재 사용자 확인 (Server Component·Route Handler·Server Function에서 호출. cookies()를 읽으므로 Server Component는 Suspense 안에서 부른다).
+ * 토큰 쿠키가 있으면 `GET /api/v1/users/me`로 확인한다. 한 요청 안에서는 한 번만 조회한다 (React cache).
+ * API 모드 전용이다: Mock 모드에서는 공통 API Client가 요청하지 않아 unverified(ERROR)가 된다 (Mock 화면은 이 함수를 쓰지 않는다).
+ */
+export const getAuthState = cache(async (): Promise<AuthState> => {
   const token = await readAccessToken();
   if (!token) return { status: "signed-out" };
-  return {
-    status: "unverified",
-    reason: "사용자 정보 확인 API(GET /api/v1/users/me)가 아직 준비되지 않아 권한을 확인할 수 없습니다.",
-  };
-}
+  return verifyAccessToken(token);
+});
 
 /**
  * Gateway 요청용 인증 헤더 (`Authorization: Bearer <JWT>`).

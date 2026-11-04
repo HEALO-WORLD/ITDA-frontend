@@ -1,6 +1,6 @@
 import { Bell, CalendarDays, FileText, Search, Wrench } from "lucide-react";
 
-import type { OrganizationRole } from "@/types/auth";
+import type { OrganizationRole, UserRoleCode } from "@/types/auth";
 import type { NavItem } from "@/types/navigation";
 
 /** 화면 라우트 (screen-spec 0.2). 백엔드 API 경로가 아니다. */
@@ -50,6 +50,19 @@ export const HOME_ROUTE_BY_ROLE: Record<OrganizationRole, string> = {
   REFERRING: ROUTES.referring.slots,
   EXAMINING: ROUTES.examining.equipment,
 };
+
+/** 백엔드 Role → 화면 역할. ADMIN은 관리자 화면이 없어 대응하는 화면 역할이 없다 */
+export const ORGANIZATION_ROLE_BY_USER_ROLE: Record<UserRoleCode, OrganizationRole | null> = {
+  REQUESTER: "REFERRING",
+  EXAMINER: "EXAMINING",
+  ADMIN: null,
+};
+
+/** 로그인 후 이동할 화면 (HOME_ROUTE_BY_ROLE 재사용). 관리자 화면이 없는 ADMIN은 null */
+export function getHomeRouteForUserRole(role: UserRoleCode): string | null {
+  const organizationRole = ORGANIZATION_ROLE_BY_USER_ROLE[role];
+  return organizationRole ? HOME_ROUTE_BY_ROLE[organizationRole] : null;
+}
 
 /** 헤더 알림 아이콘이 이동할 화면 */
 export const NOTIFICATION_ROUTE_BY_ROLE: Record<OrganizationRole, string | null> = {
