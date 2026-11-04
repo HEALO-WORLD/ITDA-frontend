@@ -1,4 +1,6 @@
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
+import { getScreenDataSource } from "@/lib/api/config";
 import { getCurrentExaminingOrganizationId, getEquipments } from "@/features/equipment/api";
 import { getReceivedReservations, IS_MOCK_DATA } from "@/features/reservations/api";
 import ReservationBoard from "@/features/reservations/components/ReservationBoard";
@@ -7,8 +9,17 @@ import ReservationBoard from "@/features/reservations/components/ReservationBoar
  * 확정 예약 관리 (S06) — 조회 중심.
  * 현재 검사기관(개발용 세션 매핑)으로 접수된 예약만 서버에서 골라 넘기고, 검색·선택은 클라이언트에서 한다.
  * 자동 확정 정책이므로 승인·거절·상태 변경 기능은 두지 않는다.
+ * API 모드: 받은 예약 목록 API 연동이 아직 없어 준비 중으로 안내한다 (Mock 데이터·Mock 기관 ID를 쓰지 않는다).
  */
 export default async function ReservationsPage() {
+  if (getScreenDataSource(null) === "not-ready") {
+    return (
+      <>
+        <PageHeader title="확정 예약 관리" description="검사기관에 접수된 검사 예약과 진행 상태를 확인합니다." />
+        <FeatureNotReady />
+      </>
+    );
+  }
   const organizationId = await getCurrentExaminingOrganizationId();
   const [reservations, equipments] = organizationId
     ? await Promise.all([getReceivedReservations(organizationId), getEquipments(organizationId)])

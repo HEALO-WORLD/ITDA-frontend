@@ -101,12 +101,27 @@ export function mockOnly(name: string): void {
   if (!(API_FEATURES as readonly string[]).includes(feature)) {
     throw new ApiError("CONFIG", `알 수 없는 기능 이름입니다: "${name}"`);
   }
-  if (!isApiFeature(feature as ApiFeature)) return;
-  // 기능은 API 대상인데 이 함수는 미연결임을 개발 중에만 한 번 알린다 (배포 빌드에서는 출력하지 않는다)
-  if (process.env.NODE_ENV === "development" && !warnedMockOnlyNames.has(name)) {
+  if (getApiMode() === "mock") return;
+  // API 모드에서는 화면이 getScreenDataSource로 Mock 경로를 막는다. 그래도 불렸다면 Mock이 새는 경로이므로
+  // 함수마다 한 번 오류 로그를 남긴다 (배포 환경 포함). 화면이 깨지지 않도록 예외는 던지지 않는다
+  if (!warnedMockOnlyNames.has(name)) {
     warnedMockOnlyNames.add(name);
-    console.warn(`[API 모드] ${name}: 아직 API에 연결하지 않은 함수라 Mock 데이터를 사용합니다.`);
+    console.error(`[API 모드] Mock 함수 호출: ${name} (화면에서 Mock 경로를 막아야 합니다)`);
   }
+}
+
+/**
+ * 화면 데이터 출처.
+ * - mock: Mock 모드 (기존 Mock 데모)
+ * - api: API 모드이고 실제 API에 연결된 기능이 켜져 있음
+ * - not-ready: API 모드인데 연결된 API가 없거나 기능이 꺼져 있음 → Mock으로 채우지 않고 '준비 중'으로 안내한다
+ * @param feature 실제 API에 연결된 화면의 기능 키. 아직 연결된 API가 없는 화면은 null
+ */
+export type ScreenDataSource = "mock" | "api" | "not-ready";
+
+export function getScreenDataSource(feature: ApiFeature | null): ScreenDataSource {
+  if (getApiMode() === "mock") return "mock";
+  return feature !== null && isApiFeature(feature) ? "api" : "not-ready";
 }
 
 /**

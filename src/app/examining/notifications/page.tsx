@@ -1,10 +1,11 @@
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
 import { IS_MOCK_DATA } from "@/features/examining-notifications/api";
 import ExaminingNotificationBoard from "@/features/examining-notifications/components/ExaminingNotificationBoard";
 import ApiNotificationSection from "@/features/notifications/components/ApiNotificationSection";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 
 /**
  * 검사기관 알림.
@@ -29,6 +30,15 @@ export default function ExaminingNotificationsPage({ searchParams }: PageProps<"
         >
           <ApiNotificationSection variant="examining" searchParams={searchParams} />
         </Suspense>
+      </>
+    );
+  }
+  // API 모드인데 이 기능이 API 대상이 아니면 Mock으로 채우지 않고 준비 중으로 안내한다
+  if (getScreenDataSource("examining-notifications") === "not-ready") {
+    return (
+      <>
+        {header}
+        <FeatureNotReady />
       </>
     );
   }

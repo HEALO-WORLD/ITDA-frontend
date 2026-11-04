@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
 import { getNotifications } from "@/features/notifications/api";
 import { getFailedEquipments } from "@/features/notifications/reschedule";
 import { getReferralById } from "@/features/referrals/api";
@@ -8,11 +9,12 @@ import { RESCHEDULE_QUERY_KEY } from "@/features/referrals/reschedule";
 import type { ReferralSummary } from "@/features/referrals/types";
 import { getPartnerOrganizations } from "@/features/slots/api";
 import SlotSearch from "@/features/slots/components/SlotSearch";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 
 /**
  * 검사 슬롯 검색 (S02).
  * `?rescheduleReferralId=`가 있으면 재조정 대체 슬롯 선택 모드로 동작한다.
+ * API 모드에서는 슬롯 검색 API가 없어 준비 중으로 안내한다 (재조정 모드 포함, Mock 데이터를 쓰지 않는다).
  * 쿼리는 요청 시점 값이므로 검색 영역을 Suspense 안에서 렌더링한다.
  */
 export default function SlotSearchPage({ searchParams }: PageProps<"/referring/slots">) {
@@ -40,6 +42,8 @@ export default function SlotSearchPage({ searchParams }: PageProps<"/referring/s
 
 async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/slots">, "searchParams">) {
   const rescheduleReferralId = (await searchParams)[RESCHEDULE_QUERY_KEY];
+  // API 모드에서는 슬롯 검색 API가 없어 Mock 기관·슬롯·의뢰·알림으로 화면을 채우지 않는다 (재조정 모드 포함)
+  if (getScreenDataSource(null) === "not-ready") return <FeatureNotReady />;
   const [organizations, rescheduleTarget, notifications] = await Promise.all([
     getPartnerOrganizations(),
     resolveRescheduleTarget(rescheduleReferralId),
