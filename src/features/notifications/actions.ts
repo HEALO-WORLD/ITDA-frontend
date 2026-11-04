@@ -4,10 +4,10 @@ import { refresh } from "next/cache";
 import { headers } from "next/headers";
 
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { getOwnerScopedAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess } from "@/lib/auth/session";
 
 import { isNotificationId, markNotificationAsRead, NOTIFICATION_API_FEATURES, type NotificationApiFeature } from "./remote";
-import { SIGNED_OUT_FAILURE, toNotificationFailure } from "./server";
+import { NOTIFICATION_ROLE_BY_FEATURE, toNotificationAccessFailure, toNotificationFailure } from "./server";
 import type { NotificationReadActionResult } from "./types";
 
 /**
@@ -15,8 +15,8 @@ import type { NotificationReadActionResult } from "./types";
  *
  * 인자는 브라우저에서 오므로 믿지 않고 다시 검증한다.
  * - CSRF: Next가 Server Function의 Origin·Host를 비교하고, 여기서도 같은 출처인지 한 번 더 확인한다
- * - 인증: 로그인 쿠키의 토큰을 서버에서 Gateway로 넘긴다. 쿠키가 없으면 요청하지 않는다
- *   (토큰 검증·역할·본인 알림 여부는 Gateway와 백엔드가 확인한다)
+ * - 인증: 기능 이름으로 서버가 정한 화면 역할을 users/me로 확인한 뒤에만 토큰을 Gateway로 넘긴다 (requireRoleAccess).
+ *   확인에 실패하면 요청하지 않는다 (본인 알림 여부·API 권한은 Gateway와 백엔드가 다시 확인한다)
  * - 결과에는 토큰을 담지 않는다
  * 성공하면 화면을 다시 불러와(refresh) 목록과 읽지 않은 알림 수를 서버 값으로 맞춘다.
  * 백엔드가 멱등이라 같은 알림을 다시 요청해도 처음 읽은 시각이 그대로 온다.
@@ -32,8 +32,10 @@ export async function markNotificationAsReadAction(
     return { ok: false, reason: "ERROR", message: "알림 정보가 올바르지 않습니다. 화면을 새로고침해 주세요." };
   }
 
-  const authorization = await getOwnerScopedAuthorizationHeaders();
-  if (!authorization) return SIGNED_OUT_FAILURE;
+  // 브라우저가 보낸 기능 이름은 필요한 역할을 고르는 데만 쓴다. 허용 여부는 users/me로 확인한 역할로 정한다
+  const access = await requireRoleAccess(NOTIFICATION_ROLE_BY_FEATURE[feature as NotificationApiFeature]);
+  if (!access.ok) return toNotificationAccessFailure(access);
+  const authorization = access.headers;
 
   let result: NotificationReadActionResult;
   try {
