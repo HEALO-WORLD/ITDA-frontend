@@ -164,15 +164,18 @@ export type RoleAccess =
  * - users/me로 확인한 역할만 쓴다 (getAuthState, 한 요청 안에서는 한 번만 조회). 클라이언트가 보낸 역할은 받지 않는다
  * - REQUESTER → 의뢰기관(REFERRING) 데이터만, EXAMINER → 검사기관(EXAMINING) 데이터만, ADMIN → 둘 다 불가
  *   (백엔드가 ADMIN에게 허용하는 API라도 프론트 역할 화면에서는 허용하지 않는다)
+ * - role이 "ADMIN"이면 관리자 화면 데이터: users/me 역할이 ADMIN일 때만 허용 (REQUESTER·EXAMINER 불가)
  * - 확인에 실패하면 헤더를 주지 않는다 → 호출한 쪽은 요청을 보내지 않는다
  */
-export async function requireRoleAccess(role: OrganizationRole): Promise<RoleAccess> {
+export async function requireRoleAccess(role: OrganizationRole | "ADMIN"): Promise<RoleAccess> {
   const state = await getAuthState();
   if (state.status === "signed-out") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." };
   if (state.status === "unverified") {
     return { ok: false, reason: state.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "UNVERIFIED", message: state.message };
   }
-  if (ORGANIZATION_ROLE_BY_USER_ROLE[state.role] !== role) {
+  // ADMIN: 관리자 화면 데이터는 users/me 역할이 ADMIN일 때만. 그 밖의 역할: 화면 역할과 같을 때만 (ADMIN은 업무 화면 불가)
+  const allowed = role === "ADMIN" ? state.role === "ADMIN" : ORGANIZATION_ROLE_BY_USER_ROLE[state.role] === role;
+  if (!allowed) {
     return { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." };
   }
   return { ok: true, headers: toAuthorizationHeaders(state), user: state.user };

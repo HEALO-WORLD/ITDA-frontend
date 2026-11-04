@@ -90,17 +90,33 @@ function assertUuid(value: string, label: string) {
   if (!isUuid(value)) throw new ApiError("CONFIG", `${label} 형식이 올바르지 않습니다: "${value}"`);
 }
 
-/** 장애 목록 `GET /api/v1/equipment-incidents?equipmentId&page&size` (최신 발생순 고정) */
+/** 장애 상태 값 (백엔드 EquipmentIncidentStatus, origin/dev c38ed96 기준 OCCURRED 하나) */
+export const INCIDENT_STATUSES = ["OCCURRED"] as const;
+
+/**
+ * 장애 목록 `GET /api/v1/equipment-incidents?institutionId&equipmentId&status&page&size` (최신 발생순 고정).
+ * institutionId·status는 관리자 화면에서만 넘긴다 (institutionId는 ADMIN 전용 조건: 검사기관은 서버가 자기 기관으로 정한다).
+ */
 export async function fetchIncidentPage(
-  { page = 0, size = 10, equipmentId }: { page?: number; size?: IncidentPageSize; equipmentId?: string } = {},
+  {
+    page = 0,
+    size = 10,
+    equipmentId,
+    institutionId,
+    status,
+  }: { page?: number; size?: IncidentPageSize; equipmentId?: string; institutionId?: string; status?: (typeof INCIDENT_STATUSES)[number] } = {},
   options: RequestOptions = {},
 ): Promise<PagedResponseDto<EquipmentIncidentDto>> {
   requireApiFeature("incidents");
   assertPage(page, size);
   if (equipmentId !== undefined) assertUuid(equipmentId, "장비 ID");
+  if (institutionId !== undefined) assertUuid(institutionId, "기관 ID");
+  if (status !== undefined && !(INCIDENT_STATUSES as readonly string[]).includes(status)) {
+    throw new ApiError("CONFIG", `장애 상태 값이 올바르지 않습니다: "${status}"`);
+  }
   const data = await apiRequestData<unknown>("/api/v1/equipment-incidents", {
     ...options,
-    query: { page, size, equipmentId },
+    query: { page, size, equipmentId, institutionId, status },
   });
   if (!isPage(data, isIncident)) throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
   return data;

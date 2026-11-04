@@ -89,6 +89,6 @@ export async function POST(request: Request) {
   return respond({
     ok: true,
     redirectTo,
-    message: redirectTo ? null : "관리자 계정으로 로그인했습니다. 관리자 화면은 아직 준비되지 않았습니다.",
+    message: redirectTo ? null : "로그인했지만 이 계정으로 이동할 화면이 없습니다.",
   });
 }
