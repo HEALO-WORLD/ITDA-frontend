@@ -34,7 +34,8 @@ import { toRescheduleLocalTimes, type RescheduleTimeConversionResult } from "./r
  * 1. 같은 출처 확인 (Next의 Server Function Origin 검사에 더해 한 번 더)
  * 2. referrals·slots·equipment 기능이 모두 API 대상이어야 한다 (Mock으로 대체하지 않는다)
  * 3. 인증: 로그인 쿠키의 토큰을 Authorization: Bearer로만 넘긴다 (X- 헤더는 Gateway가 만든다). 쿠키가 없으면 요청하지 않는다
- * 4. 역할·접근 권한: 프론트에서 판단하지 않는다 (users/me 미연동). Gateway·백엔드 응답으로 구분한다
+ * 4. 역할·접근 권한: 이 Action은 users/me(getAuthState)로 역할을 다시 판단하지 않는다. Gateway·백엔드 응답으로 구분한다
+ *    (화면 진입은 의뢰기관 레이아웃의 ApiRoleGate가 users/me로 확인한다)
  *    - 의뢰 조회: 의뢰기관 소속이거나 관리자가 아니면 404 · 장비 조회: REQUESTER는 ACTIVE 협약 검사기관만, ADMIN은 Gateway 403
  *    - 의뢰 작성자 본인 여부는 확인하지 않는다 (재예약 POST에서 백엔드가 404로 거부한다)
  * 5. 의뢰·슬롯 ID 형식 확인 → 의뢰 → 슬롯 → 슬롯의 equipmentId로 장비 조회 → checkRescheduleCandidate → toRescheduleLocalTimes

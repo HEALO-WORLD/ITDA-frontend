@@ -2,12 +2,14 @@ import { getLoginFailureReason, LOGIN_FAILURE_MESSAGES, requestLogin } from "@/f
 import type { LoginFailureReason, LoginResult } from "@/features/auth/types";
 import { getApiMode } from "@/lib/api/config";
 import { isSameOriginRequest } from "@/lib/auth/csrf";
-import { setAccessTokenCookie } from "@/lib/auth/session";
+import { setAccessTokenCookie, verifyAccessToken } from "@/lib/auth/session";
+import { getHomeRouteForUserRole } from "@/constants/navigation";
 
 /**
  * 로그인 `POST /auth/login` (화면 → Next 서버 → Gateway `POST /api/v1/auth/login`).
  *
  * 브라우저는 토큰을 받지 않는다: 서버가 받은 토큰을 HttpOnly 쿠키에 저장하고 결과(LoginResult)만 돌려준다.
+ * 토큰을 받으면 `GET /api/v1/users/me`로 사용자를 확인하고, 확인된 경우에만 쿠키를 저장해 역할별 첫 화면 경로를 돌려준다.
  * API 모드에서만 동작한다. Mock 모드에서는 백엔드를 부르지 않고 거부한다 (Mock 로그인을 만들지 않는다).
  */
 
@@ -19,6 +21,7 @@ const STATUS_BY_REASON: Record<LoginFailureReason, number> = {
   MOCK_MODE: 409,
   CONFIG: 500,
   SERVER_ERROR: 502,
+  USER_INFO_FAILED: 502,
 };
 
 const LOGIN_ID_MAX_LENGTH = 50;
@@ -76,6 +79,16 @@ export async function POST(request: Request) {
     return fail(reason);
   }
 
+  // 사용자 정보(users/me)로 역할을 확인한 뒤에만 쿠키를 저장한다 (토큰을 해석해 역할을 정하지 않는다)
+  const verified = await verifyAccessToken(token.accessToken);
+  if (verified.status !== "verified") {
+    return respond({ ok: false, reason: "USER_INFO_FAILED", message: verified.message });
+  }
   await setAccessTokenCookie(token.accessToken, token.expiresIn);
-  return respond({ ok: true });
+  const redirectTo = getHomeRouteForUserRole(verified.role);
+  return respond({
+    ok: true,
+    redirectTo,
+    message: redirectTo ? null : "관리자 계정으로 로그인했습니다. 관리자 화면은 아직 준비되지 않았습니다.",
+  });
 }

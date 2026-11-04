@@ -4,6 +4,7 @@ import { useState, type MouseEvent, type ReactNode } from "react";
 import type { ExamType } from "@/features/slots/types";
 
 import { formatOperatingHoursSummary } from "../operatingHours";
+import { getSupportedExamTypeNames } from "../supportedExamTypes";
 import type { Equipment } from "../types";
 
 import EquipmentStatusBadge from "./EquipmentStatusBadge";
@@ -229,6 +230,8 @@ export default function EquipmentPicker({
                     const isSelected = selection === equipment.id;
                     const hasHours = equipment.operatingHours.length > 0;
                     const hoursSummary = hasHours ? formatOperatingHoursSummary(equipment.operatingHours) : "미설정";
+                    const supportedNames = getSupportedExamTypeNames(equipment.supportedExamTypeIds);
+                    const supportedSummary = supportedNames ? supportedNames.join(", ") : "미설정";
                     return (
                       <tr
                         key={equipment.id}
@@ -263,6 +266,9 @@ export default function EquipmentPicker({
                               {hasHours ? hoursSummary : "운영시간 미설정"}
                             </span>
                           </div>
+                          <p className="mt-1 truncate text-xs text-gray-500" title={supportedSummary}>
+                            지원 검사: <span className={supportedNames ? "text-gray-700" : "text-gray-400"}>{supportedSummary}</span>
+                          </p>
                         </td>
                         <td className={`${tdClass} hidden @min-[600px]:table-cell`}>
                           <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-600">

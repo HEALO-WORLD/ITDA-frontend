@@ -12,9 +12,11 @@ interface AppHeaderProps {
   user?: SessionUser;
   /** 알림 아이콘 이동 경로. null이면 알림 아이콘을 표시하지 않는다 */
   notificationHref?: string | null;
+  /** 로그아웃 버튼 표시 (API 모드 로그인 세션에서만. 기존 `POST /auth/logout` 사용) */
+  showLogout?: boolean;
 }
 
-export default function AppHeader({ subtitle, user, notificationHref = null }: AppHeaderProps) {
+export default function AppHeader({ subtitle, user, notificationHref = null, showLogout = false }: AppHeaderProps) {
   return (
     <header className="sticky top-0 z-20 flex h-[72px] shrink-0 items-center justify-between border-b border-line bg-white px-8">
       <div className="flex items-center gap-5">
@@ -40,6 +42,17 @@ export default function AppHeader({ subtitle, user, notificationHref = null }: A
                 href={notificationHref}
                 fallbackHasUnread={user.hasUnreadNotifications}
               />
+            </>
+          )}
+
+          {showLogout && (
+            <>
+              <span className="h-6 w-px bg-line" aria-hidden="true" />
+              <form action="/auth/logout" method="post">
+                <button type="submit" className="text-[15px] font-medium text-gray-600 hover:text-gray-900 hover:underline">
+                  로그아웃
+                </button>
+              </form>
             </>
           )}
         </div>

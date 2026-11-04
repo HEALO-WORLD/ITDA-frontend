@@ -30,4 +30,6 @@ export interface Equipment {
   operatingHours: DailyOperatingHours[];
   /** 슬롯 1개 길이(분) */
   slotMinutes: number;
+  /** 지원 검사 유형 ID (임시 내부 모델, supportedExamTypes.ts). 없거나 비어 있으면 미설정 */
+  supportedExamTypeIds?: readonly string[] | null;
 }

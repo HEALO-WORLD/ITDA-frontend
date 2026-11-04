@@ -4,6 +4,9 @@
  */
 export type OrganizationRole = "REFERRING" | "EXAMINING";
 
+/** 백엔드 Role (users/me 응답). REQUESTER = 의뢰기관, EXAMINER = 검사기관, ADMIN = 플랫폼 관리자 */
+export type UserRoleCode = "REQUESTER" | "EXAMINER" | "ADMIN";
+
 /** 헤더에 표시할 로그인 사용자 정보 */
 export interface SessionUser {
   role: OrganizationRole;

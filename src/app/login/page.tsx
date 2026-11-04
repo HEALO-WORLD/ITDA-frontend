@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
 import DevRoleShortcuts from "@/components/dev/DevRoleShortcuts";
 import AppHeader from "@/components/layout/AppHeader";
@@ -21,7 +22,17 @@ export const metadata: Metadata = {
   title: "의료기관 로그인 | IT:DA",
 };
 
-export default function LoginPage() {
+/** 보호 화면에서 로그인 만료(401)로 돌아온 경우 안내 (`?reason=expired`, 주소 값은 문구 선택에만 쓴다) */
+async function ExpiredNotice({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
+  if ((await searchParams).reason !== "expired") return null;
+  return (
+    <p role="alert" className="mt-6 rounded-lg bg-red-50 px-4 py-3 text-center text-[15px] text-red-700">
+      로그인 정보가 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요.
+    </p>
+  );
+}
+
+export default function LoginPage({ searchParams }: PageProps<"/login">) {
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader subtitle="의료기관 검사 의뢰·예약 플랫폼" />
@@ -32,6 +43,9 @@ export default function LoginPage() {
             등록된 기관 계정으로 로그인하세요.
           </p>
 
+          <Suspense fallback={null}>
+            <ExpiredNotice searchParams={searchParams} />
+          </Suspense>
           <div className="mt-10">
             <LoginForm />
           </div>
