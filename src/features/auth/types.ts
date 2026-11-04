@@ -18,9 +18,17 @@ export type LoginFailureReason =
   /** Mock 모드라 실제 로그인을 하지 않음 */
   | "MOCK_MODE"
   /** 다른 출처에서 온 요청 (CSRF 방어) */
-  | "FORBIDDEN_ORIGIN";
+  | "FORBIDDEN_ORIGIN"
+  /** 로그인은 됐지만 사용자 정보(users/me) 확인 실패 → 쿠키를 저장하지 않는다 */
+  | "USER_INFO_FAILED";
 
-export type LoginResult = { ok: true } | { ok: false; reason: LoginFailureReason; message: string };
+/**
+ * 로그인 결과. 성공은 사용자 정보(users/me)까지 확인된 경우뿐이다.
+ * - redirectTo: 역할별 첫 화면. 화면이 없는 역할(ADMIN)은 null이고 message로 안내한다
+ */
+export type LoginResult =
+  | { ok: true; redirectTo: string | null; message: string | null }
+  | { ok: false; reason: LoginFailureReason; message: string };
 
 /** 가입 가능 기관 유형 (백엔드 InstitutionType 중 가입 목록에 나오는 값. 운영사 PLATFORM은 목록에서 빠진다) */
 export type SignupInstitutionType = "REQUESTER" | "EXAM";

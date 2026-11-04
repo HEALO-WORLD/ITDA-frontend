@@ -14,7 +14,7 @@ interface ExaminationApiSectionProps {
 /**
  * 검사 목록 (API 모드). cookies()·searchParams를 읽으므로 페이지의 Suspense 안에서 렌더링한다.
  *
- * 접근 보호: 사용자 정보 API(users/me)가 없어 화면에서 역할을 확인하지 않는다 (getAuthState를 verified로 바꾸지 않는다).
+ * 접근 보호: 화면 진입은 검사기관 레이아웃(ApiRoleGate, users/me)이 확인한다. 여기서는 역할을 다시 판단하지 않는다.
  * 대신 검사 API 전용 인증 헤더로 토큰을 Gateway에 넘기고, Gateway가 EXAMINER만 허용·백엔드가 소속 기관 검사만 돌려준다.
  * 토큰 쿠키가 없으면 호출하지 않는다. 쿠키가 있다는 것만으로 권한이 있다고 보지 않는다 (401·403은 안내로 표시).
  * 기관 ID는 보내지 않는다: Gateway가 토큰에서 X-Institution-Id를 만든다.

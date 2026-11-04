@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
 import type { LoginResult } from "@/features/auth/types";
@@ -30,7 +31,11 @@ function validate({ loginId, password }: LoginFormValues): LoginFormErrors {
 function isLoginResult(value: unknown): value is LoginResult {
   if (typeof value !== "object" || value === null || !("ok" in value)) return false;
   const result = value as Record<string, unknown>;
-  return result.ok === true || (result.ok === false && typeof result.message === "string");
+  const isRouteOrNull = (v: unknown) => v === null || (typeof v === "string" && v.startsWith("/") && !v.startsWith("//"));
+  return (
+    (result.ok === true && isRouteOrNull(result.redirectTo) && (result.message === null || typeof result.message === "string")) ||
+    (result.ok === false && typeof result.message === "string")
+  );
 }
 
 const SERVER_ERROR_MESSAGE = "로그인 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.";
@@ -41,7 +46,8 @@ const inputClass =
 /**
  * 로그인 폼.
  * API 모드: Next 서버의 `POST /auth/login`을 거쳐 백엔드에 로그인하고, 토큰은 서버가 HttpOnly 쿠키에 저장한다
- * (이 컴포넌트는 토큰을 받지도 저장하지도 않는다).
+ * (이 컴포넌트는 토큰을 받지도 저장하지도 않는다). 서버가 사용자 정보로 확인한 역할별 화면(redirectTo)으로 이동하고,
+ * 화면이 없는 역할(ADMIN)은 안내만 한다.
  * Mock 모드: 요청을 보내지 않고 데모 체험 바로가기를 안내한다.
  */
 export default function LoginForm() {
@@ -49,7 +55,9 @@ export default function LoginForm() {
   const [errors, setErrors] = useState<LoginFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formMessage, setFormMessage] = useState<string | null>(null);
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  /** 로그인됐지만 이동할 화면이 없는 경우(ADMIN)의 안내 */
+  const [loggedInNotice, setLoggedInNotice] = useState<string | null>(null);
+  const router = useRouter();
   /** 상태 갱신 전 연속 제출까지 막는다 (버튼 비활성화는 다음 렌더부터 적용된다) */
   const submittingRef = useRef(false);
 
@@ -98,8 +106,15 @@ export default function LoginForm() {
     }
 
     if (result.ok) {
-      setIsLoggedIn(true);
       setValues({ loginId: "", password: "" });
+      if (result.redirectTo) {
+        // 이동 중 다시 제출하지 못하게 막아 둔다 (이동이 끝나면 이 화면은 사라진다)
+        submittingRef.current = true;
+        setIsSubmitting(true);
+        router.replace(result.redirectTo);
+        return;
+      }
+      setLoggedInNotice(result.message ?? "로그인했습니다. 이동할 화면이 없습니다.");
       return;
     }
     setFormMessage(result.message);
@@ -107,15 +122,12 @@ export default function LoginForm() {
     if (result.reason === "INVALID_CREDENTIALS") setValues((prev) => ({ ...prev, password: "" }));
   };
 
-  if (isLoggedIn) {
+  if (loggedInNotice) {
     return (
       <div className="flex flex-col gap-4">
         <div role="status" className="rounded-lg border border-line bg-surface-muted px-4 py-4 text-[15px] text-gray-800">
           <p className="font-semibold">로그인되었습니다.</p>
-          {/* TODO(auth): users/me로 역할을 확인한 뒤 HOME_ROUTE_BY_ROLE로 이동한다 */}
-          <p className="mt-1 text-sm text-gray-600">
-            사용자 권한 확인 API가 아직 준비되지 않아 역할별 화면으로 이동하지 않습니다.
-          </p>
+          <p className="mt-1 text-sm text-gray-600">{loggedInNotice}</p>
         </div>
         <form action="/auth/logout" method="post">
           <button
