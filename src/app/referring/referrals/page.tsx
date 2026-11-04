@@ -2,6 +2,8 @@ import { Plus } from "lucide-react";
 import Link from "next/link";
 
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
+import { getScreenDataSource } from "@/lib/api/config";
 import { ROUTES } from "@/constants/navigation";
 import { getRecentReferrals, IS_MOCK_DATA } from "@/features/referrals/api";
 import ReferralHistoryTable from "@/features/referrals/components/ReferralHistoryTable";
@@ -9,8 +11,17 @@ import ReferralHistoryTable from "@/features/referrals/components/ReferralHistor
 /**
  * 의뢰·예약 관리 (S03).
  * 의뢰·예약 목록이 메인 콘텐츠이며, 새 의뢰는 검사 슬롯 검색에서 슬롯을 고른 뒤 모달로 입력한다.
+ * API 모드: 화면 표가 쓰는 값(검사기관·장비·검사 일시 등)을 채울 API 연동이 아직 없어 준비 중으로 안내한다 (Mock 데이터를 쓰지 않는다).
  */
 export default async function ReferralsPage() {
+  if (getScreenDataSource(null) === "not-ready") {
+    return (
+      <>
+        <PageHeader title="의뢰·예약 관리" />
+        <FeatureNotReady />
+      </>
+    );
+  }
   const referrals = await getRecentReferrals();
 
   return (

@@ -1,11 +1,12 @@
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
 import { getCurrentExaminingOrganizationId } from "@/features/equipment/api";
 import { getExaminations, IS_MOCK_DATA } from "@/features/examinations/api";
 import ExaminationApiSection from "@/features/examinations/components/ExaminationApiSection";
 import ExaminationBoard from "@/features/examinations/components/ExaminationBoard";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 
 /**
  * 검사 진행·결과 (S08).
@@ -28,6 +29,16 @@ export default async function ExaminationsPage({ searchParams }: PageProps<"/exa
         >
           <ExaminationApiSection searchParams={searchParams} />
         </Suspense>
+      </>
+    );
+  }
+
+  // API 모드인데 이 기능이 API 대상이 아니면 Mock으로 채우지 않고 준비 중으로 안내한다
+  if (getScreenDataSource("examinations") === "not-ready") {
+    return (
+      <>
+        <PageHeader title="검사 진행·결과" description="우리 기관에 배정된 검사의 진행 상태를 확인하고 결과를 등록합니다." />
+        <FeatureNotReady />
       </>
     );
   }

@@ -6,7 +6,7 @@ import { getNotifications } from "@/features/notifications/api";
 import ApiNotificationUnreadProvider from "@/features/notifications/components/ApiNotificationUnreadProvider";
 import NotificationReadProvider from "@/features/notifications/components/NotificationReadProvider";
 import { loadUnreadNotificationCount } from "@/features/notifications/server";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 import { getMockSession } from "@/lib/dev/mockSession";
 
 /**
@@ -35,8 +35,9 @@ export default async function ReferringLayout({ children }: LayoutProps<"/referr
     );
   }
 
-  // 헤더 알림 표시와 재조정·알림 화면이 같은 알림 목록·읽음 상태를 공유한다
-  const notifications = await getNotifications();
+  // 헤더 알림 표시와 재조정·알림 화면이 같은 알림 목록·읽음 상태를 공유한다.
+  // Mock 알림은 Mock 모드에서만 쓴다 (API 모드에서 알림 기능이 꺼져 있으면 빈 목록: Mock으로 채우지 않는다)
+  const notifications = getScreenDataSource("notifications") === "mock" ? await getNotifications() : [];
 
   return <NotificationReadProvider initialNotifications={notifications}>{shell(children)}</NotificationReadProvider>;
 }

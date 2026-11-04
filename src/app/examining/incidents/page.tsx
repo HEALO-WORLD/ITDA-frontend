@@ -1,12 +1,13 @@
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
+import FeatureNotReady from "@/components/ui/FeatureNotReady";
 import { getCurrentExaminingOrganizationId } from "@/features/equipment/api";
 import { getIncidentRecords, IS_MOCK_DATA } from "@/features/incidents/api";
 import IncidentApiSection from "@/features/incidents/components/IncidentApiSection";
 import IncidentBoard from "@/features/incidents/components/IncidentBoard";
 import { getReceivedReservations } from "@/features/reservations/api";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 
 /**
  * 장비 장애·재조정 (S07).
@@ -30,6 +31,16 @@ export default async function IncidentsPage({ searchParams }: PageProps<"/examin
         >
           <IncidentApiSection searchParams={searchParams} />
         </Suspense>
+      </>
+    );
+  }
+
+  // API 모드인데 이 기능이 API 대상이 아니면 Mock으로 채우지 않고 준비 중으로 안내한다
+  if (getScreenDataSource("incidents") === "not-ready") {
+    return (
+      <>
+        <PageHeader title="장비 장애·재조정" description="우리 기관 장비의 장애 이력과 영향받은 의뢰 처리 현황을 확인합니다." />
+        <FeatureNotReady />
       </>
     );
   }

@@ -7,7 +7,7 @@ import { getExaminingNotifications } from "@/features/examining-notifications/ap
 import ExaminingNotificationReadProvider from "@/features/examining-notifications/components/ExaminingNotificationReadProvider";
 import ApiNotificationUnreadProvider from "@/features/notifications/components/ApiNotificationUnreadProvider";
 import { loadUnreadNotificationCount } from "@/features/notifications/server";
-import { isApiFeature } from "@/lib/api/config";
+import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 import { getMockSession } from "@/lib/dev/mockSession";
 
 /**
@@ -35,8 +35,10 @@ export default async function ExaminingLayout({ children }: LayoutProps<"/examin
       </ApiNotificationUnreadProvider>
     );
   }
-  // 헤더 알림 표시와 알림 화면이 같은 알림 목록·읽음 상태를 공유한다 (현재 검사기관 알림만)
-  const organizationId = await getCurrentExaminingOrganizationId();
+  // 헤더 알림 표시와 알림 화면이 같은 알림 목록·읽음 상태를 공유한다 (현재 검사기관 알림만).
+  // Mock 기관 ID·Mock 알림은 Mock 모드에서만 쓴다 (API 모드에서 알림 기능이 꺼져 있으면 빈 목록)
+  const organizationId =
+    getScreenDataSource("examining-notifications") === "mock" ? await getCurrentExaminingOrganizationId() : null;
   const notifications = organizationId ? await getExaminingNotifications(organizationId) : [];
 
   return (
