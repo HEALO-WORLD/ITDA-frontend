@@ -24,7 +24,7 @@ export const RESULT_REGISTRATION_LABELS = Object.fromEntries(
   Object.entries(RESULT_META).map(([status, { label }]) => [status, label]),
 ) as Record<ResultRegistrationStatus, string>;
 
-const badgeClass = "inline-flex whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium";
+const badgeClass = "inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5";
 
 export function ProgressStatusBadge({ status }: { status: ExamProgressStatus }) {
   const { label, className } = PROGRESS_META[status];

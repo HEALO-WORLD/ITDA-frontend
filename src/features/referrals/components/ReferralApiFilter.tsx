@@ -4,6 +4,7 @@ import { RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
+import { controlClass, filterPanelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 
 import { PATIENT_NAME_SEARCH_MAX_LENGTH, type ReferralStatusDto } from "../remote";
@@ -29,9 +30,6 @@ interface ReferralApiFilterProps {
   examTypeNotice: { kind: "empty" } | { kind: "error"; message: string } | null;
 }
 
-// Mock 의뢰 검색 조건(ReferralFilter)과 같은 모양
-const controlClass =
-  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
 
 /** 조건 → 주소. 빈 값은 넣지 않고, 조건이 바뀌면 첫 페이지로 간다 (page를 넣지 않는다) */
 export function referralListHref({ patientName, status, examTypeId }: ReferralApiFilterValues): string {
@@ -70,7 +68,7 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
       action={ROUTES.referring.referrals}
       method="get"
       onSubmit={submit}
-      className="flex flex-col gap-3"
+      className={filterPanelClass}
     >
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[190px] flex-[2_1_230px]">
@@ -125,7 +123,7 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
             disabled
             aria-describedby="referral-detail-filter-unavailable"
             title="검사기관·검사 기간 조건은 의뢰 목록 API에서 아직 지원하지 않습니다."
-            className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm font-medium text-gray-400"
+            className={`${secondaryButtonClass} cursor-not-allowed text-gray-400 hover:bg-white`}
           >
             <SlidersHorizontal className="size-4" aria-hidden="true" />
             상세 필터
@@ -133,7 +131,7 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
 
           <button
             type="submit"
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-bold text-white hover:bg-primary-hover"
+            className={primaryButtonClass}
           >
             <Search className="size-4" aria-hidden="true" />
             검색
@@ -142,7 +140,7 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
           <button
             type="button"
             onClick={reset}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className={secondaryButtonClass}
           >
             <RotateCcw className="size-4" aria-hidden="true" />
             초기화

@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { ROUTES } from "@/constants/navigation";
 import NotificationPagination from "@/features/notifications/components/NotificationPagination";
+import { emptyStateClass, rowClass, tableClass, tableWrapClass, tdClass as baseTd, theadClass, thClass as baseTh } from "@/components/ui/styles";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import { toReferralDisplayStatus, type ReferralStatusDto } from "../remote";
@@ -40,9 +41,9 @@ interface ReferralApiTableProps {
 /** 백엔드 상태 → 배지 상태. FAILED는 화면 표시 상태가 없어 예약 실패 배지로 보여 준다 */
 export const toBadgeStatus = (status: ReferralStatusDto) => toReferralDisplayStatus(status) ?? "FAILED";
 
-// Mock 의뢰·예약 목록(ReferralHistoryTable)과 같은 표 모양
-const thClass = "whitespace-nowrap px-6 py-5 text-left text-[15px] font-semibold text-gray-700";
-const tdClass = "px-6 py-5 text-[15px] text-gray-900";
+// 공통 표 모양 (Mock 의뢰·예약 목록·관리자 표와 같다)
+const thClass = baseTh;
+const tdClass = baseTd;
 
 /** 값이 없는 셀: "—"만 보이고, 원인(예약 전·정보 없음·조회 실패)은 스크린리더와 툴팁으로 구분한다 */
 const EMPTY_REASON: Record<Exclude<DetailCell["state"], "ok">, string> = {
@@ -84,14 +85,14 @@ export default function ReferralApiTable({ rows, page, totalPages, totalElements
       </div>
 
       {detailIncomplete && (
-        <p role="status" className="rounded-lg bg-amber-50 px-4 py-3 text-sm text-amber-800">
+        <p role="status" className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
           일부 예약 정보(검사기관·검사 일시)를 불러오지 못해 &quot;—&quot;로 표시했습니다. 잠시 후 다시 조회해 주세요.
         </p>
       )}
 
       {rows.length === 0 ? (
-        <div role="status" className="rounded-lg border border-dashed border-line px-6 py-16 text-center">
-          <p className="text-[15px] text-gray-500">
+        <div role="status" className={emptyStateClass}>
+          <p>
             {page > 0
               ? "이 페이지에 의뢰·예약이 없습니다."
               : filtered
@@ -108,10 +109,10 @@ export default function ReferralApiTable({ rows, page, totalPages, totalElements
           )}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className={tableWrapClass}>
           {/* Mock 6개 열(min-w 820px)에 환자명 열만큼 최소 너비를 늘린다. 좁은 화면은 Mock처럼 가로 스크롤 */}
-          <table className="w-full min-w-[940px] border-collapse">
-            <thead className="bg-gray-100/80">
+          <table className={`${tableClass} min-w-[940px]`}>
+            <thead className={theadClass}>
               <tr>
                 <th scope="col" className={thClass}>
                   의뢰 번호
@@ -128,21 +129,21 @@ export default function ReferralApiTable({ rows, page, totalPages, totalElements
                 <th scope="col" className={thClass}>
                   검사 일시
                 </th>
-                <th scope="col" className={`${thClass} text-center`}>
+                <th scope="col" className={`${thClass} text-center!`}>
                   예약 상태
                 </th>
-                <th scope="col" className={`${thClass} text-center`}>
+                <th scope="col" className={`${thClass} text-center!`}>
                   관리
                 </th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.referralId} className="border-t border-line transition-colors hover:bg-gray-50/60">
+                <tr key={row.referralId} className={rowClass}>
                   <td className={`${tdClass} whitespace-nowrap`}>
                     <ReferralIdCopyButton referralId={row.referralId} />
                   </td>
-                  <td className={`${tdClass} whitespace-nowrap`}>{row.patientName}</td>
+                  <td className={`${tdClass} whitespace-nowrap font-semibold text-gray-900`}>{row.patientName}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>
                     <DetailValue cell={row.examInstitution} />
                   </td>

@@ -41,7 +41,7 @@ export default function EquipmentScheduleDetail({
         )}
       </p>
       <table className="w-full border-collapse overflow-hidden rounded-lg border border-line text-[15px]">
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className="px-4 py-2.5 text-left font-semibold text-gray-700">요일</th>
             <th scope="col" className="px-4 py-2.5 text-left font-semibold text-gray-700">운영 시간</th>

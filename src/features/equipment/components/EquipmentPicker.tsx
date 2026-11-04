@@ -45,8 +45,8 @@ const TYPE_FILTERS: { value: ExamTypeFilter; label: string }[] = [
  */
 const COLLAPSED_ROW_LIMIT = 5;
 
-const thClass = "whitespace-nowrap px-3 py-2.5 text-left text-sm font-semibold text-gray-700";
-const tdClass = "px-3 py-2 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-3 py-2.5 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-3 py-2 text-sm text-gray-700";
 const actionClass =
   "inline-flex h-8 items-center gap-1 whitespace-nowrap rounded-md border px-2.5 text-xs font-semibold focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary";
 
@@ -181,7 +181,7 @@ export default function EquipmentPicker({
               관리 버튼이 가로 스크롤 없이 보이게 한다.
             */}
             <table className="w-full min-w-[400px] table-fixed border-collapse" aria-label="장비 목록">
-              <thead className="bg-gray-100/80">
+              <thead className="bg-gray-50">
                 <tr>
                   <th scope="col" className={`${thClass} @min-[960px]:w-[30%]`}>장비명</th>
                   <th scope="col" className={`${thClass} hidden w-[88px] @min-[600px]:table-cell`}>검사 유형</th>

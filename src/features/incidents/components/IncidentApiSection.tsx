@@ -167,7 +167,7 @@ function IncidentApiTable({
   equipmentHref: (equipmentId: string) => string;
 }) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
       <table className="w-full min-w-[1000px] table-fixed border-collapse">
         <colgroup>
           <col className="w-[160px]" />
@@ -177,14 +177,14 @@ function IncidentApiTable({
           <col className="w-[100px]" />
           <col className="w-[96px]" />
         </colgroup>
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className={thClass}>장애 발생일시</th>
             <th scope="col" className={thClass}>장비 ID</th>
             <th scope="col" className={thClass}>장애 사유</th>
             <th scope="col" className={thClass}>영향 구간</th>
-            <th scope="col" className={`${thClass} text-center`}>장애 상태</th>
-            <th scope="col" className={`${thClass} text-center`}>상세</th>
+            <th scope="col" className={`${thClass} text-center!`}>장애 상태</th>
+            <th scope="col" className={`${thClass} text-center!`}>상세</th>
           </tr>
         </thead>
         <tbody>
@@ -307,15 +307,15 @@ function IncidentApiDetail({
           </p>
         ) : (
           <>
-            <div className="overflow-x-auto rounded-lg border border-line">
+            <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
               <table className="w-full min-w-[1000px] border-collapse">
-                <thead className="bg-gray-100/80">
+                <thead className="bg-gray-50">
                   <tr>
                     <th scope="col" className={thClass}>의뢰 ID</th>
                     <th scope="col" className={thClass}>예약 ID</th>
                     <th scope="col" className={thClass}>처리 상태</th>
                     <th scope="col" className={thClass}>결과 코드</th>
-                    <th scope="col" className={`${thClass} text-center`}>재시도</th>
+                    <th scope="col" className={`${thClass} text-center!`}>재시도</th>
                     <th scope="col" className={thClass}>다음 재시도</th>
                     <th scope="col" className={thClass}>처리 완료</th>
                   </tr>
@@ -364,7 +364,7 @@ function IncidentApiStatusBadge({ status }: { status: string }) {
   const isOccurred = status === "OCCURRED";
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ${
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5 ${
         isOccurred ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-700"
       }`}
     >
@@ -463,8 +463,8 @@ function toHref(query: Record<string, string>): string {
   return search ? `${ROUTES.examining.incidents}?${search}` : ROUTES.examining.incidents;
 }
 
-const thClass = "whitespace-nowrap px-4 py-3.5 text-left text-sm font-semibold text-gray-700";
-const tdClass = "px-4 py-3.5 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 const smallLinkClass =
   "inline-flex h-8 items-center rounded-md border border-line bg-white px-3 text-sm font-semibold text-gray-700 hover:bg-gray-50";
 const actionClass =

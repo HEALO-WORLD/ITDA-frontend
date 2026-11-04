@@ -18,9 +18,11 @@ export default function AdminShell({ organizationName, roleLabel, showLogout = f
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader subtitle={organizationName} user={{ roleLabel, hasUnreadNotifications: false }} showLogout={showLogout} />
-      <div className="flex flex-1">
+      <div className="flex flex-1 flex-col md:flex-row">
         <RoleSidebar role="ADMIN" />
-        <main className="min-w-0 flex-1 px-10 py-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+          <div className="mx-auto w-full max-w-[1320px]">{children}</div>
+        </main>
       </div>
     </div>
   );
