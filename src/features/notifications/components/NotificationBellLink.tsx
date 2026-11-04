@@ -17,7 +17,7 @@ interface NotificationBellLinkProps {
   fallbackHasUnread: boolean;
 }
 
-const linkClass = "relative rounded-md p-1 text-gray-700 hover:bg-gray-100";
+const linkClass = "relative inline-flex size-10 items-center justify-center rounded-lg text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900";
 
 /** 헤더 알림 아이콘. 읽지 않은 알림이 있으면 점을 표시한다 */
 export default function NotificationBellLink({ href, fallbackHasUnread }: NotificationBellLinkProps) {
@@ -30,7 +30,7 @@ export default function NotificationBellLink({ href, fallbackHasUnread }: Notifi
   if (apiUnreadCount) {
     return (
       <Link href={href} className={linkClass}>
-        <Bell className="size-6" strokeWidth={1.8} aria-hidden="true" />
+        <Bell className="size-5" strokeWidth={1.8} aria-hidden="true" />
         <Suspense fallback={<span className="sr-only">알림</span>}>
           <ApiUnreadIndicator unreadCount={apiUnreadCount} />
         </Suspense>
@@ -47,7 +47,7 @@ export default function NotificationBellLink({ href, fallbackHasUnread }: Notifi
       className={linkClass}
       aria-label={hasUnread ? "알림 (읽지 않은 알림 있음)" : "알림"}
     >
-      <Bell className="size-6" strokeWidth={1.8} aria-hidden="true" />
+      <Bell className="size-5" strokeWidth={1.8} aria-hidden="true" />
       {hasUnread && <UnreadDot />}
     </Link>
   );
@@ -65,5 +65,5 @@ function ApiUnreadIndicator({ unreadCount }: { unreadCount: Promise<UnreadNotifi
 }
 
 function UnreadDot() {
-  return <span className="absolute right-1 top-0.5 size-2 rounded-full bg-primary ring-2 ring-white" />;
+  return <span className="absolute right-2 top-2 size-2 rounded-full bg-primary ring-2 ring-white" />;
 }

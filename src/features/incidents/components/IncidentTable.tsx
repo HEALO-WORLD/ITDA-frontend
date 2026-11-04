@@ -15,8 +15,8 @@ interface IncidentTableProps {
   onResetFilters?: () => void;
 }
 
-const thClass = "whitespace-nowrap px-4 py-3.5 text-left text-sm font-semibold text-gray-700";
-const tdClass = "px-4 py-3.5 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 
 /** 장비 장애 목록 (상세 버튼으로 상세 모달 열기). 좁은 화면에서는 표 안에서 가로 스크롤 */
 export default function IncidentTable({ rows, selectedId, onSelect, emptyMessage, onResetFilters }: IncidentTableProps) {
@@ -41,7 +41,7 @@ export default function IncidentTable({ rows, selectedId, onSelect, emptyMessage
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
       {/* 고정 열 너비: 일시·상태·버튼은 잘리지 않게, 장비명은 남는 폭에서 말줄임 */}
       <table className="w-full min-w-[1000px] table-fixed border-collapse">
         <colgroup>
@@ -54,16 +54,16 @@ export default function IncidentTable({ rows, selectedId, onSelect, emptyMessage
           <col className="w-[100px]" />
           <col className="w-[104px]" />
         </colgroup>
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className={thClass}>장애번호</th>
             <th scope="col" className={thClass}>장비명</th>
             <th scope="col" className={thClass}>검사 유형</th>
             <th scope="col" className={thClass}>장애 발생일시</th>
             <th scope="col" className={thClass}>복구일시</th>
-            <th scope="col" className={`${thClass} text-center`}>장애 상태</th>
-            <th scope="col" className={`${thClass} text-center`}>영향 예약</th>
-            <th scope="col" className={`${thClass} text-center`}>상세</th>
+            <th scope="col" className={`${thClass} text-center!`}>장애 상태</th>
+            <th scope="col" className={`${thClass} text-center!`}>영향 예약</th>
+            <th scope="col" className={`${thClass} text-center!`}>상세</th>
           </tr>
         </thead>
         <tbody>

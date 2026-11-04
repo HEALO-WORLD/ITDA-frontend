@@ -35,12 +35,12 @@ export default function NotificationPagination({
   const start = Math.max(0, Math.min(page - Math.floor(PAGE_WINDOW / 2), lastPage - PAGE_WINDOW + 1));
   const pages = Array.from({ length: Math.min(PAGE_WINDOW, totalPages) }, (_, index) => start + index);
   const linkClass =
-    "inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-line px-2 text-sm hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-primary";
+    "inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-line bg-white px-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus-visible:outline-2 focus-visible:outline-primary";
   const disabledClass =
-    "inline-flex h-9 min-w-9 items-center justify-center rounded-md border border-line px-2 text-sm text-gray-300";
+    "inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-line bg-gray-50 px-2 text-sm text-gray-300";
 
   return (
-    <nav aria-label={label} className="mt-4 flex items-center justify-center gap-1">
+    <nav aria-label={label} className="mt-5 flex items-center justify-center gap-1.5">
       {page > 0 ? (
         <Link href={pageHref(Math.min(page - 1, lastPage))} className={linkClass} aria-label="이전 페이지">
           <ChevronLeft className="size-4" aria-hidden="true" />
@@ -53,7 +53,7 @@ export default function NotificationPagination({
 
       {pages.map((item) =>
         item === page ? (
-          <span key={item} aria-current="page" className={`${linkClass} border-primary bg-primary font-semibold text-white hover:bg-primary`}>
+          <span key={item} aria-current="page" className="inline-flex h-9 min-w-9 items-center justify-center rounded-lg border border-primary bg-primary px-2 text-sm font-semibold text-white shadow-sm">
             {item + 1}
           </span>
         ) : (

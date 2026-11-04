@@ -17,7 +17,7 @@ export default function IncidentStatusBadge({ status }: { status: IncidentStatus
 
   return (
     <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-sm font-medium ${className}`}
+      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5 ${className}`}
     >
       <span className={`size-1.5 rounded-full ${dotClass}`} aria-hidden="true" />
       {label}

@@ -216,11 +216,11 @@ export default function SlotSearch({
 
       <section
         aria-labelledby="slot-result-title"
-        className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-8"
+        className="rounded-xl border border-line bg-white px-4 pb-5 pt-5 shadow-card sm:px-7 sm:pb-6 sm:pt-6"
       >
         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
           <div className="flex items-center gap-3">
-            <h2 id="slot-result-title" className="text-2xl font-bold text-gray-900">
+            <h2 id="slot-result-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
               검색 결과
             </h2>
             {IS_MOCK_DATA && (
@@ -380,7 +380,7 @@ function ResultMessage({
   return (
     <p
       role={tone === "error" ? "alert" : "status"}
-      className={`rounded-lg border border-dashed border-line px-6 py-16 text-center text-[15px] ${
+      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${
         tone === "error" ? "text-red-600" : "text-gray-500"
       }`}
     >

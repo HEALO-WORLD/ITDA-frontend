@@ -44,7 +44,7 @@ export default function NotificationList() {
       className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-6"
     >
       <div className="mb-1 flex items-center justify-between gap-3">
-        <h2 id="notification-list-title" className="text-2xl font-bold text-gray-900">
+        <h2 id="notification-list-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
           알림 내역
         </h2>
         <button

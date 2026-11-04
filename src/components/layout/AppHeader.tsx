@@ -45,8 +45,8 @@ export default function AppHeader({ subtitle, user, notificationHref = null, sho
                 className="inline-flex h-10 items-center gap-1.5 rounded-lg px-3 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900"
               >
                 <LogOut className="size-4" strokeWidth={1.8} aria-hidden="true" />
-                <span className="hidden sm:inline">로그아웃</span>
-                <span className="sr-only sm:hidden">로그아웃</span>
+                {/* 좁은 화면에서는 아이콘만 보이고 글자는 스크린리더에만 읽힌다 */}
+                <span className="sr-only sm:not-sr-only">로그아웃</span>
               </button>
             </form>
           )}

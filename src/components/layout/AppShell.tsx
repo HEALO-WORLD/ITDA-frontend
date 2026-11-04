@@ -23,9 +23,11 @@ export default function AppShell({ user, showLogout = false, children }: AppShel
         notificationHref={NOTIFICATION_ROUTE_BY_ROLE[user.role]}
         showLogout={showLogout}
       />
-      <div className="flex flex-1">
+      <div className="flex flex-1 flex-col md:flex-row">
         <RoleSidebar role={user.role} />
-        <main className="min-w-0 flex-1 px-10 py-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+          <div className="mx-auto w-full max-w-[1320px]">{children}</div>
+        </main>
       </div>
     </div>
   );

@@ -11,8 +11,8 @@ interface RescheduleTableProps {
   isEquipmentFailure: boolean;
 }
 
-const thClass = "whitespace-nowrap px-3 py-4 text-left text-sm font-semibold text-gray-600";
-const tdClass = "px-3 py-4 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-3 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-3 py-3.5 text-sm text-gray-700";
 
 /** 예약 재조정 필요 목록 */
 export default function RescheduleTable({ referrals, isEquipmentFailure }: RescheduleTableProps) {
@@ -21,7 +21,7 @@ export default function RescheduleTable({ referrals, isEquipmentFailure }: Resch
       aria-labelledby="reschedule-title"
       className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-6"
     >
-      <h2 id="reschedule-title" className="text-2xl font-bold text-gray-900">
+      <h2 id="reschedule-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
         예약 재조정 필요
       </h2>
       <p className="mb-5 mt-2 text-[15px] text-gray-600">
@@ -36,16 +36,16 @@ export default function RescheduleTable({ referrals, isEquipmentFailure }: Resch
           재조정이 필요한 예약이 없습니다.
         </p>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
           <table className="w-full min-w-[680px] border-collapse">
-            <thead className="bg-gray-100/80">
+            <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className={thClass}>예약번호</th>
                 <th scope="col" className={thClass}>검사기관</th>
                 <th scope="col" className={thClass}>검사유형</th>
                 <th scope="col" className={thClass}>기존 예약일시</th>
-                <th scope="col" className={`${thClass} text-center`}>상태</th>
-                <th scope="col" className={`${thClass} text-center`}>작업</th>
+                <th scope="col" className={`${thClass} text-center!`}>상태</th>
+                <th scope="col" className={`${thClass} text-center!`}>작업</th>
               </tr>
             </thead>
             <tbody>

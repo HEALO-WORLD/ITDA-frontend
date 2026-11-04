@@ -24,9 +24,9 @@ export default async function ReferralsPage({ searchParams }: PageProps<"/referr
         <PageHeader title="의뢰·예약 관리" />
         <section
           aria-labelledby="referral-list-title"
-          className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-8"
+          className="rounded-xl border border-line bg-white px-4 pb-5 pt-5 shadow-card sm:px-7 sm:pb-6 sm:pt-6"
         >
-          <h2 id="referral-list-title" className="mb-6 text-2xl font-bold text-gray-900">
+          <h2 id="referral-list-title" className="mb-5 text-lg font-semibold text-gray-900 sm:text-xl">
             최근 의뢰·예약 내역
           </h2>
           <Suspense
@@ -59,7 +59,7 @@ export default async function ReferralsPage({ searchParams }: PageProps<"/referr
         actions={
           <Link
             href={ROUTES.referring.slots}
-            className="inline-flex h-12 items-center gap-2 rounded-lg bg-primary px-5 text-base font-bold text-white transition-colors hover:bg-primary-hover"
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-primary px-5 text-[15px] font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover"
           >
             <Plus className="size-5" aria-hidden="true" />
             새 검사 의뢰
@@ -69,10 +69,10 @@ export default async function ReferralsPage({ searchParams }: PageProps<"/referr
 
       <section
         aria-labelledby="referral-history-title"
-        className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-8"
+        className="rounded-xl border border-line bg-white px-4 pb-5 pt-5 shadow-card sm:px-7 sm:pb-6 sm:pt-6"
       >
-        <div className="mb-6 flex flex-wrap items-center gap-3">
-          <h2 id="referral-history-title" className="text-2xl font-bold text-gray-900">
+        <div className="mb-5 flex flex-wrap items-center gap-3">
+          <h2 id="referral-history-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
             최근 의뢰·예약 내역
           </h2>
           {IS_MOCK_DATA && (

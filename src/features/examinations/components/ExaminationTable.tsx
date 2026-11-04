@@ -17,8 +17,8 @@ interface ExaminationTableProps {
   onResetFilters?: () => void;
 }
 
-const thClass = "whitespace-nowrap px-4 py-3.5 text-left text-sm font-semibold text-gray-700";
-const tdClass = "px-4 py-3.5 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 const actionClass =
   "h-9 whitespace-nowrap rounded-md px-3 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary";
 
@@ -55,7 +55,7 @@ export default function ExaminationTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
       {/* 고정 열 너비: 번호·일시·상태·버튼은 잘리지 않게, 장비명은 남는 폭에서 말줄임 */}
       <table className="w-full min-w-[1000px] table-fixed border-collapse">
         <colgroup>
@@ -68,15 +68,15 @@ export default function ExaminationTable({
           <col className="w-[136px]" />
           <col className="w-[184px]" />
         </colgroup>
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className={thClass}>의뢰번호</th>
             <th scope="col" className={thClass}>가상 환자 ID</th>
             <th scope="col" className={thClass}>검사 유형</th>
             <th scope="col" className={thClass}>검사 장비</th>
             <th scope="col" className={thClass}>검사 예정 일시</th>
-            <th scope="col" className={`${thClass} text-center`}>진행 상태</th>
-            <th scope="col" className={`${thClass} text-center`}>결과 상태</th>
+            <th scope="col" className={`${thClass} text-center!`}>진행 상태</th>
+            <th scope="col" className={`${thClass} text-center!`}>결과 상태</th>
             <th scope="col" className={thClass}>작업</th>
           </tr>
         </thead>
