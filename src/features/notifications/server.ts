@@ -3,7 +3,7 @@ import "server-only";
 import { unstable_rethrow } from "next/navigation";
 
 import { isApiError } from "@/lib/api/errors";
-import { getOwnerScopedAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess, toRoleAccessFailure, type RoleAccess } from "@/lib/auth/session";
 
 import {
   fetchNotificationPage,
@@ -13,12 +13,13 @@ import {
   type NotificationDto,
 } from "./remote";
 import type { ApiNotificationItem, NotificationFailure, UnreadNotificationCountResult } from "./types";
+import type { OrganizationRole } from "@/types/auth";
 
 /**
  * 알림 API 화면용 데이터 (서버 전용, 의뢰기관·검사기관 공통).
  *
- * 인증: 로그인 쿠키의 토큰을 Gateway로 넘기고(getOwnerScopedAuthorizationHeaders), 토큰·역할·본인 여부 검증은 Gateway와 백엔드에 맡긴다.
- * 쿠키가 없으면 요청하지 않는다. 토큰은 결과에 담지 않는다 (Client Component로 넘어가지 않게).
+ * 인증: users/me로 확인한 역할이 알림 기능의 화면 역할과 같을 때만 토큰을 Gateway로 넘긴다(requireRoleAccess).
+ * 본인 여부·API 권한은 Gateway와 백엔드가 다시 확인한다. 확인에 실패하면(로그인 안 함·다른 역할·users/me 실패) 요청하지 않는다. 토큰은 결과에 담지 않는다 (Client Component로 넘어가지 않게).
  * 실패해도 Mock으로 대체하지 않고 실패 결과를 돌려준다. JSX는 만들지 않는다.
  */
 
@@ -30,6 +31,21 @@ export const SIGNED_OUT_FAILURE: NotificationFailure = {
   reason: "SIGNED_OUT",
   message: "로그인이 필요합니다.",
 };
+
+/**
+ * 알림 기능별 화면 역할. users/me로 확인한 역할과 같을 때만 조회한다 (requireRoleAccess).
+ * 브라우저가 기능 이름을 보내도 확인된 역할과 다르면 요청하지 않는다.
+ */
+export const NOTIFICATION_ROLE_BY_FEATURE: Record<NotificationApiFeature, OrganizationRole> = {
+  notifications: "REFERRING",
+  "examining-notifications": "EXAMINING",
+};
+
+/** 역할 확인 실패 → 알림 실패 결과 (요청을 보내지 않음) */
+export function toNotificationAccessFailure(access: Extract<RoleAccess, { ok: false }>): NotificationFailure {
+  const { reason, message } = toRoleAccessFailure(access);
+  return { ok: false, reason, message };
+}
 
 export type NotificationPageLoadResult =
   | {
@@ -60,8 +76,9 @@ export async function loadNotificationPage(
   feature: NotificationApiFeature,
   { page, unreadOnly = false }: { page: number; unreadOnly?: boolean },
 ): Promise<NotificationPageLoadResult> {
-  const headers = await getOwnerScopedAuthorizationHeaders();
-  if (!headers) return SIGNED_OUT_FAILURE;
+  const access = await requireRoleAccess(NOTIFICATION_ROLE_BY_FEATURE[feature]);
+  if (!access.ok) return toNotificationAccessFailure(access);
+  const headers = access.headers;
   try {
     const data = await fetchNotificationPage(
       feature,
@@ -86,8 +103,9 @@ export async function loadNotificationPage(
 export async function loadUnreadNotificationCount(
   feature: NotificationApiFeature,
 ): Promise<UnreadNotificationCountResult> {
-  const headers = await getOwnerScopedAuthorizationHeaders();
-  if (!headers) return SIGNED_OUT_FAILURE;
+  const access = await requireRoleAccess(NOTIFICATION_ROLE_BY_FEATURE[feature]);
+  if (!access.ok) return toNotificationAccessFailure(access);
+  const headers = access.headers;
   try {
     return { ok: true, unreadCount: await fetchUnreadNotificationCount(feature, { headers }) };
   } catch (error) {

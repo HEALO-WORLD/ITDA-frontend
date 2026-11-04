@@ -9,7 +9,7 @@ import { fetchSlotDetail, getSlotDetailErrorMessage, isSlotApiId, type SlotDetai
 import { isApiFeature } from "@/lib/api/config";
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { getRescheduleAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess } from "@/lib/auth/session";
 
 import {
   fetchReferral,
@@ -34,8 +34,8 @@ import { toRescheduleLocalTimes, type RescheduleTimeConversionResult } from "./r
  * 1. 같은 출처 확인 (Next의 Server Function Origin 검사에 더해 한 번 더)
  * 2. referrals·slots·equipment 기능이 모두 API 대상이어야 한다 (Mock으로 대체하지 않는다)
  * 3. 인증: 로그인 쿠키의 토큰을 Authorization: Bearer로만 넘긴다 (X- 헤더는 Gateway가 만든다). 쿠키가 없으면 요청하지 않는다
- * 4. 역할·접근 권한: 이 Action은 users/me(getAuthState)로 역할을 다시 판단하지 않는다. Gateway·백엔드 응답으로 구분한다
- *    (화면 진입은 의뢰기관 레이아웃의 ApiRoleGate가 users/me로 확인한다)
+ * 4. 역할: users/me로 의뢰기관(REQUESTER) 역할을 확인한다 (requireRoleAccess). ADMIN·EXAMINER·확인 실패는 요청 전 차단(FORBIDDEN_ROLE).
+ *    그 뒤의 데이터 범위·작성자 권한은 Gateway·백엔드 응답으로 구분한다
  *    - 의뢰 조회: 의뢰기관 소속이거나 관리자가 아니면 404 · 장비 조회: REQUESTER는 ACTIVE 협약 검사기관만, ADMIN은 Gateway 403
  *    - 의뢰 작성자 본인 여부는 확인하지 않는다 (재예약 POST에서 백엔드가 404로 거부한다)
  * 5. 의뢰·슬롯 ID 형식 확인 → 의뢰 → 슬롯 → 슬롯의 equipmentId로 장비 조회 → checkRescheduleCandidate → toRescheduleLocalTimes
@@ -77,6 +77,8 @@ type RescheduleCandidateActionResult =
         | "SIGNED_OUT"
         /** Gateway 401 (만료·위조 토큰) */
         | "UNAUTHORIZED"
+        /** users/me로 확인한 역할이 의뢰기관이 아니거나(ADMIN·EXAMINER) 사용자 확인 실패 (요청하지 않음) */
+        | "FORBIDDEN_ROLE"
         /** 의뢰·슬롯·장비 조회 실패 (lookup에 대상과 원인) */
         | "LOOKUP_FAILED"
         /** 사전 확인 조건 실패 (failures에 실패 조건) */
@@ -199,10 +201,16 @@ async function prepareReschedule(
   if (!REQUIRED_FEATURES.every((feature) => isApiFeature(feature))) {
     return { ok: false, reason: "NOT_AVAILABLE", message: "재예약 기능은 준비 중입니다." };
   }
-  const authorization = await getRescheduleAuthorizationHeaders();
-  if (!authorization) {
-    return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다. 다시 로그인해 주세요." };
+  // 의뢰기관(REQUESTER) 역할을 users/me로 확인한 뒤에만 조회·재예약 요청을 보낸다 (ADMIN·EXAMINER는 요청 전 차단)
+  const access = await requireRoleAccess("REFERRING");
+  if (!access.ok) {
+    if (access.reason === "SIGNED_OUT") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다. 다시 로그인해 주세요." };
+    if (access.reason === "UNAUTHORIZED") {
+      return { ok: false, reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요." };
+    }
+    return { ok: false, reason: "FORBIDDEN_ROLE", message: access.message };
   }
+  const authorization = access.headers;
   if (!isReferralApiId(referralId) || !isSlotApiId(slotId)) {
     return { ok: false, reason: "INVALID_INPUT", message: "재예약 대상 정보가 올바르지 않습니다. 화면을 새로고침해 주세요." };
   }

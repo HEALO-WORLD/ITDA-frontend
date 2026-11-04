@@ -3,7 +3,7 @@ import "server-only";
 import { unstable_rethrow } from "next/navigation";
 
 import { isApiError } from "@/lib/api/errors";
-import { getInstitutionScopedAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import {
   fetchExamTypePage,
@@ -61,10 +61,9 @@ export type RescheduleReferralLoadResult =
     };
 
 export async function loadRescheduleReferralPage(page: number): Promise<RescheduleReferralLoadResult> {
-  const headers = await getInstitutionScopedAuthorizationHeaders();
-  if (!headers) {
-    return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다.", code: null };
-  }
+  const access = await requireRoleAccess("REFERRING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
 
   let data: Awaited<ReturnType<typeof fetchRescheduleReferralPage>>;
   try {
@@ -129,10 +128,9 @@ export async function loadRescheduleReservation(item: RescheduleReferralItem): P
   if (item.currentReservationId === null) {
     return { ok: false, reason: "NO_RESERVATION", message: "이 의뢰에 연결된 예약 정보가 없습니다.", code: null };
   }
-  const headers = await getInstitutionScopedAuthorizationHeaders();
-  if (!headers) {
-    return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다.", code: null };
-  }
+  const access = await requireRoleAccess("REFERRING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
 
   let data: ReservationResponseDto;
   try {

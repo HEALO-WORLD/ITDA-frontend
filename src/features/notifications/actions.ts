@@ -4,10 +4,10 @@ import { refresh } from "next/cache";
 import { headers } from "next/headers";
 
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { getOwnerScopedAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess } from "@/lib/auth/session";
 
 import { isNotificationId, markNotificationAsRead, NOTIFICATION_API_FEATURES, type NotificationApiFeature } from "./remote";
-import { SIGNED_OUT_FAILURE, toNotificationFailure } from "./server";
+import { NOTIFICATION_ROLE_BY_FEATURE, SIGNED_OUT_FAILURE, toNotificationFailure } from "./server";
 import type { NotificationReadActionResult } from "./types";
 
 /**
@@ -32,8 +32,14 @@ export async function markNotificationAsReadAction(
     return { ok: false, reason: "ERROR", message: "알림 정보가 올바르지 않습니다. 화면을 새로고침해 주세요." };
   }
 
-  const authorization = await getOwnerScopedAuthorizationHeaders();
-  if (!authorization) return SIGNED_OUT_FAILURE;
+  // 알림 기능의 화면 역할이 users/me로 확인한 역할과 같아야 한다 (브라우저가 보낸 기능 이름만으로 허용하지 않는다)
+  const access = await requireRoleAccess(NOTIFICATION_ROLE_BY_FEATURE[feature as NotificationApiFeature]);
+  if (!access.ok) {
+    if (access.reason === "SIGNED_OUT") return SIGNED_OUT_FAILURE;
+    if (access.reason === "UNAUTHORIZED") return { ok: false, reason: "UNAUTHORIZED", message: access.message };
+    return { ok: false, reason: "FORBIDDEN", message: access.message };
+  }
+  const authorization = access.headers;
 
   let result: NotificationReadActionResult;
   try {
