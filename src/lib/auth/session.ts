@@ -4,8 +4,10 @@ import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { cache } from "react";
 
+import { ORGANIZATION_ROLE_BY_USER_ROLE } from "@/constants/navigation";
 import { fetchMyInfo, type MyInfoDto, type UserRoleDto } from "@/features/auth/remote";
 import { isApiError } from "@/lib/api/errors";
+import type { OrganizationRole } from "@/types/auth";
 
 /**
  * 로그인 세션 (서버 전용).
@@ -139,55 +141,109 @@ export function toAuthorizationHeaders(state: Extract<AuthState, { status: "veri
   return { Authorization: state.authorization };
 }
 
+/** 역할 화면 데이터 접근 실패 구분 */
+export type RoleAccessFailureReason =
+  /** 토큰 쿠키 없음 */
+  | "SIGNED_OUT"
+  /** users/me 401 (만료·위조 토큰) */
+  | "UNAUTHORIZED"
+  /** users/me 403·404·5xx·네트워크 등으로 사용자를 확인하지 못함 */
+  | "UNVERIFIED"
+  /** 확인된 역할이 이 화면 역할과 다름 (ADMIN 포함) */
+  | "FORBIDDEN_ROLE";
+
+export type RoleAccess =
+  | { ok: true; headers: HeadersInit; user: VerifiedUser }
+  | { ok: false; reason: RoleAccessFailureReason; message: string };
+
 /**
- * 본인 데이터로 제한된 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`). 토큰 쿠키가 없으면 null.
+ * 역할 화면 데이터 접근 확인 (중앙 권한 검증). 실제 API 요청 전에 부른다.
  *
- * 사용자 확인(getAuthState의 verified) 없이 토큰을 Gateway로 넘긴다. 아래 조건을 모두 만족하는 API에만 쓴다.
- * - Gateway가 JWT 서명·만료와 역할을 검증한다 (Gateway 정책에 경로 규칙이 있다)
- * - 백엔드가 Gateway의 X-User-Id로 요청자 본인의 데이터만 조회·변경한다 (다른 사용자·기관의 데이터를 돌려주지 않는다)
- * 현재 대상: 알림 API (`/api/v1/notifications/**`, features/notifications/server.ts·actions.ts에서만 호출).
- *
- * 제약
- * - 반환값이 있다고 로그인·권한이 확인된 것이 아니다. 화면 접근 허용·역할 판단에 쓰지 않는다 (그것은 getAuthState)
- * - 기관 단위 데이터·역할별 화면 데이터에는 쓰지 않는다: 그런 API는 verified 상태의 toAuthorizationHeaders나 해당 API 전용 함수를 쓴다
- * - 서버에서 Gateway 요청에만 붙인다. Client Component props·응답 JSON·로그로 내보내지 않는다
+ * 레이아웃의 ApiRoleGate만으로는 부족하다: Next는 레이아웃과 페이지를 함께 렌더링하므로 게이트가 막아도 페이지의
+ * 데이터 조회는 실행된다. 그래서 데이터를 조회하는 서버 함수·Server Function이 각자 이 확인을 거친다.
+ * - users/me로 확인한 역할만 쓴다 (getAuthState, 한 요청 안에서는 한 번만 조회). 클라이언트가 보낸 역할은 받지 않는다
+ * - REQUESTER → 의뢰기관(REFERRING) 데이터만, EXAMINER → 검사기관(EXAMINING) 데이터만, ADMIN → 둘 다 불가
+ *   (백엔드가 ADMIN에게 허용하는 API라도 프론트 역할 화면에서는 허용하지 않는다)
+ * - 확인에 실패하면 헤더를 주지 않는다 → 호출한 쪽은 요청을 보내지 않는다
  */
-export async function getOwnerScopedAuthorizationHeaders(): Promise<HeadersInit | null> {
-  const token = await readAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : null;
+export async function requireRoleAccess(role: OrganizationRole): Promise<RoleAccess> {
+  const state = await getAuthState();
+  if (state.status === "signed-out") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." };
+  if (state.status === "unverified") {
+    return { ok: false, reason: state.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "UNVERIFIED", message: state.message };
+  }
+  if (ORGANIZATION_ROLE_BY_USER_ROLE[state.role] !== role) {
+    return { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." };
+  }
+  return { ok: true, headers: toAuthorizationHeaders(state), user: state.user };
 }
 
 /**
- * 토큰의 기관으로 범위가 정해지는 조회 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`). 토큰 쿠키가 없으면 null.
+ * 접근 실패 → 데이터 함수의 공통 실패 구분 (각 기능의 실패 결과에 그대로 쓴다).
+ * 만료(401)는 UNAUTHORIZED, 다른 역할·사용자 확인 실패는 FORBIDDEN (요청을 보내지 않았으므로 code는 없다).
+ */
+export function toRoleAccessFailure(access: Extract<RoleAccess, { ok: false }>): {
+  reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN";
+  message: string;
+  code: null;
+} {
+  const reason = access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : access.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN";
+  return { reason, message: access.message, code: null };
+}
+
+/** requireRoleAccess를 통과했을 때만 인증 헤더 (아래 API별 헬퍼 공통). role은 서버 코드가 정한 업무 역할이다 */
+async function roleScopedHeaders(role: OrganizationRole): Promise<HeadersInit | null> {
+  const access = await requireRoleAccess(role);
+  return access.ok ? access.headers : null;
+}
+
+/**
+ * 본인 데이터로 제한된 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`).
+ * 업무 역할(role)이 users/me로 확인된 경우에만 돌려주고, 그 밖에는 null (requireRoleAccess). 쿠키만으로는 주지 않는다.
  *
- * 사용자 확인(getAuthState의 verified) 없이 토큰을 Gateway로 넘긴다. 아래 조건을 모두 만족하는 API에만 쓴다.
+ * 아래 조건을 모두 만족하는 API에만 쓴다.
+ * - Gateway가 JWT 서명·만료와 역할을 검증한다 (Gateway 정책에 경로 규칙이 있다)
+ * - 백엔드가 Gateway의 X-User-Id로 요청자 본인의 데이터만 조회·변경한다 (다른 사용자·기관의 데이터를 돌려주지 않는다)
+ * 현재 호출 위치: 없음 (알림 API는 features/notifications/server.ts·actions.ts에서 requireRoleAccess를 직접 쓴다).
+ *
+ * 제약
+ * - role은 서버 코드가 정한 값만 넘긴다 (브라우저 입력을 그대로 넘기지 않는다)
+ * - 화면 역할 확인만 한다. 데이터 범위(본인·기관)와 API별 권한은 Gateway·백엔드가 다시 확인한다
+ * - 서버에서 Gateway 요청에만 붙인다. Client Component props·응답 JSON·로그로 내보내지 않는다
+ */
+export async function getOwnerScopedAuthorizationHeaders(role: OrganizationRole): Promise<HeadersInit | null> {
+  return roleScopedHeaders(role);
+}
+
+/**
+ * 토큰의 기관으로 범위가 정해지는 조회 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`).
+ * 업무 역할(role)이 users/me로 확인된 경우에만 돌려주고, 그 밖에는 null (requireRoleAccess). 쿠키만으로는 주지 않는다.
+ *
+ * 아래 조건을 모두 만족하는 API에만 쓴다.
  * - 조회(GET)만 한다
  * - Gateway가 JWT 서명·만료와 역할을 검증한다 (Gateway 정책에 경로 규칙이 있다)
  * - 백엔드가 Gateway의 X-Institution-Id·X-Role로 범위를 정한다 (다른 기관 데이터는 403·404, 프론트는 기관 ID를 보내지 않는다)
- * 현재 대상: 장비 장애 조회 API (`GET /api/v1/equipment-incidents/**`, features/incidents/server.ts에서만 호출).
+ * 현재 호출 위치: 없음 (장비 장애 조회 API는 features/incidents/server.ts에서 requireRoleAccess를 직접 쓴다).
  * 검사 API는 대상이 아니다 (getExaminationAuthorizationHeaders를 쓴다).
  *
- * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
+ * 제약은 getOwnerScopedAuthorizationHeaders와 같다.
  */
-export async function getInstitutionScopedAuthorizationHeaders(): Promise<HeadersInit | null> {
-  const token = await readAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : null;
+export async function getInstitutionScopedAuthorizationHeaders(role: OrganizationRole): Promise<HeadersInit | null> {
+  return roleScopedHeaders(role);
 }
 
 /**
- * 검사 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`). 토큰 쿠키가 없으면 null.
- *
- * 사용자 확인(getAuthState의 verified) 없이 토큰을 Gateway로 넘긴다. getAuthState는 바꾸지 않는다.
+ * 검사 API 전용 인증 헤더 (`Authorization: Bearer <JWT>`).
+ * 검사기관(EXAMINING) 역할이 users/me로 확인된 경우에만 돌려주고, 그 밖에는 null (requireRoleAccess). 쿠키만으로는 주지 않는다.
  * 대상 API와 근거 (origin/dev 기준)
  * - `GET /api/v1/examinations`, `PATCH /api/v1/examinations/{id}/status`, `POST /api/v1/examinations/{id}/results`
  * - Gateway가 JWT 서명·만료를 검증하고 세 경로 모두 EXAMINER만 허용한다
  * - 백엔드가 Gateway의 X-Institution-Id로 범위를 정한다 (다른 기관의 검사는 403, 프론트는 기관 ID를 보내지 않는다)
- * 호출 위치: features/examinations의 ExaminationApiSection(목록)·actions.ts(상태 변경·결과 등록)에서만 쓴다.
- * 변경 요청(PATCH·POST)은 Server Function에서 같은 출처 확인을 거친 뒤에만 이 헤더를 붙인다.
+ * 호출 위치: features/examinations의 ExaminationApiSection(목록). 상태 변경·결과 등록(actions.ts)은 실패 원인을 안내하려고
+ * requireRoleAccess를 직접 쓴다.
  *
- * 제약은 getOwnerScopedAuthorizationHeaders와 같다: 화면 접근·역할 판단에 쓰지 않고, 브라우저로 내보내지 않는다.
+ * 제약은 getOwnerScopedAuthorizationHeaders와 같다.
  */
 export async function getExaminationAuthorizationHeaders(): Promise<HeadersInit | null> {
-  const token = await readAccessToken();
-  return token ? { Authorization: `Bearer ${token}` } : null;
+  return roleScopedHeaders("EXAMINING");
 }
