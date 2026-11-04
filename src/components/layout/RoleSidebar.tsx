@@ -3,11 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { NAV_ITEMS_BY_ROLE } from "@/constants/navigation";
-import type { OrganizationRole } from "@/types/auth";
+import { NAV_ITEMS_BY_ROLE, type NavRole } from "@/constants/navigation";
 
 interface RoleSidebarProps {
-  role: OrganizationRole;
+  role: NavRole;
 }
 
 const itemBase =

@@ -1,9 +1,12 @@
 import { redirect } from "next/navigation";
 import type { ReactNode } from "react";
 
+import Link from "next/link";
+
+import AdminShell from "@/components/layout/AdminShell";
 import AppHeader from "@/components/layout/AppHeader";
 import AppShell from "@/components/layout/AppShell";
-import { HOME_ROUTE_BY_ROLE, ORGANIZATION_ROLE_BY_USER_ROLE, ROUTES } from "@/constants/navigation";
+import { ADMIN_HOME_ROUTE, HOME_ROUTE_BY_ROLE, ORGANIZATION_ROLE_BY_USER_ROLE, ROUTES } from "@/constants/navigation";
 import { getApiMode } from "@/lib/api/config";
 import { getAuthState, type AuthFailureReason } from "@/lib/auth/session";
 import type { OrganizationRole, SessionUser } from "@/types/auth";
@@ -13,7 +16,8 @@ import type { OrganizationRole, SessionUser } from "@/types/auth";
  *
  * 사용자 정보 API(users/me)로 확인한 역할만 믿는다 (토큰을 해석하지 않고, 실패하면 Mock 사용자로 대체하지 않는다).
  * - 미로그인 → 로그인 화면 · 401(만료·위조) → 로그인 화면(만료 안내)
- * - 다른 역할의 화면 → 그 사용자의 첫 화면 · ADMIN → 관리자 화면 미구현 안내 (역할 화면을 열지 않는다)
+ * - 다른 역할의 화면 → 그 사용자의 첫 화면 · ADMIN이 업무 화면 → 안내 + 관리자 화면 링크 (역할 화면을 열지 않는다)
+ * - role="ADMIN"(관리자 화면): users/me 역할이 ADMIN일 때만 관리자 틀(AdminShell)로 연다. REQUESTER·EXAMINER는 자기 첫 화면으로
  * - 403·404·네트워크·그 밖의 실패 → 권한을 허용하지 않고 안내 (네트워크·오류는 다시 시도)
  * 화면 데이터 API의 권한은 이와 별개로 Gateway·백엔드와 각 Server Function이 다시 확인한다.
  */
@@ -32,7 +36,7 @@ const ROLE_LABELS: Record<OrganizationRole, string> = {
   EXAMINING: "검사기관 담당자",
 };
 
-export default async function ApiRoleGate({ role, children }: { role: OrganizationRole; children: ReactNode }) {
+export default async function ApiRoleGate({ role, children }: { role: OrganizationRole | "ADMIN"; children: ReactNode }) {
   const state = await getAuthState();
   if (state.status === "signed-out") redirect(ROUTES.login);
   if (state.status === "unverified") {
@@ -41,8 +45,17 @@ export default async function ApiRoleGate({ role, children }: { role: Organizati
   }
 
   const userRole = ORGANIZATION_ROLE_BY_USER_ROLE[state.role];
+  // 관리자 화면: users/me 역할이 ADMIN일 때만 연다. 다른 역할은 자기 첫 화면으로 보낸다
+  if (role === "ADMIN") {
+    if (state.role !== "ADMIN" || userRole !== null) redirect(userRole ? HOME_ROUTE_BY_ROLE[userRole] : ROUTES.login);
+    return (
+      <AdminShell organizationName={state.user.institutionName} roleLabel={`관리자 · ${state.user.loginId}`} showLogout>
+        {children}
+      </AdminShell>
+    );
+  }
   if (userRole === null) {
-    return <AuthProblem reason="ADMIN" message="관리자 계정입니다. 관리자 화면은 아직 준비되지 않아 의뢰기관·검사기관 화면을 열 수 없습니다." />;
+    return <AuthProblem reason="ADMIN" message="관리자 계정은 의뢰기관·검사기관 화면을 열 수 없습니다. 관리자 화면을 이용해 주세요." />;
   }
   if (userRole !== role) redirect(HOME_ROUTE_BY_ROLE[userRole]);
 
@@ -79,7 +92,7 @@ const PROBLEM_TITLES: Record<AuthFailureReason | "ADMIN", string> = {
   NOT_FOUND: "사용자 정보를 확인할 수 없습니다.",
   NETWORK: "사용자 정보를 확인하지 못했습니다.",
   ERROR: "사용자 정보를 확인하지 못했습니다.",
-  ADMIN: "관리자 화면은 준비 중입니다.",
+  ADMIN: "관리자 계정입니다.",
 };
 
 const actionClass =
@@ -98,6 +111,11 @@ function AuthProblem({ reason, message }: { reason: AuthFailureReason | "ADMIN";
           <h1 className="text-xl font-bold text-gray-900">{PROBLEM_TITLES[reason]}</h1>
           <p className="text-[15px] text-gray-600">{message}</p>
           <div className="mt-2 flex flex-wrap justify-center gap-2">
+            {reason === "ADMIN" && (
+              <Link href={ADMIN_HOME_ROUTE} className={actionClass}>
+                관리자 화면으로
+              </Link>
+            )}
             {canRetry && (
               // 같은 주소를 다시 요청해 사용자 확인을 다시 한다
               <form method="get">
