@@ -1,7 +1,8 @@
 import type { ReferralDisplayStatus } from "../types";
 
 interface ReferralStatusBadgeProps {
-  status: ReferralDisplayStatus;
+  /** FAILED: 백엔드 예약 실패 (API 화면 전용. 화면 표시 상태·필터 선택지에는 넣지 않는다) */
+  status: ReferralDisplayStatus | "FAILED";
 }
 
 /**
@@ -15,13 +16,16 @@ const STATUS_META: Record<ReferralDisplayStatus, { label: string; className: str
   CANCELLED: { label: "취소", className: "bg-gray-100 text-gray-500" },
 };
 
+/** 백엔드 FAILED(예약 실패). Mock 상태·필터 선택지(REFERRAL_STATUS_LABELS)를 바꾸지 않도록 따로 둔다 */
+const FAILED_META = { label: "예약 실패", className: "bg-orange-50 text-orange-700" };
+
 /** 상태 표시 문구 (필터 선택지 등에서 재사용) */
 export const REFERRAL_STATUS_LABELS = Object.fromEntries(
   Object.entries(STATUS_META).map(([status, { label }]) => [status, label]),
 ) as Record<ReferralDisplayStatus, string>;
 
 export default function ReferralStatusBadge({ status }: ReferralStatusBadgeProps) {
-  const { label, className } = STATUS_META[status];
+  const { label, className } = status === "FAILED" ? FAILED_META : STATUS_META[status];
 
   return (
     <span
