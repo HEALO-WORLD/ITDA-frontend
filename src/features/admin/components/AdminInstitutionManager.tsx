@@ -1,9 +1,11 @@
 "use client";
 
-import { Plus, Search } from "lucide-react";
+import { ChevronDown, Plus, Search } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 
+import { controlClass as fieldControlClass, iconClass } from "@/components/ui/FormControls";
 import Modal from "@/components/ui/Modal";
+import { searchButtonClass } from "@/components/ui/styles";
 import { formatDateTime } from "@/lib/format/date";
 
 import { createInstitutionAction, deleteInstitutionAction, updateInstitutionAction } from "../actions";
@@ -26,12 +28,12 @@ export const INSTITUTION_TYPE_LABELS: Record<InstitutionTypeDto, string> = { REQ
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
 
 // 의뢰·예약 목록(Mock 와이어프레임)과 같은 표·입력 모양
-const thClass = "whitespace-nowrap px-6 py-5 text-left text-[15px] font-semibold text-gray-700";
-const tdClass = "px-6 py-5 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 const controlClass =
-  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
-const secondaryButton = "h-10 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50";
-const primaryButton = "h-10 rounded-lg bg-primary px-5 text-sm font-bold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-300";
+  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
+const secondaryButton = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";
+const primaryButton = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
 
 type Dialog = { kind: "create" } | { kind: "edit"; institution: InstitutionDto } | { kind: "delete"; institution: InstitutionDto } | null;
 
@@ -57,33 +59,37 @@ export default function AdminInstitutionManager({ institutions }: AdminInstituti
   };
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="search" aria-label="기관 검색" className="flex flex-1 flex-wrap items-center gap-2">
-          <div className="relative min-w-[190px] max-w-md flex-[2_1_230px]">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
+    // 관리자 의뢰 관리(/admin/referrals)와 같은 흰 카드 하나에 검색·등록 버튼·건수·표를 담는다 (그림자 없음)
+    <div className="flex flex-col gap-4 rounded-xl border border-line bg-white px-5 py-5 sm:px-8 sm:py-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div role="search" aria-label="기관 검색" className="flex flex-col gap-2 sm:flex-row sm:items-center md:flex-1">
+          <div className="relative w-full sm:max-w-sm sm:flex-1">
+            <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-gray-400" aria-hidden="true" />
             <input
               type="search"
               value={keyword}
               onChange={(event) => setKeyword(event.target.value)}
               placeholder="기관명 검색"
               aria-label="기관명 검색 (받은 목록 안에서 찾습니다)"
-              className={`${controlClass} pl-9`}
+              className={`${fieldControlClass} pl-11 pr-4 placeholder:text-gray-400`}
             />
           </div>
-          <select
-            aria-label="기관 유형"
-            value={typeFilter}
-            onChange={(event) => setTypeFilter(event.target.value as InstitutionTypeDto | "")}
-            className={`${controlClass} max-w-[160px]`}
-          >
-            <option value="">전체 유형</option>
-            {(Object.keys(INSTITUTION_TYPE_LABELS) as InstitutionTypeDto[]).map((type) => (
-              <option key={type} value={type}>
-                {INSTITUTION_TYPE_LABELS[type]}
-              </option>
-            ))}
-          </select>
+          <div className="relative w-full sm:w-[180px]">
+            <select
+              aria-label="기관 유형"
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value as InstitutionTypeDto | "")}
+              className={fieldControlClass}
+            >
+              <option value="">전체 유형</option>
+              {(Object.keys(INSTITUTION_TYPE_LABELS) as InstitutionTypeDto[]).map((type) => (
+                <option key={type} value={type}>
+                  {INSTITUTION_TYPE_LABELS[type]}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className={iconClass} aria-hidden="true" />
+          </div>
         </div>
         <button
           type="button"
@@ -91,9 +97,9 @@ export default function AdminInstitutionManager({ institutions }: AdminInstituti
             setNotice(null);
             setDialog({ kind: "create" });
           }}
-          className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-bold text-white hover:bg-primary-hover"
+          className={`${searchButtonClass} w-full sm:w-auto`}
         >
-          <Plus className="size-4" aria-hidden="true" />
+          <Plus className="size-5" aria-hidden="true" />
           기관 등록
         </button>
       </div>
@@ -110,40 +116,41 @@ export default function AdminInstitutionManager({ institutions }: AdminInstituti
       )}
 
       {filtered.length === 0 ? (
-        <div role="status" className="rounded-lg border border-dashed border-line px-6 py-16 text-center text-[15px] text-gray-500">
+        <div role="status" className="rounded-lg border border-dashed border-line-strong px-6 py-14 text-center text-[15px] text-gray-500">
           {institutions.length === 0 ? "등록된 기관이 없습니다." : "검색 조건에 맞는 기관이 없습니다."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-line">
           <table className="w-full min-w-[960px] border-collapse">
-            <thead className="bg-gray-100/80">
+            <thead className="bg-gray-50">
               <tr>
-                <th scope="col" className={thClass}>요양기관기호</th>
                 <th scope="col" className={thClass}>기관명</th>
                 <th scope="col" className={thClass}>기관 유형</th>
+                <th scope="col" className={thClass}>요양기관기호</th>
                 <th scope="col" className={thClass}>주소</th>
-                <th scope="col" className={`${thClass} text-center`}>활성 상태</th>
-                <th scope="col" className={thClass}>등록일</th>
-                <th scope="col" className={`${thClass} text-center`}>관리</th>
+                <th scope="col" className={`${thClass} text-center!`}>활성 상태</th>
+                <th scope="col" className={`${thClass} text-center!`}>관리</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((item) => (
-                <tr key={item.id} className="border-t border-line transition-colors hover:bg-gray-50/60">
-                  <td className={`${tdClass} whitespace-nowrap font-mono`}>{item.careInstitutionCode ?? "—"}</td>
-                  <td className={`${tdClass} font-medium`}>{item.name}</td>
+                <tr key={item.id} className="border-t border-line transition-colors first:border-t-0 hover:bg-gray-50/70">
+                  <td className={tdClass}>
+                    <p className="font-semibold text-gray-900">{item.name}</p>
+                    <p className="mt-0.5 text-xs text-gray-400">등록 {item.createdAt ? formatDateTime(item.createdAt) : "—"}</p>
+                  </td>
                   <td className={`${tdClass} whitespace-nowrap`}>{INSTITUTION_TYPE_LABELS[item.type]}</td>
+                  <td className={`${tdClass} whitespace-nowrap font-mono text-[13px]`}>{item.careInstitutionCode ?? "—"}</td>
                   <td className={tdClass}>{item.address || "—"}</td>
                   <td className={`${tdClass} text-center`}>
                     <span
-                      className={`inline-flex whitespace-nowrap rounded-full px-4 py-1.5 text-[15px] font-medium ${
+                      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5 ${
                         item.active ? "bg-emerald-50 text-emerald-700" : "bg-gray-100 text-gray-500"
                       }`}
                     >
                       {item.active ? "활성" : "비활성"}
                     </span>
                   </td>
-                  <td className={`${tdClass} whitespace-nowrap`}>{item.createdAt ? formatDateTime(item.createdAt) : "—"}</td>
                   <td className={`${tdClass} text-center`}>
                     <div className="flex justify-center gap-2">
                       <button
@@ -153,7 +160,7 @@ export default function AdminInstitutionManager({ institutions }: AdminInstituti
                           setDialog({ kind: "edit", institution: item });
                         }}
                         aria-label={`${item.name} 수정`}
-                        className="h-10 w-[72px] rounded-lg border border-primary bg-white text-[15px] font-semibold text-primary hover:bg-primary-soft"
+                        className="inline-flex h-9 items-center rounded-lg border border-primary/40 bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:border-primary hover:bg-primary-soft"
                       >
                         수정
                       </button>
@@ -164,7 +171,7 @@ export default function AdminInstitutionManager({ institutions }: AdminInstituti
                           setDialog({ kind: "delete", institution: item });
                         }}
                         aria-label={`${item.name} 삭제`}
-                        className="h-10 w-[72px] rounded-lg border border-red-200 bg-white text-[15px] font-semibold text-red-600 hover:bg-red-50"
+                        className="inline-flex h-9 items-center rounded-lg border border-red-200 bg-white px-3.5 text-sm font-semibold text-red-600 transition-colors hover:bg-red-50"
                       >
                         삭제
                       </button>
@@ -301,7 +308,7 @@ function InstitutionFormDialog({
         {mode === "create" &&
           field("careInstitutionCode", "요양기관기호 (숫자 8자리)", { inputMode: "numeric", maxLength: 8, autoComplete: "off", pattern: "\\d{8}" })}
         {formError && (
-          <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {formError}
           </p>
         )}
@@ -357,7 +364,7 @@ function InstitutionDeleteDialog({
           진행 중인 협약이나 소속 사용자가 있으면 삭제할 수 없습니다.
         </p>
         {error && (
-          <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
             {error}
           </p>
         )}
@@ -370,7 +377,7 @@ function InstitutionDeleteDialog({
             data-autofocus
             onClick={remove}
             disabled={pending}
-            className="h-10 rounded-lg bg-red-600 px-5 text-sm font-bold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? "삭제 중…" : "삭제"}
           </button>

@@ -19,10 +19,10 @@ const ROLE_LABELS: Record<AdminUserRoleDto, string> = { REQUESTER: "의뢰기관
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
 
 // 의뢰·예약 목록(Mock 와이어프레임)과 같은 표·입력 모양
-const thClass = "whitespace-nowrap px-6 py-5 text-left text-[15px] font-semibold text-gray-700";
-const tdClass = "px-6 py-5 text-[15px] text-gray-900";
+const thClass = "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 const controlClass =
-  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
 
 /**
  * 회원 목록 (API 모드). 검색은 받은 목록 안에서만 한다 (백엔드 목록 API에 검색 조건이 없다).
@@ -88,7 +88,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
       )}
 
       {filtered.length === 0 ? (
-        <div role="status" className="rounded-lg border border-dashed border-line px-6 py-16 text-center text-[15px] text-gray-500">
+        <div role="status" className="rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] text-gray-500">
           {users.length === 0
             ? tab === "pending"
               ? "가입 승인을 기다리는 회원이 없습니다."
@@ -96,28 +96,28 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
             : "검색 조건에 맞는 회원이 없습니다."}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-line">
+        <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
           <table className="w-full min-w-[820px] border-collapse">
-            <thead className="bg-gray-100/80">
+            <thead className="bg-gray-50">
               <tr>
                 <th scope="col" className={thClass}>로그인 ID</th>
                 <th scope="col" className={thClass}>역할</th>
                 <th scope="col" className={thClass}>소속 기관</th>
                 <th scope="col" className={thClass}>가입일</th>
-                <th scope="col" className={`${thClass} text-center`}>승인 상태</th>
-                <th scope="col" className={`${thClass} text-center`}>관리</th>
+                <th scope="col" className={`${thClass} text-center!`}>승인 상태</th>
+                <th scope="col" className={`${thClass} text-center!`}>관리</th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((user) => (
-                <tr key={user.userId} className="border-t border-line transition-colors hover:bg-gray-50/60">
+                <tr key={user.userId} className="border-t border-line transition-colors first:border-t-0 hover:bg-gray-50/70">
                   <td className={`${tdClass} whitespace-nowrap font-medium`}>{user.loginId}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>{ROLE_LABELS[user.role]}</td>
                   <td className={tdClass}>{user.institutionName || "—"}</td>
                   <td className={`${tdClass} whitespace-nowrap`}>{user.createdAt ? formatDateTime(user.createdAt) : "—"}</td>
                   <td className={`${tdClass} text-center`}>
                     <span
-                      className={`inline-flex whitespace-nowrap rounded-full px-4 py-1.5 text-[15px] font-medium ${
+                      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5 ${
                         user.active ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"
                       }`}
                     >
@@ -133,7 +133,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
                           setTarget(user);
                         }}
                         aria-label={`${user.loginId} 가입 승인`}
-                        className="h-10 w-[92px] rounded-lg bg-primary text-[15px] font-semibold text-white hover:bg-primary-hover"
+                        className="inline-flex h-9 items-center justify-center rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         승인
                       </button>
@@ -156,7 +156,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
               승인할까요? 승인하면 바로 로그인할 수 있습니다.
             </p>
             {outcome && !outcome.ok && (
-              <p role="alert" className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                 {outcome.message}
               </p>
             )}
@@ -165,7 +165,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
                 type="button"
                 onClick={() => setTarget(null)}
                 disabled={pending}
-                className="h-10 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 취소
               </button>
@@ -174,7 +174,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
                 data-autofocus
                 onClick={approve}
                 disabled={pending}
-                className="h-10 rounded-lg bg-primary px-5 text-sm font-bold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-300"
+                className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pending ? "승인 중…" : "승인"}
               </button>
