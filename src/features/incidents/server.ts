@@ -4,7 +4,7 @@ import { unstable_rethrow } from "next/navigation";
 
 import type { PagedResponseDto } from "@/lib/api/types";
 import { isApiError } from "@/lib/api/errors";
-import { getInstitutionScopedAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import {
   fetchIncidentDetail,
@@ -21,8 +21,8 @@ import {
 /**
  * 장비 장애 조회 API 화면용 데이터 (서버 전용).
  *
- * 인증: 로그인 쿠키의 토큰을 Gateway로 넘기고(getInstitutionScopedAuthorizationHeaders),
- * 토큰·역할·기관 범위 검증은 Gateway와 백엔드에 맡긴다. 쿠키가 없으면 요청하지 않는다.
+ * 인증: users/me로 검사기관(EXAMINER) 역할을 확인한 뒤에만 토큰을 Gateway로 넘긴다(requireRoleAccess("EXAMINING")).
+ * 기관 범위는 Gateway와 백엔드가 다시 확인한다. 확인에 실패하면(로그인 안 함·다른 역할·users/me 실패) 요청하지 않는다.
  * 결과에는 토큰과 ADMIN 전용 진단값(lastError)을 담지 않는다. 실패해도 Mock으로 대체하지 않는다. JSX는 만들지 않는다.
  */
 
@@ -50,11 +50,10 @@ type PageResult<T> =
   | { ok: true; items: T[]; totalElements: number; totalPages: number; /** 0부터 */ page: number }
   | IncidentLoadFailure;
 
-const SIGNED_OUT: IncidentLoadFailure = { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다.", code: null };
-
 export async function loadIncidentPage(page: number, equipmentId?: string): Promise<PageResult<EquipmentIncidentDto>> {
-  const headers = await getInstitutionScopedAuthorizationHeaders();
-  if (!headers) return SIGNED_OUT;
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
   try {
     const data = await fetchIncidentPage({ page, size: INCIDENT_API_PAGE_SIZE, equipmentId }, { headers });
     return toPageResult(data, pickIncident);
@@ -68,8 +67,9 @@ export async function loadIncidentPage(page: number, equipmentId?: string): Prom
 export async function loadIncidentDetail(
   incidentId: string,
 ): Promise<{ ok: true; incident: EquipmentIncidentDetailDto } | IncidentLoadFailure> {
-  const headers = await getInstitutionScopedAuthorizationHeaders();
-  if (!headers) return SIGNED_OUT;
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
   try {
     const data = await fetchIncidentDetail(incidentId, { headers });
     return {
@@ -96,8 +96,9 @@ export async function loadIncidentReferralPage(
   page: number,
   status?: IncidentProcessingStatusDto,
 ): Promise<PageResult<IncidentReferralDto>> {
-  const headers = await getInstitutionScopedAuthorizationHeaders();
-  if (!headers) return SIGNED_OUT;
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
   try {
     const data = await fetchIncidentReferralPage(incidentId, { page, size: INCIDENT_API_PAGE_SIZE, status }, { headers });
     return toPageResult(data, pickReferral);

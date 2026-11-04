@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { getExaminationAuthorizationHeaders } from "@/lib/auth/session";
+import { requireRoleAccess } from "@/lib/auth/session";
 
 import {
   changeExaminationStatus,
@@ -21,7 +21,7 @@ import type { ExaminationActionResult } from "./types";
  *
  * 인자는 브라우저에서 오므로 믿지 않고 다시 검증한다.
  * - CSRF: Next가 Server Function의 Origin·Host를 비교하고, 여기서도 같은 출처인지 한 번 더 확인한다
- * - 인증: 로그인 쿠키의 토큰을 서버에서 Gateway로 넘긴다. 쿠키가 없으면 요청하지 않는다
+ * - 인증: users/me로 검사기관(EXAMINER) 역할을 확인한 뒤에만 토큰을 Gateway로 넘긴다 (requireRoleAccess). 아니면 요청하지 않는다
  *   (토큰 검증·EXAMINER 역할·검사 수행 기관 일치는 Gateway와 백엔드가 확인한다)
  * - 결과에는 토큰·서버 오류 본문을 담지 않는다
  * 성공하면 화면을 다시 불러와(refresh) 목록을 서버 값으로 맞춘다 (화면에서 먼저 바꾸지 않는다).
@@ -46,8 +46,9 @@ export async function changeExaminationStatusAction(
     return { ok: false, reason: "INVALID", message: "변경할 검사 상태가 올바르지 않습니다." };
   }
 
-  const authorization = await getExaminationAuthorizationHeaders();
-  if (!authorization) return SIGNED_OUT;
+  const access = await authorizeExaminer();
+  if (!access.ok) return access.failure;
+  const authorization = access.headers;
 
   let message: string;
   try {
@@ -78,8 +79,9 @@ export async function registerExaminationResultAction(
     return { ok: false, reason: "INVALID", message: "추가 소견 입력값이 올바르지 않습니다." };
   }
 
-  const authorization = await getExaminationAuthorizationHeaders();
-  if (!authorization) return SIGNED_OUT;
+  const access = await authorizeExaminer();
+  if (!access.ok) return access.failure;
+  const authorization = access.headers;
 
   try {
     await createExaminationResult(examinationId as string, { summary, notes }, { headers: authorization });
@@ -95,6 +97,17 @@ const SIGNED_OUT: ExaminationActionResult = {
   reason: "SIGNED_OUT",
   message: "로그인이 필요합니다. 다시 로그인해 주세요.",
 };
+
+/** 검사기관(EXAMINER) 역할을 users/me로 확인한다. 아니면 요청하지 않는다 (requireRoleAccess) */
+async function authorizeExaminer(): Promise<{ ok: true; headers: HeadersInit } | { ok: false; failure: ExaminationActionResult }> {
+  const access = await requireRoleAccess("EXAMINING");
+  if (access.ok) return { ok: true, headers: access.headers };
+  if (access.reason === "SIGNED_OUT") return { ok: false, failure: SIGNED_OUT };
+  if (access.reason === "UNAUTHORIZED") {
+    return { ok: false, failure: { ok: false, reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요." } };
+  }
+  return { ok: false, failure: { ok: false, reason: "FORBIDDEN", message: access.message } };
+}
 
 /** 같은 출처·검사 ID 확인. 통과하면 null */
 async function checkRequest(examinationId: unknown): Promise<ExaminationActionResult | null> {
