@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Info, Loader2, X } from "lucide-react";
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
 import { controlClass, fieldLabelClass, SelectInput, TextInput } from "@/components/ui/FormControls";
@@ -12,6 +12,10 @@ import type { ExamTypeDto } from "@/features/referrals/remote";
 import { addDays, getDaysInMonth, parseDateKey, toDateKey, type DateKey } from "@/lib/date/seoulDate";
 import { useSeoulNow } from "@/lib/date/useSeoulNow";
 import { isApiFeature } from "@/lib/api/config";
+import { loadMonthSlotsAction } from "@/features/slots/managementActions";
+import { createMonthSlotStore } from "@/features/slots/managementMonth";
+
+import ApiSlotSchedule from "./ApiSlotSchedule";
 
 import {
   createEquipmentWithExamTypesAction,
@@ -100,6 +104,17 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
   const [viewMonth, setViewMonth] = useState<DateKey | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null);
+
+  // 월별 슬롯 조회 결과 관리
+  const [slotStore] = useState(() =>
+    createMonthSlotStore((monthStart) => loadMonthSlotsAction(monthStart)),
+  );
+
+  const monthStates = useSyncExternalStore(
+    slotStore.subscribe,
+    slotStore.getSnapshot,
+    slotStore.getSnapshot,
+  );
 
   const visible = useMemo(() => {
     const keyword = normalize(query);
@@ -210,7 +225,18 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
         note={equipments.length > SUPPORTED_PREVIEW_COUNT ? `지원 검사는 앞쪽 ${SUPPORTED_PREVIEW_COUNT}대만 표시합니다. 나머지는 [상세]에서 확인해 주세요.` : null}
       />
 
-      {!today || !range || !monthStart ? (
+      {isApiFeature("slots") && today && now ? (
+        <ApiSlotSchedule
+          store={slotStore}
+          monthStates={monthStates}
+          today={today}
+          nowDateTime={now.dateTime}
+          visibleEquipments={visible}
+          selectedEquipment={selected}
+          totalEquipmentCount={equipments.length}
+          scopeLabel={scopeLabel}
+        />
+      ) : !today || !range || !monthStart ? (
         <p role="status" className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500">
           슬롯 현황을 불러오고 있습니다.
         </p>
@@ -267,7 +293,10 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
           <ApiSlotGenerationDialog
             equipments={equipments}
             initialId={selected?.id ?? null}
-            onClose={() => setDialog(null)}
+            onClose={() => {
+              setDialog(null);
+              slotStore.invalidate();
+            }}
           />
         ) : (
           <SlotGenerationUnavailableDialog

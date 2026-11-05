@@ -254,6 +254,24 @@ async function requestSlotSlice(
   return { items: data.items, page: data.page, size: data.size, hasNext: data.hasNext };
 }
 
+/**
+ * 관리 조회 `GET /api/v1/slots?view=MANAGEMENT&...` (검사기관·관리자용, 지난 슬롯·모든 상태 포함).
+ * Gateway 권한: REQUESTER·EXAMINER·ADMIN이지만 서비스가 REQUESTER의 MANAGEMENT를 403으로 막고, EXAMINER는 자기 기관 장비만 돌려준다.
+ * 기간·ID·페이지 검증은 검색(searchSlots)과 같다 (31일 이하, `+09:00`). status를 주면 그 상태만 온다.
+ * 서버(Server Function)에서만 부른다.
+ */
+export async function searchManagementSlots(
+  input: SlotSearchRequestDto & { status?: SlotStatusDto },
+  options: Pick<ApiRequestOptions, "headers" | "signal" | "timeoutMs"> = {},
+): Promise<SliceResponseDto<SlotDetailResponseDto>> {
+  requireApiFeature("slots");
+  const validation = validateSlotSearchRequest(input);
+  if (!validation.ok) throw new ApiError("CONFIG", validation.message);
+  if (input.status !== undefined && !SLOT_STATUSES.includes(input.status)) throw new ApiError("CONFIG", "슬롯 상태가 올바르지 않습니다.");
+  const query = { ...validation.query, view: "MANAGEMENT" as const, ...(input.status ? { status: input.status } : {}) };
+  return requestSlotSlice(query, input.status ?? null, options);
+}
+
 function isSlotSlice(value: unknown): value is SliceResponseDto<SlotDetailDto> {
   if (typeof value !== "object" || value === null) return false;
   const data = value as Record<string, unknown>;
