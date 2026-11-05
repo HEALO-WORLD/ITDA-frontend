@@ -1,4 +1,5 @@
 import { Suspense, type ReactNode } from "react";
+import { connection } from "next/server";
 
 import ApiRoleGate, { AuthChecking, isApiAuthMode } from "@/components/auth/ApiRoleGate";
 import AppShell from "@/components/layout/AppShell";
@@ -8,6 +9,7 @@ import NotificationReadProvider from "@/features/notifications/components/Notifi
 import { loadUnreadNotificationCount } from "@/features/notifications/server";
 import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 import { getMockSession } from "@/lib/dev/mockSession";
+
 
 /**
  * 의뢰기관 화면 공통 레이아웃.
@@ -26,12 +28,12 @@ export default async function ReferringLayout({ children }: LayoutProps<"/referr
     );
 
   if (isApiFeature("notifications")) {
-    // API 모드: 헤더 알림 점은 읽지 않은 알림 수 API로 표시한다 (Mock 알림·세션 값을 쓰지 않는다).
-    // 기다리지 않고 Promise로 넘겨 쿠키를 읽는 조회가 화면 전체를 막지 않게 한다 (쓰는 쪽이 Suspense 안에서 읽는다)
     return (
-      <ApiNotificationUnreadProvider unreadCount={loadUnreadNotificationCount("notifications")}>
-        {shell(children)}
-      </ApiNotificationUnreadProvider>
+      <Suspense fallback={<AuthChecking />}>
+        <ReferringApiNotifications>
+          {shell(children)}
+        </ReferringApiNotifications>
+      </Suspense>
     );
   }
 
@@ -40,4 +42,20 @@ export default async function ReferringLayout({ children }: LayoutProps<"/referr
   const notifications = getScreenDataSource("notifications") === "mock" ? await getNotifications() : [];
 
   return <NotificationReadProvider initialNotifications={notifications}>{shell(children)}</NotificationReadProvider>;
+}
+
+async function ReferringApiNotifications({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  await connection();
+
+  return (
+    <ApiNotificationUnreadProvider
+      unreadCount={loadUnreadNotificationCount("notifications")}
+    >
+      {children}
+    </ApiNotificationUnreadProvider>
+  );
 }
