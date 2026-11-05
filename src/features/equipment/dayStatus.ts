@@ -12,12 +12,14 @@ import type { Equipment } from "./types";
  * - NO_SLOTS: 운영일이지만 슬롯 없음 → 선택 불가
  * - PAST_DAY / OUT_OF_RANGE: 지난 날짜 / 조회 범위 밖 → 선택 불가
  * - LOADING: 그 달 슬롯을 아직 불러오지 않음
+ * - UNKNOWN: 슬롯을 조회할 수 없음 (API 모드: 슬롯 목록 조회 API가 없다) → 선택 불가. 휴무·슬롯 없음으로 단정하지 않는다
  * 슬롯이 실제로 있으면 운영 요일보다 슬롯 데이터를 우선한다 (데이터를 숨기지 않기 위해).
  */
 export type DayStatus =
   | { kind: "PAST_DAY" }
   | { kind: "OUT_OF_RANGE" }
   | { kind: "LOADING" }
+  | { kind: "UNKNOWN" }
   | { kind: "CLOSED" }
   | { kind: "NO_SLOTS" }
   | { kind: "AVAILABLE"; total: number; available: number }

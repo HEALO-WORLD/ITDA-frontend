@@ -29,7 +29,7 @@ import { useEquipmentChanges, useLiveEquipments, useSlotDataKey } from "../useLi
 
 import DaySlotList from "./DaySlotList";
 import EquipmentForm from "./EquipmentForm";
-import EquipmentPicker, { type EquipmentSelection, type ExamTypeFilter } from "./EquipmentPicker";
+import EquipmentPicker, { toMockPickerRow, type EquipmentSelection, type ExamTypeFilter } from "./EquipmentPicker";
 import EquipmentScheduleDetail from "./EquipmentScheduleDetail";
 import OperatingHoursForm from "./OperatingHoursForm";
 import SlotDetail from "./SlotDetail";
@@ -376,7 +376,7 @@ export default function EquipmentSlotWorkspace({ organizationId }: EquipmentSlot
       <div className="flex min-w-0 flex-col gap-5">
       <EquipmentPicker
         totalCount={equipments.length}
-        visibleEquipments={visibleEquipments}
+        visibleEquipments={visibleEquipments.map(toMockPickerRow)}
         query={query}
         onQueryChange={(value) => applyFilter(value, typeFilter)}
         typeFilter={typeFilter}
