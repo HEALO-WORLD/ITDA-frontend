@@ -11,12 +11,16 @@ import {
   EQUIPMENT_PAGE_MAX_SIZE,
   fetchEquipment,
   fetchEquipmentExamTypePage,
+  fetchEquipmentOperatingHours,
   fetchEquipmentPage,
   getEquipmentErrorMessage,
   type EquipmentDto,
   type EquipmentExamTypeDto,
   type EquipmentModalityDto,
+  type EquipmentOperatingHoursDto,
 } from "./remote";
+import { fromBackendWeek } from "./operatingHours";
+import type { DailyOperatingHours } from "./types";
 
 /**
  * 검사기관 장비 화면 데이터 (서버 전용, 조회만).
@@ -77,13 +81,18 @@ export async function loadEquipmentPage(query: { modality?: EquipmentModalityDto
 export const SUPPORTED_LOOKUP_MAX = 10;
 const SUPPORTED_LOOKUP_CONCURRENCY = 4;
 
-export type SupportedExamTypesResult =
-  | { ok: true; byEquipment: Record<string, { names: string[] } | { failed: true }> }
-  | EquipmentLoadFailure;
+/** 목록 한 행의 미리보기. 항목마다 따로 실패할 수 있다 (null = 조회 실패) */
+export interface EquipmentRowPreview {
+  names: string[] | null;
+  hours: DailyOperatingHours[] | null;
+}
+
+export type SupportedExamTypesResult = { ok: true; byEquipment: Record<string, EquipmentRowPreview> } | EquipmentLoadFailure;
 
 /**
- * 장비별 지원 검사 유형 이름 (목록 표시용). 요청: 우리 기관 장비 목록 1회(브라우저가 보낸 ID가 우리 기관 장비인지 확인)
- * + 장비당 `GET /equipments/{id}/exam-types` 1회 (동시에 4개까지, 최대 10대). 다른 기관 장비 ID는 조회하지 않는다.
+ * 장비별 지원 검사 유형 이름 + 운영시간 (목록 표시용). 요청: 우리 기관 장비 목록 1회(브라우저가 보낸 ID가 우리 기관 장비인지 확인)
+ * + 장비당 `GET /equipments/{id}/exam-types`·`GET /equipments/{id}/operating-hours` 각 1회
+ * (장비 단위로 동시에 4대까지, 최대 10대). 다른 기관 장비 ID는 조회하지 않는다.
  */
 export async function loadSupportedExamTypes(equipmentIds: string[]): Promise<SupportedExamTypesResult> {
   const access = await requireRoleAccess("EXAMINING");
@@ -99,18 +108,23 @@ export async function loadSupportedExamTypes(equipmentIds: string[]): Promise<Su
     return toFailure(error, "supported-list", "지원 검사 유형을 불러오지 못했습니다.");
   }
   const ids = [...new Set(equipmentIds.map((id) => id.toLowerCase()))].filter((id) => ownIds.has(id)).slice(0, SUPPORTED_LOOKUP_MAX);
-  const byEquipment: Record<string, { names: string[] } | { failed: true }> = {};
+  const byEquipment: Record<string, EquipmentRowPreview> = {};
   let next = 0;
   const worker = async () => {
     while (next < ids.length) {
       const id = ids[next++];
-      try {
-        const page = await fetchEquipmentExamTypePage(id, { page: 0, size: EQUIPMENT_PAGE_MAX_SIZE }, { headers: access.headers });
-        byEquipment[id] = { names: page.contents.filter((item) => item.equipmentId.toLowerCase() === id).map((item) => item.examTypeName) };
-      } catch (error) {
-        unstable_rethrow(error);
-        byEquipment[id] = { failed: true };
-      }
+      const [examTypes, hours] = await Promise.allSettled([
+        fetchEquipmentExamTypePage(id, { page: 0, size: EQUIPMENT_PAGE_MAX_SIZE }, { headers: access.headers }),
+        fetchEquipmentOperatingHours(id, { headers: access.headers }),
+      ]);
+      for (const settled of [examTypes, hours]) if (settled.status === "rejected") unstable_rethrow(settled.reason);
+      byEquipment[id] = {
+        names:
+          examTypes.status === "fulfilled"
+            ? examTypes.value.contents.filter((item) => item.equipmentId.toLowerCase() === id).map((item) => item.examTypeName)
+            : null,
+        hours: hours.status === "fulfilled" ? toDailyOperatingHours(hours.value) : null,
+      };
     }
   };
   await Promise.all(Array.from({ length: Math.min(SUPPORTED_LOOKUP_CONCURRENCY, ids.length) }, worker));
@@ -153,8 +167,40 @@ export async function loadExamTypeOptions(modality: EquipmentModalityDto): Promi
   }
 }
 
+/** 운영시간 조회 오류 문구 (UNSUPPORTED_REQUEST: 서버에 운영시간 API가 아직 배포되지 않았을 때 Gateway·서비스가 주는 404) */
+const OPERATING_HOURS_LOAD_MESSAGES: Record<string, string> = {
+  RESOURCE_NOT_FOUND: "장비를 찾을 수 없습니다. 삭제되었을 수 있습니다.",
+  UNSUPPORTED_REQUEST: "서버에서 운영 시간 조회를 처리하지 못했습니다. 서버에 운영 시간 기능이 배포되었는지 확인해 주세요.",
+};
+
+export type EquipmentOperatingHoursResult = { ok: true; equipment: EquipmentDto; hours: DailyOperatingHours[] } | EquipmentLoadFailure;
+
+/** 운영시간 응답 → 화면 요일 모양 (week 7=일 → 0). 휴게 시간은 백엔드에 없어 넣지 않는다 */
+export const toDailyOperatingHours = (list: EquipmentOperatingHoursDto[]): DailyOperatingHours[] =>
+  list.map(({ week, startTime, endTime }) => ({ weekday: fromBackendWeek(week), open: startTime, close: endTime }));
+
+/**
+ * 장비 운영시간 (요청 2회: 장비 확인 후 운영시간). 운영시간 GET은 의뢰기관에도 열려 있어
+ * 장비가 우리 기관 것인지 먼저 확인하고, 아니면 운영시간을 요청하지 않는다.
+ */
+export async function loadEquipmentOperatingHours(equipmentId: string): Promise<EquipmentOperatingHoursResult> {
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  try {
+    const equipment = await fetchEquipment(equipmentId, { headers: access.headers });
+    if (equipment.institutionId.toLowerCase() !== access.user.institutionId.toLowerCase()) {
+      return { ok: false, reason: "FORBIDDEN", message: "우리 기관 장비만 볼 수 있습니다.", code: null };
+    }
+    const hours = await fetchEquipmentOperatingHours(equipmentId, { headers: access.headers });
+    return { ok: true, equipment, hours: toDailyOperatingHours(hours) };
+  } catch (error) {
+    unstable_rethrow(error);
+    return toFailure(error, "operating-hours", "운영 시간을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.", OPERATING_HOURS_LOAD_MESSAGES);
+  }
+}
+
 /** 조회·변경 실패 → 화면 안내 (토큰·응답 본문은 담지 않는다) */
-export function toFailure(error: unknown, action: string, fallback: string): EquipmentLoadFailure {
+export function toFailure(error: unknown, action: string, fallback: string, overrides?: Record<string, string>): EquipmentLoadFailure {
   const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
   const code = isApiError(error) ? error.code : null;
   const isNetwork = isApiError(error) && (error.kind === "NETWORK" || error.kind === "TIMEOUT");
@@ -166,6 +212,6 @@ export function toFailure(error: unknown, action: string, fallback: string): Equ
       ? "로그인 정보가 만료되었습니다. 다시 로그인해 주세요."
       : isNetwork
         ? "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요."
-        : getEquipmentErrorMessage(error, fallback);
+        : getEquipmentErrorMessage(error, fallback, overrides);
   return { ok: false, reason: status === 401 ? "UNAUTHORIZED" : status === 403 ? "FORBIDDEN" : isNetwork ? "NETWORK" : "ERROR", message, code };
 }

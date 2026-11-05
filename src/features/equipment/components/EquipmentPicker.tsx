@@ -13,7 +13,7 @@ export type ExamTypeFilter = "ALL" | ExamType;
 
 /**
  * 장비 목록 한 행 (Mock·API 공용 표시 값). Mock은 toMockPickerRow로, API는 장비 API 응답으로 만든다.
- * - hours: set(운영시간 있음) · unset(미설정 → 설정 필요 버튼) · unavailable(운영시간 API 없음 → 조회 준비 중)
+ * - hours: set(운영시간 있음) · unset(미설정 → 설정 필요 버튼) · unavailable(아직 모름 → label, 없으면 '조회 준비 중')
  * - supported: 지원 검사 유형 이름 · 비어 있으면 '미설정' · 문자열이면 그 안내(불러오는 중 등)를 흐리게 보인다
  */
 export interface EquipmentPickerRow {
@@ -21,7 +21,7 @@ export interface EquipmentPickerRow {
   name: string;
   examType: ExamType;
   statusBadge: ReactNode;
-  hours: { kind: "set"; summary: string } | { kind: "unset" } | { kind: "unavailable" };
+  hours: { kind: "set"; summary: string } | { kind: "unset" } | { kind: "unavailable"; label?: string };
   supported: string[] | null | { placeholder: string };
 }
 
@@ -259,7 +259,11 @@ export default function EquipmentPicker({
                     const isSelected = selection === equipment.id;
                     const hasHours = equipment.hours.kind === "set";
                     const hoursSummary =
-                      equipment.hours.kind === "set" ? equipment.hours.summary : equipment.hours.kind === "unset" ? "미설정" : "조회 준비 중";
+                      equipment.hours.kind === "set"
+                        ? equipment.hours.summary
+                        : equipment.hours.kind === "unset"
+                          ? "미설정"
+                          : (equipment.hours.label ?? "조회 준비 중");
                     const supportedNames = Array.isArray(equipment.supported) && equipment.supported.length > 0 ? equipment.supported : null;
                     const supportedSummary = supportedNames
                       ? supportedNames.join(", ")
@@ -297,7 +301,7 @@ export default function EquipmentPicker({
                               className={`min-w-0 max-w-full truncate ${hasHours ? "text-gray-600" : "text-gray-400"}`}
                               title={hoursSummary}
                             >
-                              {equipment.hours.kind === "unset" ? "운영시간 미설정" : equipment.hours.kind === "unavailable" ? "운영시간 조회 준비 중" : hoursSummary}
+                              {equipment.hours.kind === "unset" ? "운영시간 미설정" : equipment.hours.kind === "unavailable" ? `운영시간 ${hoursSummary}` : hoursSummary}
                             </span>
                           </div>
                           <p className="mt-1 truncate text-xs text-gray-500" title={supportedSummary}>

@@ -49,13 +49,15 @@ interface OperatingHoursFieldsProps {
   /** 저장(또는 다음 단계)을 시도한 뒤에만 오류를 보인다 */
   showErrors: boolean;
   disabled?: boolean;
+  /** 휴게 시간 입력을 보일지 (기본 true). API 모드는 백엔드에 휴게 시간이 없어 false로 숨긴다 */
+  allowBreak?: boolean;
 }
 
 /**
  * 요일별 운영 시간 입력 (운영 여부·운영 시간·휴게 시간) + 평일 일괄 적용.
  * 운영 시간 수정 폼과 장비 등록 2단계가 함께 쓴다. 검증은 rules.ts의 validateOperatingDay.
  */
-export function OperatingHoursFields({ days, onChange, showErrors, disabled = false }: OperatingHoursFieldsProps) {
+export function OperatingHoursFields({ days, onChange, showErrors, disabled = false, allowBreak = true }: OperatingHoursFieldsProps) {
   const update = (weekday: number, patch: Partial<OperatingDayInput>) =>
     onChange(days.map((day) => (day.weekday === weekday ? { ...day, ...patch } : day)));
 
@@ -120,7 +122,7 @@ export function OperatingHoursFields({ days, onChange, showErrors, disabled = fa
                       endInvalid={Boolean(errors.close)}
                       describedBy={describedBy}
                     />
-                    <TimeRange
+                    {allowBreak && <TimeRange
                       label={`${label}요일 휴게 (선택)`}
                       caption="휴게"
                       start={day.breakStart}
@@ -130,7 +132,7 @@ export function OperatingHoursFields({ days, onChange, showErrors, disabled = fa
                       startInvalid={Boolean(errors.breakStart)}
                       endInvalid={Boolean(errors.breakEnd)}
                       describedBy={describedBy}
-                    />
+                    />}
                   </div>
                 ) : (
                   <span className="text-sm text-gray-400">휴무 · 슬롯을 만들지 않습니다</span>
