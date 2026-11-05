@@ -104,6 +104,8 @@ export async function submitCreateReferral(input: unknown): Promise<CreateReferr
 
   const data = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   const { slotId, examTypeId, patientName, idempotencyKey } = data;
+  /** 결과 불명 뒤 같은 키로 다시 확인하는 요청: 앞 요청이 접수됐다면 슬롯은 이미 HELD·BOOKED다 */
+  const confirmExisting = data.confirmExisting === true;
   if (!isSlotApiId(slotId) || !isReferralApiId(examTypeId)) {
     return { ok: false, reason: "INVALID_INPUT", message: "선택한 슬롯 정보가 올바르지 않습니다. 슬롯을 다시 선택해 주세요." };
   }
@@ -115,7 +117,7 @@ export async function submitCreateReferral(input: unknown): Promise<CreateReferr
   if (inFlightKeys.has(key)) return { ok: false, reason: "IN_PROGRESS", message: "같은 요청을 처리하고 있습니다. 잠시 후 결과를 확인해 주세요.", uncertain: true };
   inFlightKeys.add(key);
   try {
-    return await createAfterChecks({ slotId, examTypeId, patientName: patientName as string, idempotencyKey, access });
+    return await createAfterChecks({ slotId, examTypeId, patientName: patientName as string, idempotencyKey, confirmExisting, access });
   } finally {
     inFlightKeys.delete(key);
   }
@@ -126,12 +128,14 @@ async function createAfterChecks({
   examTypeId,
   patientName,
   idempotencyKey,
+  confirmExisting,
   access,
 }: {
   slotId: string;
   examTypeId: string;
   patientName: string;
   idempotencyKey: string;
+  confirmExisting: boolean;
   access: Extract<Awaited<ReturnType<typeof requireRoleAccess>>, { ok: true }>;
 }): Promise<CreateReferralActionResult> {
   const options = { headers: access.headers };
@@ -143,7 +147,10 @@ async function createAfterChecks({
   } catch (error) {
     return lookupFailure("슬롯", error, "슬롯을 찾을 수 없습니다. 다시 검색해 주세요.");
   }
-  if (slot.status !== "AVAILABLE") {
+  // 다시 확인 요청은 HELD·BOOKED도 보낸다: 같은 키로 이미 접수됐으면 백엔드가 기존 의뢰를 돌려준다
+  // (접수되지 않았는데 다른 요청이 선점했다면 새 의뢰가 비동기 SLOT_CONFLICT로 실패하고 상태 확인에서 보인다)
+  const sendable = slot.status === "AVAILABLE" || (confirmExisting && (slot.status === "HELD" || slot.status === "BOOKED"));
+  if (!sendable) {
     return { ok: false, reason: "SLOT_NOT_AVAILABLE", message: "이미 선점되었거나 예약할 수 없는 슬롯입니다. 다시 검색해 다른 슬롯을 선택해 주세요." };
   }
   if (!sameId(slot.examTypeId, examTypeId)) {

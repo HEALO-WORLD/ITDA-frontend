@@ -64,7 +64,7 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
       onBusyChange?.(true);
       setFailure(null);
       try {
-        const result = await createReferralAction({ ...content, idempotencyKey });
+        const result = await createReferralAction({ ...content, idempotencyKey, confirmExisting: tracker.isLocked });
         if (result.ok) {
           setCreated(result);
           setUncertain(false);
