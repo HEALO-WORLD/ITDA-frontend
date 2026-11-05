@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import Modal from "@/components/ui/Modal";
 import { ROUTES } from "@/constants/navigation";
+import ApiReferralCreateForm from "@/features/referrals/components/ApiReferralCreateForm";
 import ReferralCreateForm from "@/features/referrals/components/ReferralCreateForm";
 import RescheduleSlotConfirm from "@/features/referrals/components/RescheduleSlotConfirm";
 import type { ReferralDraft, ReferralSummary } from "@/features/referrals/types";
@@ -152,7 +153,7 @@ export default function SlotSearch({
       .then((slots) => {
         if (isCurrent) setSearch((prev) => (prev.status === "success" ? { status: "success", slots } : prev));
       })
-      .catch(() => { });
+      .catch(() => {});
     return () => {
       isCurrent = false;
     };
@@ -400,12 +401,16 @@ export default function SlotSearch({
           onClose={closeApiRequest}
         >
           {requestedSlot && (
-            <div role="status" className="py-6 text-center text-sm text-gray-600">
-              실제 의뢰·예약 요청 기능은 아직 연동되지 않았습니다.
-              <p className="mt-2">
-                슬롯 검색 기능만 이용할 수 있습니다.
-              </p>
-            </div>
+            <ApiReferralCreateForm
+              slot={requestedSlot as ApiExamSlot}
+              onCancel={closeApiRequest}
+              onCreated={() => {
+                apiRequestCreatedRef.current = true;
+              }}
+              onBusyChange={(busy) => {
+                apiRequestBusyRef.current = busy;
+              }}
+            />
           )}
         </Modal>
       ) : rescheduleReferral ? (
@@ -527,8 +532,9 @@ function ResultMessage({
   return (
     <p
       role={tone === "error" ? "alert" : "status"}
-      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${tone === "error" ? "text-red-600" : "text-gray-500"
-        }`}
+      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${
+        tone === "error" ? "text-red-600" : "text-gray-500"
+      }`}
     >
       {children}
     </p>
