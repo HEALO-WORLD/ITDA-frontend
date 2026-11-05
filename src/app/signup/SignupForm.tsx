@@ -84,6 +84,14 @@ export default function SignupForm({ institutions }: SignupFormProps) {
     pendingFocusRef.current = null;
   }, [isSubmitting, errors]);
 
+  const resetSignupView = () => {
+  setSignedUpLoginId(null);
+  setValues(EMPTY_VALUES);
+  setErrors({});
+  setFormMessage(null);
+  pendingFocusRef.current = null;
+};
+
   const update = (field: SignupField, value: string) => {
     setValues((prev) => ({ ...prev, [field]: value }));
     setErrors((prev) => ({ ...prev, [field]: undefined }));
@@ -157,6 +165,7 @@ export default function SignupForm({ institutions }: SignupFormProps) {
         </div>
         <Link
           href={ROUTES.login}
+          onClick={resetSignupView}
           className="flex h-12 items-center justify-center rounded-lg bg-primary text-base font-bold text-white transition-colors hover:bg-primary-hover"
         >
           로그인 화면으로 이동
