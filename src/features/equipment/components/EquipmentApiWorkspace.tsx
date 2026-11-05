@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Info, Loader2, X } from "lucide-react";
-import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
 import { controlClass, fieldLabelClass, SelectInput, TextInput } from "@/components/ui/FormControls";
@@ -11,6 +11,11 @@ import { NETWORK_FAILURE, useDetailResult } from "@/features/admin/components/Ad
 import type { ExamTypeDto } from "@/features/referrals/remote";
 import { addDays, getDaysInMonth, parseDateKey, toDateKey, type DateKey } from "@/lib/date/seoulDate";
 import { useSeoulNow } from "@/lib/date/useSeoulNow";
+import { isApiFeature } from "@/lib/api/config";
+import { loadMonthSlotsAction } from "@/features/slots/managementActions";
+import { countTodayAvailableSlots, createMonthSlotStore } from "@/features/slots/managementMonth";
+
+import ApiSlotSchedule from "./ApiSlotSchedule";
 
 import {
   createEquipmentWithExamTypesAction,
@@ -33,6 +38,7 @@ import EquipmentPicker, { type EquipmentPickerRow, type EquipmentSelection, type
 import { EquipmentSummaryBar } from "./EquipmentSummary";
 import { isOperatingDaysValid, OperatingHoursFields, toOperatingDayInputs } from "./OperatingHoursForm";
 import SlotMonthCalendar from "./SlotMonthCalendar";
+import ApiSlotGenerationDialog from "./ApiSlotGenerationDialog";
 
 interface EquipmentApiWorkspaceProps {
   /** 우리 기관 장비 (서버가 users/me 기관으로 조회, 최대 100대) */
@@ -98,6 +104,30 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
   const [viewMonth, setViewMonth] = useState<DateKey | null>(null);
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState<WorkspaceNotice | null>(null);
+
+  // 월별 슬롯 조회 결과 관리
+  const [slotStore] = useState(() =>
+    createMonthSlotStore((monthStart) => loadMonthSlotsAction(monthStart)),
+  );
+
+  const monthStates = useSyncExternalStore(
+    slotStore.subscribe,
+    slotStore.getSnapshot,
+    slotStore.getSnapshot,
+  );
+
+  // 오늘 예약 가능 슬롯 수: 오늘이 속한 달의 월 캐시를 함께 쓴다 (달력이 같은 달을 보면 추가 요청 없음).
+  // 슬롯 생성 뒤 invalidate로 캐시가 비면 다시 요청하고, 현재 시각(분)이 바뀌면 다시 센다
+  const slotsApi = isApiFeature("slots");
+  const todayMonth = today ? monthOf(today) : null;
+  useEffect(() => {
+    if (slotsApi && todayMonth) slotStore.request(todayMonth);
+  }, [slotsApi, slotStore, todayMonth, monthStates]);
+  const institutionIds = useMemo(() => new Set(equipments.map((item) => item.institutionId.toLowerCase())), [equipments]);
+  const todayAvailable =
+    slotsApi && today && now && todayMonth
+      ? countTodayAvailableSlots(monthStates[todayMonth], { today, nowDateTime: now.dateTime, institutionIds })
+      : null;
 
   const visible = useMemo(() => {
     const keyword = normalize(query);
@@ -169,15 +199,33 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
       <EquipmentSummaryBar
         mri={counts ? `${counts.MRI}대` : <Pending>확인 불가</Pending>}
         ct={counts ? `${counts.CT}대` : <Pending>확인 불가</Pending>}
-        todaySlots={<Pending title={SLOT_UNAVAILABLE}>조회 준비 중</Pending>}
+        todaySlots={
+          !slotsApi ? (
+            <Pending title={SLOT_UNAVAILABLE}>조회 준비 중</Pending>
+          ) : !todayAvailable || todayAvailable.status === "loading" ? (
+            <Pending>불러오는 중</Pending>
+          ) : todayAvailable.status === "error" ? (
+            <span className="inline-flex items-center gap-2">
+              <Pending title={todayAvailable.message}>확인 불가</Pending>
+              <button
+                type="button"
+                onClick={() => todayMonth && slotStore.retry(todayMonth)}
+                className="rounded-md border border-line bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+              >
+                다시 시도
+              </button>
+            </span>
+          ) : (
+            <span title={now ? `${now.dateTime.replace("T", " ")} 기준` : undefined}>{todayAvailable.count}개</span>
+          )
+        }
       />
 
       {notice && (
         <div
           role="status"
-          className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-[15px] ${
-            notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-300 bg-amber-50 text-amber-900"
-          }`}
+          className={`flex items-start justify-between gap-3 rounded-lg border px-4 py-3 text-[15px] ${notice.tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800" : "border-amber-300 bg-amber-50 text-amber-900"
+            }`}
         >
           <p className="flex items-start gap-2">
             {notice.tone === "success" ? <CheckCircle2 className="mt-0.5 size-5 shrink-0" aria-hidden="true" /> : <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />}
@@ -209,7 +257,18 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
         note={equipments.length > SUPPORTED_PREVIEW_COUNT ? `지원 검사는 앞쪽 ${SUPPORTED_PREVIEW_COUNT}대만 표시합니다. 나머지는 [상세]에서 확인해 주세요.` : null}
       />
 
-      {!today || !range || !monthStart ? (
+      {isApiFeature("slots") && today && now ? (
+        <ApiSlotSchedule
+          store={slotStore}
+          monthStates={monthStates}
+          today={today}
+          nowDateTime={now.dateTime}
+          visibleEquipments={visible}
+          selectedEquipment={selected}
+          totalEquipmentCount={equipments.length}
+          scopeLabel={scopeLabel}
+        />
+      ) : !today || !range || !monthStart ? (
         <p role="status" className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500">
           슬롯 현황을 불러오고 있습니다.
         </p>
@@ -261,8 +320,23 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
       {dialog?.kind === "hours" && dialogEquipment && (
         <EquipmentHoursDialog equipment={dialogEquipment} onClose={() => setDialog(null)} onSaved={reloadPreview} />
       )}
-      {dialog?.kind === "slots" && <SlotGenerationUnavailableDialog equipments={equipments} initialId={selected?.id ?? null} onClose={() => setDialog(null)} />}
-    </div>
+      {dialog?.kind === "slots" &&
+        (isApiFeature("slots") ? (
+          <ApiSlotGenerationDialog
+            equipments={equipments}
+            initialId={selected?.id ?? null}
+            onClose={() => {
+              setDialog(null);
+              slotStore.invalidate();
+            }}
+          />
+        ) : (
+          <SlotGenerationUnavailableDialog
+            equipments={equipments}
+            initialId={selected?.id ?? null}
+            onClose={() => setDialog(null)}
+          />
+        ))}</div>
   );
 }
 
@@ -410,9 +484,8 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
             <li key={value} aria-current={step === value ? "step" : undefined} className="flex items-center gap-2">
               {index > 0 && <span className="h-px w-6 bg-line" aria-hidden="true" />}
               <span
-                className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${
-                  step === value ? "bg-primary text-white" : step > value ? "bg-primary-soft text-primary" : "bg-gray-100 text-gray-500"
-                }`}
+                className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${step === value ? "bg-primary text-white" : step > value ? "bg-primary-soft text-primary" : "bg-gray-100 text-gray-500"
+                  }`}
               >
                 {value}
               </span>
@@ -603,9 +676,8 @@ function SupportedExamTypesPicker({
               return (
                 <label
                   key={option.id}
-                  className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[15px] ${
-                    checked ? "border-primary bg-primary-soft text-primary" : "border-line bg-white text-gray-700"
-                  }`}
+                  className={`inline-flex h-10 cursor-pointer items-center gap-2 rounded-lg border px-3 text-[15px] ${checked ? "border-primary bg-primary-soft text-primary" : "border-line bg-white text-gray-700"
+                    }`}
                 >
                   <input
                     type="checkbox"

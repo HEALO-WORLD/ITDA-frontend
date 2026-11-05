@@ -254,6 +254,24 @@ async function requestSlotSlice(
   return { items: data.items, page: data.page, size: data.size, hasNext: data.hasNext };
 }
 
+/**
+ * 관리 조회 `GET /api/v1/slots?view=MANAGEMENT&...` (검사기관·관리자용, 지난 슬롯·모든 상태 포함).
+ * Gateway 권한: REQUESTER·EXAMINER·ADMIN이지만 서비스가 REQUESTER의 MANAGEMENT를 403으로 막고, EXAMINER는 자기 기관 장비만 돌려준다.
+ * 기간·ID·페이지 검증은 검색(searchSlots)과 같다 (31일 이하, `+09:00`). status를 주면 그 상태만 온다.
+ * 서버(Server Function)에서만 부른다.
+ */
+export async function searchManagementSlots(
+  input: SlotSearchRequestDto & { status?: SlotStatusDto },
+  options: Pick<ApiRequestOptions, "headers" | "signal" | "timeoutMs"> = {},
+): Promise<SliceResponseDto<SlotDetailResponseDto>> {
+  requireApiFeature("slots");
+  const validation = validateSlotSearchRequest(input);
+  if (!validation.ok) throw new ApiError("CONFIG", validation.message);
+  if (input.status !== undefined && !SLOT_STATUSES.includes(input.status)) throw new ApiError("CONFIG", "슬롯 상태가 올바르지 않습니다.");
+  const query = { ...validation.query, view: "MANAGEMENT" as const, ...(input.status ? { status: input.status } : {}) };
+  return requestSlotSlice(query, input.status ?? null, options);
+}
+
 function isSlotSlice(value: unknown): value is SliceResponseDto<SlotDetailDto> {
   if (typeof value !== "object" || value === null) return false;
   const data = value as Record<string, unknown>;
@@ -337,4 +355,157 @@ export function getSlotSearchErrorMessage(error: unknown): string {
     return SLOT_SEARCH_ERROR_MESSAGES[error.code];
   }
   return error.message;
+}
+
+// ── 슬롯 일괄 생성 POST /api/v1/slots/generate ──
+
+/**
+ * 백엔드 SlotGenerateRequest (ITDA 백엔드 dev d243245 SlotController·SlotService.generateSlots 기준).
+ * 하루치만 만든다: 서버가 그날 요일의 장비 운영시간을 장비·검사 유형 소요시간으로 나누고, 이미 지난 시각은 뺀다.
+ * 기간·사용자 지정 시간·휴게 시간은 요청에 없다.
+ */
+export interface SlotGenerateRequestDto {
+  equipmentId: string;
+  examTypeId: string;
+  /** 서울 날짜 `YYYY-MM-DD` (LocalDate) */
+  date: string;
+}
+
+/** 백엔드 SlotCreateResponse (startsAt·endsAt은 서버가 Asia/Seoul로 만든 OffsetDateTime) */
+export interface SlotCreateResponseDto {
+  id: string;
+  equipmentId: string;
+  examTypeId: string;
+  startsAt: string;
+  endsAt: string;
+  status: SlotStatusDto;
+}
+
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+/** 실제 있는 날짜인지 (`YYYY-MM-DD`, 시간대 변환 없이) */
+export function isSlotDateKey(value: unknown): value is string {
+  if (typeof value !== "string" || !DATE_KEY_PATTERN.test(value)) return false;
+  const [year, month, day] = value.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+}
+
+export type SlotGenerateField = "equipmentId" | "examTypeId" | "date";
+
+/** 생성 요청 값 확인 (요청 전). 잘못된 값은 고치지 않고 실패로 돌려준다 */
+export function validateSlotGenerateRequest(input: unknown): { ok: true; body: SlotGenerateRequestDto } | { ok: false; field: SlotGenerateField; message: string } {
+  const data = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+  if (!isSlotApiId(data.equipmentId)) return { ok: false, field: "equipmentId", message: "장비를 선택해 주세요." };
+  if (!isSlotApiId(data.examTypeId)) return { ok: false, field: "examTypeId", message: "검사 유형을 선택해 주세요." };
+  if (!isSlotDateKey(data.date)) return { ok: false, field: "date", message: "생성 날짜를 선택해 주세요." };
+  return { ok: true, body: { equipmentId: data.equipmentId, examTypeId: data.examTypeId, date: data.date } };
+}
+
+/** OffsetDateTime → 서울 `YYYY-MM-DDTHH:mm` (변환할 수 없으면 null) */
+function toSeoulMinuteOf(value: string): string | null {
+  const parsed = parseOffsetDateTime(value);
+  const local = parsed && toSeoulLocalDateTime(parsed);
+  return local ? local.slice(0, 16) : null;
+}
+
+/**
+ * 생성 응답 확인: 배열이고, 항목마다 형식·요청한 장비·검사 유형·서울 날짜가 같고, 시작 < 종료, 상태 AVAILABLE, 슬롯 ID가 겹치지 않아야 한다.
+ * 백엔드는 만들 슬롯이 없으면 400(SLOT_GENERATION_EMPTY)을 주므로 201에 빈 배열이 오면 계약 위반으로 본다.
+ */
+export function isSlotGenerateResponse(data: unknown, request: SlotGenerateRequestDto): data is SlotCreateResponseDto[] {
+  if (!Array.isArray(data) || data.length === 0) return false;
+  const ids = new Set<string>();
+  for (const item of data) {
+    if (!isSlotDetail(item) || item.status !== "AVAILABLE") return false;
+    if (item.equipmentId.toLowerCase() !== request.equipmentId.toLowerCase()) return false;
+    if (item.examTypeId.toLowerCase() !== request.examTypeId.toLowerCase()) return false;
+    const start = toSeoulMinuteOf(item.startsAt);
+    const end = toSeoulMinuteOf(item.endsAt);
+    if (!start || !end || start.slice(0, 10) !== request.date || end.slice(0, 10) !== request.date || !(start < end)) return false;
+    const id = item.id.toLowerCase();
+    if (ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+}
+
+/**
+ * 슬롯 일괄 생성 `POST /api/v1/slots/generate` → `ApiResponse<List<SlotCreateResponse>>` (201).
+ * Gateway 권한: EXAMINER·ADMIN. 서비스가 장비 기관과 요청자 기관을 비교해 다른 기관 장비면 403.
+ * - slots 기능이 API 대상이 아니면 요청하지 않고 CONFIG 오류 (Mock 생성으로 대신하지 않는다)
+ * - 요청 값이 잘못되면 요청하지 않고 CONFIG 오류
+ * - 응답이 계약과 다르면 PARSE 오류 (일부만 성공으로 보지 않는다)
+ * 서버에서만 부른다 (호출한 쪽이 서버 세션의 Authorization 헤더를 options.headers로 넘긴다).
+ */
+export async function generateSlots(
+  input: SlotGenerateRequestDto,
+  options: Pick<ApiRequestOptions, "headers" | "signal" | "timeoutMs"> = {},
+): Promise<SlotCreateResponseDto[]> {
+  requireApiFeature("slots");
+  const validation = validateSlotGenerateRequest(input);
+  if (!validation.ok) throw new ApiError("CONFIG", validation.message);
+  const data = await apiRequestData<unknown>("/api/v1/slots/generate", { ...options, method: "POST", body: validation.body });
+  if (!isSlotGenerateResponse(data, validation.body)) {
+    throw new ApiError("PARSE", "슬롯 생성 결과를 확인할 수 없습니다. 장비 슬롯 현황을 다시 확인해 주세요.", { body: data });
+  }
+  return data;
+}
+
+/** 슬롯 생성 실패 구분 */
+export type SlotGenerateFailureReason =
+  | "INVALID"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "SERVER_ERROR"
+  | "NETWORK"
+  | "TIMEOUT"
+  | "INVALID_RESPONSE"
+  | "ERROR";
+
+/** 생성 오류 코드별 안내 (백엔드 slot-service ErrorCode·Gateway 코드 기준). 서버 원문 메시지는 쓰지 않는다 */
+const SLOT_GENERATE_ERROR_MESSAGES: Record<string, string> = {
+  SLOT_START_NOT_FUTURE: "지난 날짜에는 슬롯을 만들 수 없습니다. 오늘 이후 날짜를 선택해 주세요.",
+  SLOT_GENERATION_EMPTY: "선택한 날짜에 만들 수 있는 미래 슬롯이 없습니다. 오늘의 운영시간이 이미 지났을 수 있습니다.",
+  SLOT_TIME_OVERLAP: "이 장비에 시간이 겹치는 슬롯이 이미 있습니다. 그날 슬롯이 이미 만들어졌는지 확인해 주세요.",
+  SLOT_INVALID_TIME_RANGE: "장비 운영시간이 올바르지 않습니다. 운영 시간을 확인해 주세요.",
+  REFERENCE_NOT_AVAILABLE: "선택한 날짜에 장비 운영시간이 없거나, 장비 또는 검사 소요 시간을 사용할 수 없습니다. 운영 요일·장비 상태·소요 시간을 확인해 주세요.",
+  RESOURCE_NOT_FOUND: "장비 또는 이 장비에 연결된 검사 유형을 찾을 수 없습니다. 목록을 다시 불러와 주세요.",
+  INVALID_INPUT: "장비와 검사 유형이 맞지 않거나 요청 값이 올바르지 않습니다.",
+  VALIDATION_FAILED: "요청 값이 올바르지 않습니다. 장비·검사 유형·날짜를 확인해 주세요.",
+  FORBIDDEN: "우리 기관 장비에만 슬롯을 만들 수 있습니다.",
+  ACCESS_DENIED: "슬롯을 만들 권한이 없습니다. 검사기관 계정으로 로그인했는지 확인해 주세요.",
+  REFERENCE_SERVICE_UNAVAILABLE: "기준정보 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+  REFERENCE_RESPONSE_INVALID: "기준정보 서비스 응답을 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+};
+
+export function getSlotGenerateFailure(error: unknown): { reason: SlotGenerateFailureReason; message: string; code: string | null } {
+  const fallback = "슬롯을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (!isApiError(error)) return { reason: "ERROR", message: fallback, code: null };
+  const code = error.code ?? null;
+  switch (error.kind) {
+    case "NETWORK":
+      return { reason: "NETWORK", message: "서버에 연결할 수 없습니다. 네트워크 상태를 확인한 뒤 슬롯 현황을 먼저 확인해 주세요.", code };
+    case "TIMEOUT":
+      return { reason: "TIMEOUT", message: "응답이 지연되었습니다. 슬롯이 만들어졌을 수 있으니 다시 요청하기 전에 슬롯 현황을 확인해 주세요.", code };
+    case "PARSE":
+      return { reason: "INVALID_RESPONSE", message: error.message, code };
+    case "CONFIG":
+      return { reason: "INVALID", message: error.message, code };
+    case "ABORTED":
+      return { reason: "ERROR", message: fallback, code };
+    case "HTTP": {
+      const status = error.status ?? 0;
+      const known = code ? SLOT_GENERATE_ERROR_MESSAGES[code] : undefined;
+      if (status === 401) return { reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었습니다. 다시 로그인해 주세요.", code };
+      if (status === 400) return { reason: "INVALID", message: known ?? "요청 값이 올바르지 않습니다.", code };
+      if (status === 403) return { reason: "FORBIDDEN", message: known ?? SLOT_GENERATE_ERROR_MESSAGES.FORBIDDEN, code };
+      if (status === 404) return { reason: "NOT_FOUND", message: known ?? SLOT_GENERATE_ERROR_MESSAGES.RESOURCE_NOT_FOUND, code };
+      if (status === 409) return { reason: "CONFLICT", message: known ?? SLOT_GENERATE_ERROR_MESSAGES.SLOT_TIME_OVERLAP, code };
+      if (status >= 500) return { reason: "SERVER_ERROR", message: known ?? "서버 오류로 슬롯을 만들지 못했습니다. 슬롯 현황을 확인한 뒤 다시 시도해 주세요.", code };
+      return { reason: "ERROR", message: known ?? fallback, code };
+    }
+  }
 }

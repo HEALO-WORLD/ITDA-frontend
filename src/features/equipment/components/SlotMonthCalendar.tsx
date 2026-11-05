@@ -257,7 +257,7 @@ function describeStatus(status: DayStatus): string {
     case "LOADING":
       return "불러오는 중";
     case "UNKNOWN":
-      return "슬롯 조회 불가 (서버 기능 준비 중)";
+      return "슬롯을 불러오지 못함, 선택 불가";
     case "PAST_DAY":
       return "지난 날짜, 선택 불가";
     case "OUT_OF_RANGE":
