@@ -90,20 +90,22 @@ export async function fetchReferralPage(
 /** 검사 유형 구분 (institution-service Modality) */
 export type ExamTypeModalityDto = "CT" | "MRI";
 
-/** 검사 유형 (institution-service ExamTypeResponse). 기관과 무관한 전체 목록이다 (삭제된 유형은 오지 않는다) */
+/**
+ * 공통 검사 유형 (institution-service ExamTypeResponse: id·name·modality). 기관과 무관한 전체 목록이다 (삭제된 유형은 오지 않는다).
+ * 검사 소요시간은 공통 검사 유형이 아니라 장비별 지원 검사 유형(EquipmentExamType)에 있다 (origin/dev 575a413부터).
+ */
 export interface ExamTypeDto {
   id: string;
   /** 검사명 (1~50자 자유 입력. 같은 modality에 여러 유형이 있을 수 있다) */
   name: string;
   modality: ExamTypeModalityDto;
-  durationMinutes: number;
 }
 
 /** 검사 유형 목록 한 번에 받을 수 있는 최대 크기 (백엔드는 1~100 밖이면 400) */
 export const EXAM_TYPE_MAX_PAGE_SIZE = 100;
 
 /**
- * 검사 유형 목록 `GET /api/v1/exam-types?page&size` (institution-service, Gateway·서비스: REQUESTER·EXAMINER).
+ * 검사 유형 목록 `GET /api/v1/exam-types?page&size` (institution-service, Gateway·서비스: REQUESTER·EXAMINER·ADMIN).
  * 이름 오름차순·ID 순으로 페이지를 나눠 준다. modality 조건은 쓰지 않는다 (전체를 받아 화면에서 이름을 찾는다).
  * 응답이 PagedResponse<ExamTypeResponse>와 다르면 PARSE 오류로 던진다.
  */
@@ -432,16 +434,18 @@ function isMyPartnership(value: unknown): value is MyPartnershipDto {
   );
 }
 
-/** ExamTypeResponse 4개 필드 (name은 백엔드 검증: 공백 아님·50자 이하, 소요시간 1분 이상) */
+/**
+ * ExamTypeResponse 3개 필드 (name은 백엔드 검증: 공백 아님·50자 이하).
+ * 소요시간은 더 이상 공통 검사 유형 응답에 없다. 이전 백엔드가 보내던 durationMinutes 같은 추가 필드는 쓰지 않고 무시한다
+ * (배포 순서가 달라도 목록이 깨지지 않게).
+ */
 function isExamType(value: unknown): value is ExamTypeDto {
   return (
     isRecord(value) &&
     isUuid(value.id) &&
     typeof value.name === "string" &&
     value.name.trim() !== "" &&
-    (value.modality === "CT" || value.modality === "MRI") &&
-    Number.isSafeInteger(value.durationMinutes) &&
-    (value.durationMinutes as number) >= 1
+    (value.modality === "CT" || value.modality === "MRI")
   );
 }
 
