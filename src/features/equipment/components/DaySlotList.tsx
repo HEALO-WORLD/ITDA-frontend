@@ -54,6 +54,21 @@ interface DaySlotListProps {
   slotMinutes: Map<string, number>;
   nowDateTime: string;
   onSelectSlot: (slot: ExamSlot) => void;
+  /**
+   * 슬롯별 상태 표시 (API 모드: 서버 상태 원본 + 지난 시간 표시). 없으면 Mock 화면의 getSlotDisplayStatus를 쓴다
+   * isPast면 행을 흐리게 하고 '지난 시간'을 덧붙인다 (원본 상태는 그대로 보여 준다)
+   */
+  statusOf?: (slot: ExamSlot) => { label: string; className: string; isPast: boolean };
+  /** 슬롯별 종료 시각 `HH:mm` (API 모드: 서버 endsAt). 없으면 장비 소요 시간(slotMinutes)으로 계산한다 */
+  endTimeOf?: (slot: ExamSlot) => string;
+  /** 제목 아래 필터 영역 (API 모드). 없으면 표시하지 않는다 */
+  toolbar?: ReactNode;
+  /** 제목 아래 건수 줄 대신 보여 줄 내용 (API 모드: 전체·필터 결과·페이지). 없으면 넘겨받은 slots로 센다 */
+  countSummary?: ReactNode;
+  /** slots가 비었을 때 기본 안내 대신 보여 줄 문구 (API 모드: 필터 결과 0건) */
+  emptyMessage?: ReactNode;
+  /** 목록 아래 (API 모드: 페이지 이동) */
+  footer?: ReactNode;
 }
 
 /**
@@ -71,8 +86,19 @@ export default function DaySlotList({
   slotMinutes,
   nowDateTime,
   onSelectSlot,
+  statusOf,
+  endTimeOf,
+  toolbar,
+  countSummary,
+  emptyMessage,
+  footer,
 }: DaySlotListProps) {
   const availableCount = slots.filter((slot) => getSlotDisplayStatus(slot, nowDateTime) === "AVAILABLE").length;
+  const viewOf = (slot: ExamSlot) => {
+    if (statusOf) return statusOf(slot);
+    const status = getSlotDisplayStatus(slot, nowDateTime);
+    return { ...SLOT_STATUS_META[status], isPast: status === "PAST" };
+  };
 
   return (
     <section aria-labelledby="day-slot-title" className="flex min-w-0 flex-col rounded-xl border border-line bg-white px-4 pb-4 pt-5 sm:px-5">
@@ -83,11 +109,12 @@ export default function DaySlotList({
         <p className="mt-0.5 text-[15px] font-semibold text-gray-800">{date ? formatDateLong(date) : "날짜를 선택해 주세요"}</p>
         <p className="text-sm text-gray-500" aria-live="polite">
           <span className="break-all">{scopeLabel}</span>
-          {state.kind === "READY" && slots.length > 0 && (
-            <> · 전체 {slots.length}건 · 예약 가능 {availableCount}건</>
-          )}
+          {countSummary !== undefined
+            ? state.kind === "READY" && countSummary
+            : state.kind === "READY" && slots.length > 0 && <> · 전체 {slots.length}건 · 예약 가능 {availableCount}건</>}
         </p>
       </div>
+      {toolbar}
 
       {state.kind !== "READY" ? (
         <EmptyMessage>
@@ -98,11 +125,11 @@ export default function DaySlotList({
         </EmptyMessage>
       ) : slots.length === 0 ? (
         <EmptyMessage>
-          {singleEquipmentName
+          {emptyMessage ?? (singleEquipmentName
             ? otherEquipmentSlotCount > 0
               ? `${singleEquipmentName}에는 이 날짜 슬롯이 없습니다. (다른 장비 ${otherEquipmentSlotCount}건)`
               : `${singleEquipmentName}에는 이 날짜 슬롯이 없습니다.`
-            : "이 날짜에는 슬롯이 없습니다."}
+            : "이 날짜에는 슬롯이 없습니다.")}
         </EmptyMessage>
       ) : (
         <div className="@container max-h-[560px] overflow-auto rounded-lg border border-line">
@@ -127,15 +154,16 @@ export default function DaySlotList({
             </thead>
             <tbody>
               {slots.map((slot) => {
-                const status = getSlotDisplayStatus(slot, nowDateTime);
-                const { label, className } = SLOT_STATUS_META[status];
+                const { label: statusLabel, className, isPast } = viewOf(slot);
+                // API 모드는 원본 상태 옆에 지난 시간을 덧붙인다 (Mock은 상태 자체가 '지난 시간')
+                const label = statusOf && isPast ? `${statusLabel} · 지난 시간` : statusLabel;
                 const start = slot.startAt.slice(11, 16);
-                const end = addMinutesToTime(start, slotMinutes.get(slot.equipmentId) ?? 30);
+                const end = endTimeOf ? endTimeOf(slot) : addMinutesToTime(start, slotMinutes.get(slot.equipmentId) ?? 30);
                 return (
                   <tr
                     key={slot.id}
                     onClick={() => onSelectSlot(slot)}
-                    className={`cursor-pointer border-t border-line hover:bg-gray-50 ${status === "PAST" ? "text-gray-400" : ""}`}
+                    className={`cursor-pointer border-t border-line hover:bg-gray-50 ${isPast ? "text-gray-400" : ""}`}
                   >
                     <td className="whitespace-nowrap px-2.5 py-1 font-semibold tabular-nums text-gray-900">
                       {start}
@@ -183,6 +211,7 @@ export default function DaySlotList({
           </table>
         </div>
       )}
+      {state.kind === "READY" && footer}
     </section>
   );
 }
