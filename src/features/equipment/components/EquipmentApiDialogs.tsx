@@ -328,7 +328,7 @@ export function EquipmentDetailDialog({ equipment, onClose, onEditInfo }: { equi
                     <option value="">선택해 주세요</option>
                     {available.map((item) => (
                       <option key={item.id} value={item.id}>
-                        {item.name} ({item.durationMinutes}분)
+                        {item.name}
                       </option>
                     ))}
                   </select>
