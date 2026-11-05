@@ -1,4 +1,4 @@
-import { Bell, Building2, CalendarCheck, CalendarDays, FileText, Handshake, History, Search, Users, Wrench } from "lucide-react";
+import { Bell, Building2, CalendarCheck, CalendarDays, ClipboardList, FileText, Handshake, History, Search, Users, Wrench } from "lucide-react";
 
 import type { OrganizationRole, UserRoleCode } from "@/types/auth";
 import type { NavItem } from "@/types/navigation";
@@ -24,6 +24,7 @@ export const ROUTES = {
   admin: {
     users: "/admin/users",
     institutions: "/admin/institutions",
+    examTypes: "/admin/exam-types",
     referrals: "/admin/referrals",
     reservations: "/admin/reservations",
     incidents: "/admin/incidents",
@@ -53,6 +54,7 @@ const EXAMINING_NAV: NavItem[] = [
 const ADMIN_NAV: NavItem[] = [
   { label: "회원 관리", icon: Users, href: ROUTES.admin.users },
   { label: "기관 관리", icon: Building2, href: ROUTES.admin.institutions },
+  { label: "검사 유형 관리", icon: ClipboardList, href: ROUTES.admin.examTypes },
   { label: "의뢰 관리", icon: FileText, href: ROUTES.admin.referrals },
   { label: "예약 관리", icon: CalendarCheck, href: ROUTES.admin.reservations },
   { label: "장비 장애 관리", icon: Wrench, href: ROUTES.admin.incidents },

@@ -177,6 +177,96 @@ export async function fetchSlotStatusHistories(
   return data as unknown as SlotStatusHistoryPageDto;
 }
 
+// ── 공통 검사 유형 (institution-service ExamType) ──
+
+/** 검사 유형 종류 */
+export type AdminExamTypeModality = "CT" | "MRI";
+export const EXAM_TYPE_MODALITIES: readonly AdminExamTypeModality[] = ["CT", "MRI"];
+export const isExamTypeModality = (value: unknown): value is AdminExamTypeModality => EXAM_TYPE_MODALITIES.includes(value as AdminExamTypeModality);
+
+/**
+ * 공통 검사 유형 (ExamTypeResponse·ExamTypeCreateResponse: id·name·modality).
+ * 소요 시간은 여기에 없다: 장비별 지원 검사 유형 연결(EquipmentExamType)에서 관리한다.
+ */
+export interface AdminExamTypeDto {
+  id: string;
+  name: string;
+  modality: AdminExamTypeModality;
+}
+
+export interface AdminExamTypePageDto {
+  contents: AdminExamTypeDto[];
+  totalElements: number;
+  totalPages: number;
+  size: number;
+  number: number;
+}
+
+/** 검사명 최대 길이 (ExamTypeCreateRequest·ExamTypeUpdateRequest: @NotBlank @Size(max = 50)) */
+export const EXAM_TYPE_NAME_MAX_LENGTH = 50;
+/** 관리자 검사 유형 목록 페이지 크기 (백엔드 허용 1~100) */
+export const ADMIN_EXAM_TYPE_PAGE_SIZE = 20;
+
+/** 검사명 검사 (백엔드 규칙과 같다. 앞뒤 공백은 빼고 보낸다). 통과하면 null */
+export function validateExamTypeName(name: unknown): string | null {
+  if (typeof name !== "string" || name.trim() === "") return "검사명을 입력해 주세요.";
+  if (name.trim().length > EXAM_TYPE_NAME_MAX_LENGTH) return `검사명은 ${EXAM_TYPE_NAME_MAX_LENGTH}자 이하로 입력해 주세요.`;
+  return null;
+}
+
+/**
+ * 공통 검사 유형 목록 `GET /api/v1/exam-types?modality&page&size` (Gateway: 로그인 사용자 전체, 서버 정렬: 이름순).
+ * 의뢰·장비 화면은 features/referrals/remote.ts의 fetchExamTypePage(기능 설정 referrals·equipment)를 그대로 쓴다.
+ */
+export async function fetchAdminExamTypePage(
+  { modality, page = 0, size = ADMIN_EXAM_TYPE_PAGE_SIZE }: { modality?: AdminExamTypeModality; page?: number; size?: number } = {},
+  options: RequestOptions = {},
+): Promise<AdminExamTypePageDto> {
+  requireApiMode();
+  if (modality !== undefined && !isExamTypeModality(modality)) throw new ApiError("CONFIG", "검사 종류가 올바르지 않습니다.");
+  if (!Number.isSafeInteger(page) || page < 0 || !Number.isSafeInteger(size) || size < 1 || size > 100) {
+    throw new ApiError("CONFIG", "페이지 조건이 올바르지 않습니다.");
+  }
+  const data = await apiRequestData<unknown>("/api/v1/exam-types", { ...options, query: { ...(modality ? { modality } : {}), page, size } });
+  if (
+    !isRecord(data) ||
+    !Array.isArray(data.contents) ||
+    !data.contents.every((item) => isAdminExamType(item) && (!modality || item.modality === modality)) ||
+    ![data.totalElements, data.totalPages, data.size, data.number].every((n) => Number.isSafeInteger(n) && (n as number) >= 0)
+  ) {
+    throw parseError(data);
+  }
+  return data as unknown as AdminExamTypePageDto;
+}
+
+/** 검사 유형 등록 `POST /api/v1/exam-types` (ADMIN, 201). 응답이 보낸 이름·종류와 같아야 성공으로 본다 */
+export async function createExamType(input: { name: string; modality: AdminExamTypeModality }, options: RequestOptions = {}): Promise<AdminExamTypeDto> {
+  requireApiMode();
+  const nameError = validateExamTypeName(input.name);
+  if (nameError) throw new ApiError("CONFIG", nameError);
+  if (!isExamTypeModality(input.modality)) throw new ApiError("CONFIG", "검사 종류가 올바르지 않습니다.");
+  const name = input.name.trim();
+  const data = await apiRequestData<unknown>("/api/v1/exam-types", { ...options, method: "POST", body: { name, modality: input.modality } });
+  if (!isAdminExamType(data) || data.name !== name || data.modality !== input.modality) throw parseError(data);
+  return data;
+}
+
+/** 검사 유형 이름 수정 `PATCH /api/v1/exam-types/{examTypeId}` (ADMIN, 이름만. 종류는 바꿀 수 없다). 없으면 404 */
+export async function updateExamTypeName(examTypeId: string, name: string, options: RequestOptions = {}): Promise<AdminExamTypeDto> {
+  requireApiMode();
+  if (!isAdminEntityId(examTypeId)) throw new ApiError("CONFIG", "검사 유형 ID 형식이 올바르지 않습니다.");
+  const nameError = validateExamTypeName(name);
+  if (nameError) throw new ApiError("CONFIG", nameError);
+  const trimmed = name.trim();
+  const data = await apiRequestData<unknown>(`/api/v1/exam-types/${encodeURIComponent(examTypeId)}`, { ...options, method: "PATCH", body: { name: trimmed } });
+  if (!isAdminExamType(data) || data.id.toLowerCase() !== examTypeId.toLowerCase() || data.name !== trimmed) throw parseError(data);
+  return data;
+}
+
+function isAdminExamType(value: unknown): value is AdminExamTypeDto {
+  return isRecord(value) && isAdminEntityId(value.id) && typeof value.name === "string" && value.name.trim() !== "" && isExamTypeModality(value.modality);
+}
+
 /** 기관 등록 `POST /api/v1/institutions` (201). 요양기관기호 중복은 409 DUPLICATE_CARE_INSTITUTION_CODE */
 export async function createInstitution(input: InstitutionCreateInput, options: RequestOptions = {}): Promise<InstitutionDto> {
   requireApiMode();
