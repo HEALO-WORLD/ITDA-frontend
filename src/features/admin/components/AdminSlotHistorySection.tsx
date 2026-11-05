@@ -1,6 +1,9 @@
+import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 
+import { TextInput } from "@/components/ui/FormControls";
 import StatusBadge, { type StatusTone } from "@/components/ui/StatusBadge";
+import { searchCardClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import NotificationPagination from "@/features/notifications/components/NotificationPagination";
 import { formatDateTime } from "@/lib/format/date";
@@ -8,7 +11,7 @@ import { formatDateTime } from "@/lib/format/date";
 import { loadAdminSlotHistories } from "../operations";
 import type { SlotStatusChangeReasonDto, SlotStatusDto } from "../remote";
 
-import { controlClass, EmptyRows, IdText, isUuidText, None, parsePage, readParam, resetClass, submitClass, tdClass, thClass, toHref, TotalCount, type SearchParams } from "./AdminDataParts";
+import { EmptyRows, IdText, isUuidText, None, parsePage, readParam, resetClass, submitClass, tdClass, thClass, toHref, TotalCount, type SearchParams } from "./AdminDataParts";
 import { AdminFailureNotice } from "./AdminNotices";
 
 const PATH = ROUTES.admin.slots;
@@ -41,21 +44,29 @@ export default async function AdminSlotHistorySection({ searchParams }: { search
 
   return (
     <div className="flex flex-col gap-5">
-      <form role="search" aria-label="슬롯 상태 이력 조회" action={PATH} method="get" className="flex flex-col gap-3 rounded-xl border border-line bg-white p-4 shadow-card">
-        <div className="flex flex-wrap items-center gap-2">
-          <input
+      <form role="search" aria-label="슬롯 상태 이력 조회" action={PATH} method="get" className={searchCardClass}>
+        <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+          <TextInput
+            id="admin-slot-id"
             name="slotId"
+            label="슬롯 ID"
             defaultValue={slotId ?? ""}
-            placeholder="슬롯 ID (UUID)"
-            aria-label="슬롯 ID (전체 UUID)"
+            placeholder="전체 UUID 입력 (예약 상세의 슬롯 ID를 누르면 자동 입력)"
             aria-invalid={invalid || undefined}
             aria-describedby={invalid ? "admin-slot-id-error" : undefined}
             autoComplete="off"
             required
-            className={`${controlClass} min-w-[280px] flex-[2_1_360px] font-mono`}
           />
-          <button type="submit" className={submitClass}>조회</button>
-          <Link href={PATH} className={resetClass}>초기화</Link>
+          <div className="flex gap-2">
+            <Link href={PATH} className={resetClass}>
+              <RotateCcw className="size-4" aria-hidden="true" />
+              초기화
+            </Link>
+            <button type="submit" className={submitClass}>
+              <Search className="size-5" aria-hidden="true" />
+              조회
+            </button>
+          </div>
         </div>
         {invalid && (
           <p id="admin-slot-id-error" role="alert" className="text-sm text-red-600">

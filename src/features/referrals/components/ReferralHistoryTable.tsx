@@ -3,6 +3,7 @@
 
 import { useMemo, useState } from "react";
 
+import { detailButtonClass, emptyStateClass, rowClass, tableClass, tableWrapClass, tdClass as baseTd, theadClass, thClass as baseTh } from "@/components/ui/styles";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import type { ReferralSummary } from "../types";
@@ -20,10 +21,9 @@ interface ReferralHistoryTableProps {
   referrals: readonly ReferralSummary[];
 }
 
-const thClass =
-  "whitespace-nowrap px-6 py-5 text-left text-[15px] font-semibold text-gray-700";
-
-const tdClass = "px-6 py-5 text-[15px] text-gray-900";
+// 공통 표 모양 (API 의뢰 목록·관리자 표와 같다)
+const thClass = baseTh;
+const tdClass = baseTd;
 
 /**
  * 의뢰·예약 관리
@@ -136,9 +136,9 @@ export default function ReferralHistoryTable({
       {referrals.length === 0 ? (
         <div
           role="status"
-          className="rounded-lg border border-dashed border-line px-6 py-16 text-center"
+          className={emptyStateClass}
         >
-          <p className="text-[15px] text-gray-500">
+          <p>
             등록된 의뢰·예약 내역이 없습니다.
           </p>
         </div>
@@ -146,9 +146,9 @@ export default function ReferralHistoryTable({
         /* 필터링 결과가 없는 경우 */
         <div
           role="status"
-          className="rounded-lg border border-dashed border-line px-6 py-16 text-center"
+          className={emptyStateClass}
         >
-          <p className="text-[15px] text-gray-500">
+          <p>
             검색 조건에 맞는 의뢰·예약이 없습니다.
           </p>
 
@@ -162,9 +162,9 @@ export default function ReferralHistoryTable({
         </div>
       ) : (
         /* 검색 결과 테이블 */
-        <div className="overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[820px] border-collapse">
-            <thead className="bg-gray-100/80">
+        <div className={tableWrapClass}>
+          <table className={`${tableClass} min-w-[820px]`}>
+            <thead className={theadClass}>
               <tr>
                 <th scope="col" className={thClass}>
                   의뢰 번호
@@ -184,14 +184,14 @@ export default function ReferralHistoryTable({
 
                 <th
                   scope="col"
-                  className={`${thClass} text-center`}
+                  className={`${thClass} text-center!`}
                 >
                   예약 상태
                 </th>
 
                 <th
                   scope="col"
-                  className={`${thClass} text-center`}
+                  className={`${thClass} text-center!`}
                 >
                   관리
                 </th>
@@ -202,7 +202,7 @@ export default function ReferralHistoryTable({
               {filteredReferrals.map((referral) => (
                 <tr
                   key={referral.id}
-                  className="border-t border-line transition-colors hover:bg-gray-50/60"
+                  className={rowClass}
                 >
                   {/* 의뢰 번호 */}
                   <td
@@ -249,7 +249,7 @@ export default function ReferralHistoryTable({
                       type="button"
                       onClick={() => setSelected(referral)}
                       aria-label={`${referral.referralNumber} 상세`}
-                      className="h-10 w-[92px] rounded-lg border border-primary bg-white text-[15px] font-semibold text-primary transition-colors hover:bg-primary-soft"
+                      className={detailButtonClass}
                     >
                       상세
                     </button>

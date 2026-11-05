@@ -1,3 +1,4 @@
+import { CircleAlert, Info, Loader2 } from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -14,7 +15,7 @@ const TITLES: Record<AdminLoadFailure["reason"], string> = {
 };
 
 const actionClass =
-  "inline-flex h-10 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-800 hover:bg-gray-50";
+  "mt-1 inline-flex h-9 items-center rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50";
 
 /**
  * 관리자 데이터 조회 실패 안내 (비로그인·세션 만료·권한 없음·네트워크·그 밖의 오류를 구분한다).
@@ -50,11 +51,12 @@ export function AdminFailureNotice({ failure }: { failure: AdminLoadFailure }) {
     <div
       role={isError ? "alert" : "status"}
       className={`flex flex-col items-center gap-3 rounded-xl border px-6 py-12 text-center ${
-        isError ? "border-red-200 bg-red-50 text-red-700" : "border-dashed border-line bg-white text-gray-600"
+        isError ? "border-red-100 bg-red-50/70" : "border-dashed border-line-strong bg-white"
       }`}
     >
-      <p className="text-[15px] font-semibold">{TITLES[failure.reason]}</p>
-      <p className="text-sm">{message}</p>
+      {isError ? <CircleAlert className="size-6 text-red-500" aria-hidden="true" /> : <Info className="size-6 text-gray-400" aria-hidden="true" />}
+      <p className="text-[15px] font-semibold text-gray-900">{TITLES[failure.reason]}</p>
+      <p className="text-sm text-gray-600">{message}</p>
       {action}
     </div>
   );
@@ -63,7 +65,7 @@ export function AdminFailureNotice({ failure }: { failure: AdminLoadFailure }) {
 /** Mock 모드 안내: 관리자 화면은 실제 API에서만 제공한다 (가짜 관리자 데이터를 만들지 않는다) */
 export function AdminApiOnlyNotice() {
   return (
-    <section role="status" className="rounded-xl border border-dashed border-line bg-white px-6 py-16 text-center">
+    <section role="status" className="rounded-xl border border-dashed border-line-strong bg-white px-6 py-16 text-center">
       <p className="text-[15px] font-semibold text-gray-700">관리자 기능은 실제 API 연결(API 모드)에서만 제공됩니다.</p>
       <p className="mt-2 text-sm text-gray-500">데모(Mock) 모드에서는 관리자 데이터를 보여 주지 않습니다.</p>
     </section>
@@ -73,7 +75,8 @@ export function AdminApiOnlyNotice() {
 /** 조회 중 표시 (Suspense fallback) */
 export function AdminLoading({ label }: { label: string }) {
   return (
-    <p role="status" className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500">
+    <p role="status" className="flex items-center justify-center gap-2 rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500 shadow-card">
+      <Loader2 className="size-5 animate-spin text-primary" aria-hidden="true" />
       {label}
     </p>
   );

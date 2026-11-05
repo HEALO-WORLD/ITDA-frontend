@@ -1,11 +1,14 @@
+import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 
+import { SelectInput, TextInput } from "@/components/ui/FormControls";
+import { searchCardClass, searchGridClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import NotificationPagination from "@/features/notifications/components/NotificationPagination";
 import { toBadgeStatus } from "@/features/referrals/components/ReferralApiTable";
 import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 import ReferralStatusBadge from "@/features/referrals/components/ReferralStatusBadge";
-import { FAILURE_REASON_LABELS, HISTORY_REASON_LABELS, REFERRAL_STATUS_LABELS } from "@/features/referrals/labels";
+import { REFERRAL_STATUS_LABELS } from "@/features/referrals/labels";
 import {
   isPatientNameSearch,
   REFERRAL_PAGE_SIZES,
@@ -13,25 +16,20 @@ import {
   type ReferralListParams,
   type ReferralStatusDto,
 } from "@/features/referrals/remote";
-import { formatDateTime } from "@/lib/format/date";
 
-import { loadAdminReferralDetail, loadAdminReferralPage, type AdminReferralDetail } from "../operations";
+import { loadAdminReferralPage } from "../operations";
 import type { InstitutionDto } from "../remote";
 import { loadInstitutions } from "../server";
 
+import AdminReferralDetailModal, { AdminReferralDetailButton } from "./AdminReferralDetailModal";
 import {
-  controlClass,
-  detailLinkClass,
   EmptyRows,
-  Field,
   IdText,
   isUuidText,
   None,
   parsePage,
   readParam,
-  ReservationStatusBadge,
   resetClass,
-  smallLinkClass,
   submitClass,
   tdClass,
   thClass,
@@ -53,7 +51,8 @@ interface Query {
 /**
  * 의뢰 관리 (관리자, API 모드). 전체 의뢰기관의 의뢰를 조회만 한다 (변경 기능 없음).
  * - 목록 조건: status·referringInstitutionId(의뢰기관 선택)·examTypeId(ID 입력: ADMIN은 검사 유형 목록 API 권한이 없다)·patientName·size·sort·page
- * - 상세 `?referralId=`: 의뢰 + 상태 변경 이력 + 현재 예약 (단건 3회). 목록에서는 단건 API를 부르지 않는다
+ * - 상세: '상세' 버튼 → 대화상자(AdminReferralDetailModal). 주소 `?referralId=`로 열린 상태를 나타내고(직접 접근·뒤로 가기),
+ *   열 때만 의뢰 + 상태 변경 이력 + 현재 예약을 조회한다 (단건 3회). 목록을 그릴 때는 단건 API를 부르지 않는다
  * - 기관명은 관리자 기관 목록 1회로 찾는다 (실패하면 ID로 표시)
  */
 export default async function AdminReferralsSection({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -73,7 +72,6 @@ export default async function AdminReferralsSection({ searchParams }: { searchPa
       (entry): entry is [string, string] => !!entry[1],
     ),
   );
-  const pageQuery = { ...listQuery, ...(list.page > 0 ? { page: String(list.page + 1) } : {}) };
   const filtered = Object.keys(listQuery).some((key) => key !== "size" && key !== "sort");
 
   return (
@@ -90,16 +88,15 @@ export default async function AdminReferralsSection({ searchParams }: { searchPa
                 <th scope="col" className={thClass}>의뢰 번호</th>
                 <th scope="col" className={thClass}>환자명</th>
                 <th scope="col" className={thClass}>의뢰기관</th>
-                <th scope="col" className={`${thClass} text-center`}>의뢰 상태</th>
+                <th scope="col" className={`${thClass} text-center!`}>의뢰 상태</th>
                 <th scope="col" className={thClass}>현재 예약</th>
-                <th scope="col" className={`${thClass} text-center`}>관리</th>
+                <th scope="col" className={`${thClass} text-center!`}>관리</th>
               </tr>
             </thead>
             <tbody>
               {list.items.map((item) => {
-                const selected = item.id.toLowerCase() === query.referralId?.toLowerCase();
                 return (
-                  <tr key={item.id} className={`border-t border-line transition-colors first:border-t-0 ${selected ? "bg-primary-soft/60" : "hover:bg-gray-50/70"}`}>
+                  <tr key={item.id} className="border-t border-line transition-colors first:border-t-0 hover:bg-gray-50/70">
                     <td className={`${tdClass} whitespace-nowrap`}><ReferralIdCopyButton referralId={item.id} /></td>
                     <td className={`${tdClass} whitespace-nowrap`}>{item.patientName}</td>
                     <td className={tdClass}>{institutionName(item.referringInstitutionId) ?? <IdText id={item.referringInstitutionId} />}</td>
@@ -112,9 +109,7 @@ export default async function AdminReferralsSection({ searchParams }: { searchPa
                       )}
                     </td>
                     <td className={`${tdClass} text-center`}>
-                      <Link href={toHref(PATH, { ...pageQuery, referralId: item.id })} aria-current={selected ? "true" : undefined} aria-label={`의뢰 ${item.id.slice(0, 8)} 상세 보기`} className={detailLinkClass}>
-                        상세
-                      </Link>
+                      <AdminReferralDetailButton referralId={item.id} />
                     </td>
                   </tr>
                 );
@@ -124,115 +119,62 @@ export default async function AdminReferralsSection({ searchParams }: { searchPa
         </div>
       )}
       <NotificationPagination page={list.page} totalPages={list.totalPages} query={listQuery} label="의뢰 목록 페이지" />
-      {query.referralId && <ReferralDetailPanel referralId={query.referralId} closeHref={toHref(PATH, pageQuery)} institutionName={institutionName} />}
+      {/* 상세 대화상자: 기관명은 목록을 그릴 때 받은 관리자 기관 목록으로 찾는다 (추가 요청 없음) */}
+      <AdminReferralDetailModal institutionNames={Object.fromEntries(nameById)} />
     </div>
-  );
-}
-
-async function ReferralDetailPanel({ referralId, closeHref, institutionName }: { referralId: string; closeHref: string; institutionName: (id: string) => string | undefined }) {
-  const result = await loadAdminReferralDetail(referralId);
-  return (
-    <section aria-labelledby="admin-referral-detail-title" className="flex flex-col gap-5 rounded-xl border border-line bg-white px-5 py-6 shadow-card sm:px-6">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="admin-referral-detail-title" className="text-lg font-semibold text-gray-900">의뢰 상세</h2>
-        <Link href={closeHref} className={smallLinkClass}>닫기</Link>
-      </div>
-      {!result.ok ? (
-        <AdminFailureNotice failure={result} />
-      ) : (
-        <>
-          <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-[15px] sm:grid-cols-2">
-            <Field label="의뢰 번호"><IdText id={result.detail.referral.id} full /></Field>
-            <Field label="의뢰 상태"><ReferralStatusBadge status={toBadgeStatus(result.detail.referral.referralStatus)} /></Field>
-            <Field label="환자명">{result.detail.referral.patientName}</Field>
-            <Field label="의뢰기관">{institutionName(result.detail.referral.referringInstitutionId) ?? <IdText id={result.detail.referral.referringInstitutionId} full />}</Field>
-            <Field label="검사 유형 ID" wide>
-              <IdText id={result.detail.referral.examTypeId} full /> <span className="text-sm text-gray-500">(검사 유형 이름은 관리자 권한으로 조회할 수 없어 ID로 표시)</span>
-            </Field>
-          </dl>
-
-          <div className="rounded-lg bg-gray-50 p-4">
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-              <h3 className="text-[15px] font-semibold text-gray-800">연결된 현재 예약</h3>
-              <Link href={toHref(ROUTES.admin.reservations, { referralId: result.detail.referral.id })} className={smallLinkClass}>이 의뢰의 예약 이력 전체</Link>
-            </div>
-            <CurrentReservation reservation={result.detail.reservation} />
-          </div>
-
-          <div>
-            <h3 className="mb-3 text-[15px] font-semibold text-gray-800">의뢰 상태 변경 이력</h3>
-            {"ok" in result.detail.histories ? (
-              <AdminFailureNotice failure={result.detail.histories} />
-            ) : result.detail.histories.length === 0 ? (
-              <p role="status" className="text-sm text-gray-600">변경 이력이 없습니다.</p>
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
-                <table className="w-full min-w-[640px] border-collapse">
-                  <thead className="bg-gray-50">
-                    <tr>
-                      <th scope="col" className={thClass}>발생 일시</th>
-                      <th scope="col" className={thClass}>사유</th>
-                      <th scope="col" className={thClass}>이전 상태</th>
-                      <th scope="col" className={thClass}>변경 후 상태</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.detail.histories.map((history) => (
-                      <tr key={history.id} className="border-t border-line">
-                        <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{formatDateTime(history.occurredAt)}</td>
-                        <td className={tdClass}>{HISTORY_REASON_LABELS[history.reason]}</td>
-                        <td className={tdClass}>{history.fromStatus ? REFERRAL_STATUS_LABELS[history.fromStatus] : <None label="없음 (최초 접수)" />}</td>
-                        <td className={tdClass}>{REFERRAL_STATUS_LABELS[history.toStatus]}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </>
-      )}
-    </section>
-  );
-}
-
-function CurrentReservation({ reservation }: { reservation: AdminReferralDetail["reservation"] }) {
-  if (reservation === null) return <p className="text-sm text-gray-600">연결된 예약이 없습니다.</p>;
-  if ("ok" in reservation) return <AdminFailureNotice failure={reservation} />;
-  return (
-    <dl className="grid grid-cols-1 gap-x-8 gap-y-4 text-[15px] sm:grid-cols-2">
-      <Field label="예약 ID"><IdText id={reservation.id} href={toHref(ROUTES.admin.reservations, { reservationId: reservation.id })} full /></Field>
-      <Field label="예약 상태"><ReservationStatusBadge status={reservation.reservationStatus} /> <span className="text-sm text-gray-500">({reservation.attemptNo}번째 시도)</span></Field>
-      <Field label="검사 일시">{reservation.startTime ? formatDateTime(reservation.startTime) : <None label="정보 없음" />}</Field>
-      <Field label="실패 사유">{reservation.failureReason ? <span className="font-medium text-red-700">{FAILURE_REASON_LABELS[reservation.failureReason]}</span> : <None />}</Field>
-    </dl>
   );
 }
 
 function ReferralFilter({ query, institutions, institutionsFailed }: { query: Query["list"]; institutions: InstitutionDto[]; institutionsFailed: boolean }) {
   return (
-    <form role="search" aria-label="의뢰 검색 조건" action={PATH} method="get" className="flex flex-col gap-3 rounded-xl border border-line bg-white p-4 shadow-card">
-      <div className="flex flex-wrap items-center gap-2">
-        <select name="status" aria-label="의뢰 상태" defaultValue={query.status ?? ""} className={`${controlClass} min-w-[130px] flex-[1_1_130px]`}>
-          <option value="">전체 상태</option>
-          {REFERRAL_STATUSES.map((value) => <option key={value} value={value}>{REFERRAL_STATUS_LABELS[value]}</option>)}
-        </select>
-        <select name="referringInstitutionId" aria-label="의뢰기관" defaultValue={query.referringInstitutionId ?? ""} disabled={institutionsFailed} className={`${controlClass} min-w-[180px] flex-[1_1_180px] disabled:bg-gray-50 disabled:text-gray-400`}>
-          <option value="">전체 의뢰기관</option>
-          {institutions.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
-        </select>
-        <input name="patientName" defaultValue={query.patientName ?? ""} maxLength={20} placeholder="환자명" aria-label="환자명 검색 (20자 이내)" autoComplete="off" className={`${controlClass} min-w-[140px] flex-[1_1_140px]`} />
-        <input name="examTypeId" defaultValue={query.examTypeId ?? ""} placeholder="검사 유형 ID (UUID)" aria-label="검사 유형 ID (전체 UUID)" autoComplete="off" className={`${controlClass} min-w-[240px] flex-[2_1_260px] font-mono`} />
+    <form role="search" aria-label="의뢰 검색 조건" action={PATH} method="get" className={searchCardClass}>
+      {/* 기준: 의뢰기관 검사 슬롯 검색 (라벨 붙은 공통 입력, 데스크톱 4열 · 태블릿 2열 · 모바일 1열) */}
+      <div className={searchGridClass}>
+        <SelectInput
+          id="admin-referral-status"
+          name="status"
+          label="의뢰 상태"
+          defaultValue={query.status ?? ""}
+          options={[{ value: "", label: "전체 상태" }, ...REFERRAL_STATUSES.map((value) => ({ value, label: REFERRAL_STATUS_LABELS[value] }))]}
+        />
+        <SelectInput
+          id="admin-referral-institution"
+          name="referringInstitutionId"
+          label="의뢰기관"
+          defaultValue={query.referringInstitutionId ?? ""}
+          disabled={institutionsFailed}
+          options={[{ value: "", label: "전체 의뢰기관" }, ...institutions.map((item) => ({ value: item.id, label: item.name }))]}
+        />
+        <TextInput id="admin-referral-patient" name="patientName" label="환자명" defaultValue={query.patientName ?? ""} maxLength={20} placeholder="환자명 (20자 이내)" autoComplete="off" />
+        <TextInput id="admin-referral-exam-type" name="examTypeId" label="검사 유형 ID" defaultValue={query.examTypeId ?? ""} placeholder="전체 UUID 입력" autoComplete="off" />
       </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <select name="sort" aria-label="정렬" defaultValue={query.sort} className={`${controlClass} w-auto`}>
-          {(Object.keys(SORT_LABELS) as ReferralSort[]).map((value) => <option key={value} value={value}>{SORT_LABELS[value]}</option>)}
-        </select>
-        <select name="size" aria-label="페이지당 건수" defaultValue={String(query.size)} className={`${controlClass} w-auto`}>
-          {REFERRAL_PAGE_SIZES.map((value) => <option key={value} value={value}>{value}개씩</option>)}
-        </select>
-        <button type="submit" className={submitClass}>검색</button>
-        <Link href={PATH} className={resetClass}>초기화</Link>
+      <div className="flex flex-wrap items-end justify-between gap-3 border-t border-line pt-5">
+        <div className="grid w-full grid-cols-2 gap-3 sm:w-auto sm:grid-cols-[180px_140px]">
+          <SelectInput
+            id="admin-referral-sort"
+            name="sort"
+            label="정렬"
+            defaultValue={query.sort}
+            options={(Object.keys(SORT_LABELS) as ReferralSort[]).map((value) => ({ value, label: SORT_LABELS[value] }))}
+          />
+          <SelectInput
+            id="admin-referral-size"
+            name="size"
+            label="페이지 크기"
+            defaultValue={String(query.size)}
+            options={REFERRAL_PAGE_SIZES.map((value) => ({ value: String(value), label: `${value}개씩` }))}
+          />
+        </div>
+        <div className="ml-auto flex gap-2">
+          <Link href={PATH} className={resetClass}>
+            <RotateCcw className="size-4" aria-hidden="true" />
+            초기화
+          </Link>
+          <button type="submit" className={submitClass}>
+            <Search className="size-5" aria-hidden="true" />
+            검색
+          </button>
+        </div>
       </div>
       {institutionsFailed && <p role="status" className="text-sm text-amber-700">기관 목록을 불러오지 못해 의뢰기관 조건을 쓸 수 없고, 기관은 ID로 표시합니다.</p>}
     </form>

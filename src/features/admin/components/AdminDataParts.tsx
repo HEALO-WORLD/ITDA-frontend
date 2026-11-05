@@ -12,8 +12,8 @@ export const controlClass =
 export const detailLinkClass =
   "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg border border-primary/40 bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:border-primary hover:bg-primary-soft";
 export const smallLinkClass = "inline-flex h-8 items-center rounded-lg border border-line bg-white px-3 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50";
-export const submitClass = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover";
-export const resetClass = "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50";
+/** 검색·초기화 버튼: 의뢰기관 슬롯 검색과 같은 공통 버튼 */
+export { resetButtonClass as resetClass, searchButtonClass as submitClass } from "@/components/ui/styles";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const isUuidText = (value: string) => UUID_PATTERN.test(value);

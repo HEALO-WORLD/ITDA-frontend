@@ -5,6 +5,7 @@ import { RotateCcw, Search, SlidersHorizontal } from "lucide-react";
 import { useState, type KeyboardEvent } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
+import { controlClass, filterPanelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { REFERRAL_STATUS_LABELS } from "./ReferralStatusBadge";
 import type { ReferralDisplayStatus } from "../types";
 import type { ReferralFilterCriteria } from "../filter";
@@ -18,8 +19,7 @@ interface ReferralFilterProps {
   organizations: readonly string[];
 }
 
-const controlClass =
-  "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+
 
 const statusOptions = Object.entries(
   REFERRAL_STATUS_LABELS
@@ -70,7 +70,7 @@ export default function ReferralFilter({
     <div
       role="search"
       aria-label="의뢰·예약 검색 조건"
-      className="flex flex-col gap-3"
+      className={filterPanelClass}
     >
       {/* 기본 필터 */}
       <div className="flex flex-wrap items-center gap-2">
@@ -155,7 +155,7 @@ export default function ReferralFilter({
           <button
             type="button"
             onClick={handleSearch}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-bold text-white hover:bg-primary-hover"
+            className={primaryButtonClass}
           >
             <Search className="size-4" aria-hidden="true" />
             검색
@@ -164,7 +164,7 @@ export default function ReferralFilter({
           <button
             type="button"
             onClick={onReset}
-            className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm font-medium text-gray-600 hover:bg-gray-50"
+            className={secondaryButtonClass}
           >
             <RotateCcw
               className="size-4"

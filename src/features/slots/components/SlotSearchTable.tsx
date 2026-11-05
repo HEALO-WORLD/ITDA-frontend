@@ -12,8 +12,8 @@ interface SlotSearchTableProps {
   actionLabel?: string;
 }
 
-const thClass = "px-7 py-5 text-left text-[15px] font-semibold text-gray-700";
-const tdClass = "px-7 py-6 text-[15px] text-gray-900";
+const thClass = "border-b border-line px-6 py-3 text-left text-[13px] font-semibold text-gray-500";
+const tdClass = "px-6 py-4 text-sm text-gray-700";
 
 export default function SlotSearchTable({
   slots,
@@ -21,16 +21,16 @@ export default function SlotSearchTable({
   actionLabel = "예약 요청",
 }: SlotSearchTableProps) {
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
       <table className="w-full min-w-[880px] border-collapse">
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className={thClass}>검사기관</th>
             <th scope="col" className={thClass}>검사 장비</th>
             <th scope="col" className={thClass}>검사 유형</th>
             <th scope="col" className={thClass}>검사 일시</th>
-            <th scope="col" className={`${thClass} text-center`}>상태</th>
-            <th scope="col" className={`${thClass} text-center`}>선택</th>
+            <th scope="col" className={`${thClass} text-center!`}>상태</th>
+            <th scope="col" className={`${thClass} text-center!`}>선택</th>
           </tr>
         </thead>
         <tbody>

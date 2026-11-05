@@ -8,17 +8,22 @@ interface ModalProps {
   description?: ReactNode;
   /** 제목 오른쪽에 붙는 요소 (예: 상태 배지) */
   titleAddon?: ReactNode;
-  /** 최대 너비. md = 560px(기본), lg = 680px */
-  size?: "md" | "lg";
+  /** 최대 너비. md = 560px(기본), lg = 680px, xl = 780px (정보가 많은 상세 화면), 2xl = 1024px (관리자 2단 상세), 3xl = 1160px (관리자 의뢰 상세) */
+  size?: "md" | "lg" | "xl" | "2xl" | "3xl";
   onClose: () => void;
   /** 바깥(배경) 클릭으로 닫기. 입력 중인 폼은 false 권장 */
   closeOnBackdrop?: boolean;
+  /** 스크롤 영역 밖 하단에 고정할 요소 (예: 닫기 버튼 줄). 있으면 제목·하단이 고정되고 본문만 스크롤한다 */
+  footer?: ReactNode;
   children: ReactNode;
 }
 
 const WIDTH_CLASS = {
   md: "w-[min(560px,calc(100%-32px))]",
   lg: "w-[min(680px,calc(100%-32px))]",
+  xl: "w-[min(780px,calc(100%-24px))]",
+  "2xl": "w-[min(1024px,calc(100%-24px))]",
+  "3xl": "w-[min(1160px,calc(100%-24px))]",
 } as const;
 
 /**
@@ -41,6 +46,7 @@ export default function Modal({
   size = "md",
   onClose,
   closeOnBackdrop = true,
+  footer,
   children,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -57,6 +63,17 @@ export default function Modal({
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
+  // 열려 있는 동안 배경(페이지) 스크롤을 막는다. 닫히면 이전 값으로 되돌려 목록 스크롤 위치는 그대로다
+  useEffect(() => {
+    if (!open) return;
+    const root = document.documentElement;
+    const previous = root.style.overflow;
+    root.style.overflow = "hidden";
+    return () => {
+      root.style.overflow = previous;
+    };
+  }, [open]);
+
   return (
     <dialog
       ref={dialogRef}
@@ -69,11 +86,12 @@ export default function Modal({
       onClick={(event) => {
         if (closeOnBackdrop && event.target === event.currentTarget) onClose();
       }}
-      className={`m-auto max-h-[calc(100dvh-32px)] rounded-xl bg-white p-0 shadow-xl backdrop:bg-gray-900/40 ${WIDTH_CLASS[size]}`}
+      className={`m-auto max-h-[calc(100dvh-32px)] overflow-hidden rounded-2xl border border-line bg-white p-2 text-left shadow-2xl backdrop:bg-gray-900/45 sm:max-h-[85vh] ${WIDTH_CLASS[size]}`}
     >
       {open && (
-        <div className="flex max-h-[calc(100dvh-32px)] flex-col">
-          <div className="flex shrink-0 items-start justify-between gap-4 px-6 pb-5 pt-6 sm:px-7">
+        // 바깥 dialog는 넘치지 않게 두고(테두리 2px만큼 뺀다) 본문만 스크롤한다 (스크롤바가 두 개 생기지 않게)
+        <div className="flex max-h-[calc(100dvh-34px)] flex-col sm:max-h-[calc(85vh-2px)]">
+          <div className={`flex shrink-0 items-start justify-between gap-4 px-5 pb-4 pt-5 sm:px-7 sm:pt-6 ${footer ? "border-b border-line" : ""}`}>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 <h2 id={titleId} className="text-xl font-bold text-gray-900">
@@ -91,12 +109,13 @@ export default function Modal({
               type="button"
               onClick={onClose}
               aria-label="닫기"
-              className="shrink-0 rounded-md p-1.5 text-gray-500 hover:bg-gray-100 focus-visible:outline-2 focus-visible:outline-primary"
+              className="-mr-1.5 shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-primary"
             >
               <X className="size-5" aria-hidden="true" />
             </button>
           </div>
-          <div className="min-h-0 overflow-y-auto px-6 pb-6 sm:px-7">{children}</div>
+          <div className={`min-h-0 flex-1 overflow-y-auto px-5 pb-5 sm:px-7 sm:pb-6 ${footer ? "pt-5" : ""}`}>{children}</div>
+          {footer && <div className="flex shrink-0 justify-end gap-2 border-t border-line px-5 py-3 sm:px-7">{footer}</div>}
         </div>
       )}
     </dialog>

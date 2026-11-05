@@ -34,7 +34,7 @@ export default function ApiNotificationList({ notifications, page, totalPages }:
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
-      <h2 id="notification-list-title" className="mb-1 text-2xl font-bold text-gray-900">
+      <h2 id="notification-list-title" className="mb-1 text-lg font-semibold text-gray-900 sm:text-xl">
         알림 내역
       </h2>
       <p className="mb-3 text-sm text-gray-500">

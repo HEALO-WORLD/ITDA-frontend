@@ -1,20 +1,57 @@
 @import "tailwindcss";
 
-/* 디자인 토큰: 와이어프레임 기준 화이트/연회색 배경 + 블루 주요 액션 */
+/*
+ * 디자인 토큰 (Modern Healthcare B2B SaaS)
+ * - Primary: 기존 ITDA 블루 유지
+ * - 회색(gray-*)은 슬레이트 톤으로 바꿔 모든 화면의 글자·배경·테두리를 차분한 네이비 계열로 맞춘다
+ *   (클래스 이름은 그대로라 기존 화면 구조·기능에는 영향이 없다)
+ * - 의미 색상: success(그린)·warning(앰버)·danger(레드)·info(블루). 배지·안내 영역은 *-soft 배경 + 진한 글자
+ */
 @theme {
   --color-primary: #0b63f3;
   --color-primary-hover: #0a56d6;
-  --color-primary-soft: #e6effe;
+  --color-primary-soft: #eaf1fe;
   --color-navy: #0f1d3a;
-  --color-line: #e3e7ee;
+  --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
   --color-surface: #ffffff;
-  --color-surface-muted: #f6f8fb;
+  --color-surface-muted: #f5f7fa;
+
+  --color-gray-50: #f8fafc;
+  --color-gray-100: #f1f5f9;
+  --color-gray-200: #e2e8f0;
+  --color-gray-300: #cbd5e1;
+  --color-gray-400: #94a3b8;
+  --color-gray-500: #64748b;
+  --color-gray-600: #475569;
+  --color-gray-700: #334155;
+  --color-gray-800: #1e293b;
+  --color-gray-900: #0f172a;
+
+  --color-success: #15803d;
+  --color-success-soft: #ecfdf3;
+  --color-warning: #b45309;
+  --color-warning-soft: #fffbeb;
+  --color-danger: #dc2626;
+  --color-danger-soft: #fef2f2;
+  --color-info: #0b63f3;
+  --color-info-soft: #eaf1fe;
+
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.04);
 
   --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
 }
 
 body {
   background: var(--color-surface-muted);
-  color: #111827;
+  color: var(--color-gray-900);
   font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* 키보드 포커스 표시 (마우스 클릭에는 보이지 않는다). 개별 요소가 따로 정한 표시는 그대로 둔다 */
+:where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
 }

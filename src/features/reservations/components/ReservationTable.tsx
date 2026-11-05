@@ -22,9 +22,9 @@ interface ReservationTableProps {
 }
 
 const thClass =
-  "whitespace-nowrap px-4 py-3.5 text-left text-sm font-semibold text-gray-700";
+  "whitespace-nowrap border-b border-line px-4 py-3 text-left text-[13px] font-semibold text-gray-500";
 
-const tdClass = "px-4 py-3.5 text-[15px] text-gray-900";
+const tdClass = "px-4 py-3.5 text-sm text-gray-700";
 
 /**
  * 검사기관 예약 목록
@@ -68,7 +68,7 @@ export default function ReservationTable({
   }
 
   return (
-    <div className="overflow-x-auto rounded-lg border border-line">
+    <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
       {/* 예약 목록 테이블 */}
       <table className="w-full min-w-[820px] table-fixed border-collapse">
         {/* 열 너비 */}
@@ -82,7 +82,7 @@ export default function ReservationTable({
           <col className="w-[96px]" />
         </colgroup>
 
-        <thead className="bg-gray-100/80">
+        <thead className="bg-gray-50">
           <tr>
             <th scope="col" className={thClass}>
               예약번호
@@ -106,14 +106,14 @@ export default function ReservationTable({
 
             <th
               scope="col"
-              className={`${thClass} text-center`}
+              className={`${thClass} text-center!`}
             >
               예약 상태
             </th>
 
             <th
               scope="col"
-              className={`${thClass} text-center`}
+              className={`${thClass} text-center!`}
             >
               상세
             </th>
