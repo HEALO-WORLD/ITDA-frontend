@@ -1,4 +1,4 @@
-import { Bell, Building2, CalendarCheck, CalendarDays, FileText, History, Search, Users, Wrench } from "lucide-react";
+import { Bell, Building2, CalendarCheck, CalendarDays, FileText, Handshake, History, Search, Users, Wrench } from "lucide-react";
 
 import type { OrganizationRole, UserRoleCode } from "@/types/auth";
 import type { NavItem } from "@/types/navigation";
@@ -11,6 +11,7 @@ export const ROUTES = {
     slots: "/referring/slots",
     referrals: "/referring/referrals",
     notifications: "/referring/notifications",
+    partnerships: "/referring/partnerships",
   },
   examining: {
     equipment: "/examining/equipment",
@@ -18,6 +19,7 @@ export const ROUTES = {
     incidents: "/examining/incidents",
     examinations: "/examining/examinations",
     notifications: "/examining/notifications",
+    partnerships: "/examining/partnerships",
   },
   admin: {
     users: "/admin/users",
@@ -34,6 +36,7 @@ const REFERRING_NAV: NavItem[] = [
   { label: "검사 슬롯 검색", icon: Search, href: ROUTES.referring.slots },
   { label: "의뢰·예약 관리", icon: CalendarDays, href: ROUTES.referring.referrals },
   { label: "재조정·알림", icon: Bell, href: ROUTES.referring.notifications },
+  { label: "협력 검사기관", icon: Handshake, href: ROUTES.referring.partnerships },
 ];
 
 /** 검사기관 사이드바 (screen-spec 2.3) */
@@ -43,6 +46,7 @@ const EXAMINING_NAV: NavItem[] = [
   { label: "장비 장애·재조정", icon: Wrench, href: ROUTES.examining.incidents },
   { label: "검사 진행·결과", icon: FileText, href: ROUTES.examining.examinations },
   { label: "알림", icon: Bell, href: ROUTES.examining.notifications },
+  { label: "협약 관리", icon: Handshake, href: ROUTES.examining.partnerships },
 ];
 
 /** 관리자 사이드바 (MVP 1차: 회원·기관·장비 장애, 2차: 의뢰·예약·슬롯 상태 이력) */
