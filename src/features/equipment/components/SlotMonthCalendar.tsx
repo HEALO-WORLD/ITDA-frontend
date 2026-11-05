@@ -236,6 +236,7 @@ const DAY_META: Record<DayStatus["kind"], { cellClass: string }> = {
   NO_SLOTS: { cellClass: "cursor-not-allowed text-gray-300" },
   CLOSED: { cellClass: "cursor-not-allowed text-gray-300" },
   LOADING: { cellClass: "cursor-wait text-gray-300" },
+  UNKNOWN: { cellClass: "cursor-not-allowed text-gray-400" },
   PAST_DAY: { cellClass: "cursor-not-allowed bg-gray-50 text-gray-300" },
   OUT_OF_RANGE: { cellClass: "cursor-not-allowed bg-gray-50 text-gray-300" },
 };
@@ -255,6 +256,8 @@ function describeStatus(status: DayStatus): string {
       return "슬롯 없음, 선택 불가";
     case "LOADING":
       return "불러오는 중";
+    case "UNKNOWN":
+      return "슬롯 조회 불가 (서버 기능 준비 중)";
     case "PAST_DAY":
       return "지난 날짜, 선택 불가";
     case "OUT_OF_RANGE":

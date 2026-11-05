@@ -10,6 +10,32 @@ import type { Equipment } from "../types";
 import EquipmentStatusBadge from "./EquipmentStatusBadge";
 
 export type ExamTypeFilter = "ALL" | ExamType;
+
+/**
+ * 장비 목록 한 행 (Mock·API 공용 표시 값). Mock은 toMockPickerRow로, API는 장비 API 응답으로 만든다.
+ * - hours: set(운영시간 있음) · unset(미설정 → 설정 필요 버튼) · unavailable(운영시간 API 없음 → 조회 준비 중)
+ * - supported: 지원 검사 유형 이름 · 비어 있으면 '미설정' · 문자열이면 그 안내(불러오는 중 등)를 흐리게 보인다
+ */
+export interface EquipmentPickerRow {
+  id: string;
+  name: string;
+  examType: ExamType;
+  statusBadge: ReactNode;
+  hours: { kind: "set"; summary: string } | { kind: "unset" } | { kind: "unavailable" };
+  supported: string[] | null | { placeholder: string };
+}
+
+/** Mock 장비 → 행 (기존 Mock 표시 그대로) */
+export function toMockPickerRow(equipment: Equipment): EquipmentPickerRow {
+  return {
+    id: equipment.id,
+    name: equipment.name,
+    examType: equipment.examType,
+    statusBadge: <EquipmentStatusBadge status={equipment.status} />,
+    hours: equipment.operatingHours.length > 0 ? { kind: "set", summary: formatOperatingHoursSummary(equipment.operatingHours) } : { kind: "unset" },
+    supported: getSupportedExamTypeNames(equipment.supportedExamTypeIds),
+  };
+}
 /** "ALL" = 현재 목록(검색·필터 결과)의 전체 장비 */
 export type EquipmentSelection = "ALL" | string;
 
@@ -17,7 +43,7 @@ interface EquipmentPickerProps {
   /** 기관의 전체 장비 수 (등록 장비 없음과 검색 결과 없음 구분용) */
   totalCount: number;
   /** 검색·필터 결과 */
-  visibleEquipments: Equipment[];
+  visibleEquipments: EquipmentPickerRow[];
   query: string;
   onQueryChange: (query: string) => void;
   typeFilter: ExamTypeFilter;
@@ -26,11 +52,13 @@ interface EquipmentPickerProps {
   onSelect: (selection: EquipmentSelection) => void;
   /** 선택 장비가 검색 결과에서 빠져 전체 보기로 바뀐 경우 안내 */
   selectionNotice: string | null;
-  onShowSchedule: (equipment: Equipment) => void;
+  onShowSchedule: (equipment: EquipmentPickerRow) => void;
   /** 운영 시간 설정·수정 폼 바로 열기 */
-  onEditHours: (equipment: Equipment) => void;
+  onEditHours: (equipment: EquipmentPickerRow) => void;
   onRegister: () => void;
   onGenerateSlots: () => void;
+  /** 검색 줄 오른쪽 안내 (기본: Mock 개발용 안내) */
+  note?: ReactNode;
 }
 
 const TYPE_FILTERS: { value: ExamTypeFilter; label: string }[] = [
@@ -69,6 +97,7 @@ export default function EquipmentPicker({
   onEditHours,
   onRegister,
   onGenerateSlots,
+  note = "개발용 예시: 등록·생성 내용은 이 브라우저에만 저장됩니다.",
 }: EquipmentPickerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isFiltered = query.trim() !== "" || typeFilter !== "ALL";
@@ -158,7 +187,7 @@ export default function EquipmentPicker({
               </button>
             ))}
           </div>
-          <p className="text-xs text-gray-400">개발용 예시: 등록·생성 내용은 이 브라우저에만 저장됩니다.</p>
+          {note && <p className="text-xs text-gray-400">{note}</p>}
         </div>
 
         {selectionNotice && (
@@ -228,10 +257,15 @@ export default function EquipmentPicker({
                 ) : (
                   rows.map((equipment) => {
                     const isSelected = selection === equipment.id;
-                    const hasHours = equipment.operatingHours.length > 0;
-                    const hoursSummary = hasHours ? formatOperatingHoursSummary(equipment.operatingHours) : "미설정";
-                    const supportedNames = getSupportedExamTypeNames(equipment.supportedExamTypeIds);
-                    const supportedSummary = supportedNames ? supportedNames.join(", ") : "미설정";
+                    const hasHours = equipment.hours.kind === "set";
+                    const hoursSummary =
+                      equipment.hours.kind === "set" ? equipment.hours.summary : equipment.hours.kind === "unset" ? "미설정" : "조회 준비 중";
+                    const supportedNames = Array.isArray(equipment.supported) && equipment.supported.length > 0 ? equipment.supported : null;
+                    const supportedSummary = supportedNames
+                      ? supportedNames.join(", ")
+                      : equipment.supported && !Array.isArray(equipment.supported)
+                        ? equipment.supported.placeholder
+                        : "미설정";
                     return (
                       <tr
                         key={equipment.id}
@@ -257,13 +291,13 @@ export default function EquipmentPicker({
                               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-semibold text-gray-600">
                                 {equipment.examType}
                               </span>
-                              <EquipmentStatusBadge status={equipment.status} />
+                              {equipment.statusBadge}
                             </span>
                             <span
                               className={`min-w-0 max-w-full truncate ${hasHours ? "text-gray-600" : "text-gray-400"}`}
                               title={hoursSummary}
                             >
-                              {hasHours ? hoursSummary : "운영시간 미설정"}
+                              {equipment.hours.kind === "unset" ? "운영시간 미설정" : equipment.hours.kind === "unavailable" ? "운영시간 조회 준비 중" : hoursSummary}
                             </span>
                           </div>
                           <p className="mt-1 truncate text-xs text-gray-500" title={supportedSummary}>
@@ -276,7 +310,7 @@ export default function EquipmentPicker({
                           </span>
                         </td>
                         <td className={`${tdClass} hidden @min-[600px]:table-cell`}>
-                          <EquipmentStatusBadge status={equipment.status} />
+                          {equipment.statusBadge}
                         </td>
                         <td
                           className={`${tdClass} hidden truncate text-sm @min-[960px]:table-cell ${hasHours ? "text-gray-700" : "text-gray-400"}`}
@@ -296,7 +330,7 @@ export default function EquipmentPicker({
                               <Info className="size-3.5" aria-hidden="true" />
                               상세
                             </button>
-                            {hasHours ? (
+                            {equipment.hours.kind !== "unset" ? (
                               <button
                                 type="button"
                                 onClick={(e) => stop(e, () => onEditHours(equipment))}
