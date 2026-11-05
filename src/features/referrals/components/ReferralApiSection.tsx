@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 import { ROUTES } from "@/constants/navigation";
 
-import { isExamTypeId, isPatientNameSearch, isReferralStatus, REFERRAL_STATUSES, type ReferralStatusDto } from "../remote";
+import { isExamTypeId, isPatientNameSearch, isReferralStatus, REFERRAL_STATUSES, type ReferralListSubject, type ReferralStatusDto } from "../remote";
 import {
   loadExamTypes,
   loadReferralTablePage,
@@ -93,7 +93,7 @@ export default async function ReferralApiSection({ searchParams }: ReferralApiSe
 }
 
 /** 검사 유형 표시: 이름이 modality와 같으면 이름만, 아니면 "CT · 이름" (이름을 새로 만들지 않는다) */
-function examTypeLabel({ name, modality }: ExamTypeItem): string {
+export function examTypeLabel({ name, modality }: ExamTypeItem): string {
   return name.trim().toUpperCase() === modality ? name : `${modality} · ${name}`;
 }
 
@@ -159,20 +159,20 @@ function parseReferralListQuery(params: Record<string, string | string[] | undef
   return query;
 }
 
-const TITLES: Record<ReferralLoadFailure["reason"], string> = {
+const titles = (subject: ReferralListSubject): Record<ReferralLoadFailure["reason"], string> => ({
   SIGNED_OUT: "로그인이 필요합니다.",
   UNAUTHORIZED: "로그인 정보가 만료되었거나 올바르지 않습니다.",
-  FORBIDDEN: "의뢰 목록을 확인할 수 없는 계정입니다.",
+  FORBIDDEN: `${subject}을 확인할 수 없는 계정입니다.`,
   INVALID: "조회 조건이 올바르지 않습니다.",
   NETWORK: "의뢰 서버에 연결할 수 없습니다.",
-  ERROR: "의뢰 목록을 불러오지 못했습니다.",
-};
+  ERROR: `${subject}을 불러오지 못했습니다.`,
+});
 
 /**
  * 의뢰 목록 조회 실패 안내. 401은 토큰을 지워야 다시 로그인할 수 있으므로 로그아웃(폼 POST) 후 로그인 화면으로 보낸다.
  * 안내 문구는 서버 로더가 만든 문구만 쓴다 (응답 본문·환자명·검색어를 보여 주지 않는다).
  */
-function ReferralFailureNotice({ failure }: { failure: ReferralLoadFailure }) {
+export function ReferralFailureNotice({ failure, subject = "의뢰 목록" }: { failure: ReferralLoadFailure; subject?: ReferralListSubject }) {
   const isError = failure.reason === "NETWORK" || failure.reason === "ERROR" || failure.reason === "UNAUTHORIZED";
   const action: ReactNode =
     failure.reason === "SIGNED_OUT" ? (
@@ -192,7 +192,7 @@ function ReferralFailureNotice({ failure }: { failure: ReferralLoadFailure }) {
     ) : null;
   const message =
     failure.reason === "SIGNED_OUT"
-      ? "의뢰 목록은 의뢰기관 계정으로 로그인한 뒤 확인할 수 있습니다."
+      ? `${subject}은 의뢰기관 계정으로 로그인한 뒤 확인할 수 있습니다.`
       : failure.reason === "UNAUTHORIZED"
         ? "다시 로그인해 주세요."
         : failure.message;
@@ -204,7 +204,7 @@ function ReferralFailureNotice({ failure }: { failure: ReferralLoadFailure }) {
         isError ? "border-red-200 bg-red-50 text-red-700" : "border-dashed border-line bg-white text-gray-600"
       }`}
     >
-      <p className="text-[15px] font-semibold">{TITLES[failure.reason]}</p>
+      <p className="text-[15px] font-semibold">{titles(subject)[failure.reason]}</p>
       <p className="text-sm">{message}</p>
       {action}
     </div>

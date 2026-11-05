@@ -25,6 +25,7 @@ import {
   type ReferralHistoryReasonDto,
   type ReferralResponseDto,
   type ReferralStatusDto,
+  type ReferralListSubject,
   type ReservationStatusDto,
 } from "./remote";
 import type { ReferralDisplayStatus } from "./types";
@@ -91,6 +92,10 @@ export interface ReferralPageQuery {
   patientName?: string;
   /** 검사 유형 ID 한 개 (백엔드는 여러 ID·modality 조건을 지원하지 않는다) */
   examTypeId?: string;
+  /** 정렬 (기본: 생성 최신순). 재조정 필요 목록은 상태가 바뀐 최신순(updatedAt,desc)을 쓴다 */
+  sort?: typeof REFERRAL_API_SORT | "updatedAt,desc";
+  /** 실패 안내에 쓰는 목록 이름 (기본: 의뢰 목록) */
+  subject?: ReferralListSubject;
 }
 
 /** 의뢰 목록 한 페이지 (요청자 소속 기관의 전체 의뢰, 생성 최신순, 10건). 검색 조건은 서버가 전체 의뢰에 적용한다 */
@@ -113,6 +118,8 @@ async function loadReferralDtoPage({
   status,
   patientName,
   examTypeId,
+  sort = REFERRAL_API_SORT,
+  subject = "의뢰 목록",
 }: ReferralPageQuery): Promise<
   { ok: true; data: Awaited<ReturnType<typeof fetchReferralPage>>; headers: HeadersInit } | ReferralLoadFailure
 > {
@@ -123,20 +130,21 @@ async function loadReferralDtoPage({
     page < 0 ||
     (status !== undefined && !isReferralStatus(status)) ||
     (patientName !== undefined && !isPatientNameSearch(patientName)) ||
-    (examTypeId !== undefined && !isExamTypeId(examTypeId))
+    (examTypeId !== undefined && !isExamTypeId(examTypeId)) ||
+    (sort !== REFERRAL_API_SORT && sort !== "updatedAt,desc")
   ) {
-    return { ok: false, reason: "INVALID", message: "의뢰 목록 조회 조건이 올바르지 않습니다.", code: null };
+    return { ok: false, reason: "INVALID", message: `${subject} 조회 조건이 올바르지 않습니다.`, code: null };
   }
   try {
     const data = await fetchReferralPage(
-      { page, size: REFERRAL_API_PAGE_SIZE, sort: REFERRAL_API_SORT, status, patientName: patientName?.trim(), examTypeId },
+      { page, size: REFERRAL_API_PAGE_SIZE, sort, status, patientName: patientName?.trim(), examTypeId },
       { headers: access.headers },
     );
     return { ok: true, data, headers: access.headers };
   } catch (error) {
     // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
     unstable_rethrow(error);
-    return toFailure(error);
+    return toFailure(error, "list", subject);
   }
 }
 
@@ -149,9 +157,11 @@ async function loadReferralDtoPage({
  */
 export type DetailCell = { state: "ok"; value: string } | { state: "none" | "missing" | "error" };
 
-/** 의뢰 목록 표 1행 (화면용). 예약 ID·기관 ID·작성자 ID는 담지 않는다 */
+/** 의뢰 목록 표 1행 (화면용). 기관 ID·작성자 ID는 담지 않는다 */
 export interface ReferralTableRow {
   referralId: string;
+  /** 현재 예약 ID (currentReservationId, 예약 전이면 null). 재조정 필요 목록의 예약번호 열에 쓴다 */
+  reservationId: string | null;
   /** 환자명 (목록 응답 patientName. 역할이 확인된 의뢰기관 사용자에게만 내려간다) */
   patientName: string;
   examTypeId: string;
@@ -216,7 +226,7 @@ export async function loadReferralTablePage(query: ReferralPageQuery): Promise<R
 
   let detailIncomplete = !partnerships.ok && reservations.some((entry) => entry.state === "ok");
   const rows = dtos.map((dto): ReferralTableRow => {
-    const base = { referralId: dto.id, patientName: dto.patientName, examTypeId: dto.examTypeId, referralStatus: dto.referralStatus };
+    const base = { referralId: dto.id, reservationId: dto.currentReservationId, patientName: dto.patientName, examTypeId: dto.examTypeId, referralStatus: dto.referralStatus };
     if (!dto.currentReservationId) return { ...base, examInstitution: { state: "none" }, examStartTime: { state: "none" } };
     const entry = reservationById.get(dto.currentReservationId.toLowerCase());
     if (!entry || entry.state !== "ok") {
@@ -456,6 +466,7 @@ function toReferralListItem(dto: ReferralResponseDto): ReferralListItem {
 function toFailure(
   error: unknown,
   action: "list" | "exam-types" | "reservation" | "partnerships" | "detail" | "histories" | "equipment" = "list",
+  subject: ReferralListSubject = "의뢰 목록",
 ): ReferralLoadFailure {
   const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
   const code = isApiError(error) ? error.code : null;
@@ -466,7 +477,7 @@ function toFailure(
   return {
     ok: false,
     reason: status === 401 ? "UNAUTHORIZED" : status === 403 ? "FORBIDDEN" : isNetwork ? "NETWORK" : "ERROR",
-    message: getReferralErrorMessage(error),
+    message: getReferralErrorMessage(error, subject),
     code,
   };
 }
