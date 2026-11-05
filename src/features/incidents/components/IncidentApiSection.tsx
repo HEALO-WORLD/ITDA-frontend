@@ -8,10 +8,12 @@ import NotificationPagination from "@/features/notifications/components/Notifica
 import { ROUTES } from "@/constants/navigation";
 import { formatDateTime } from "@/lib/format/date";
 
+import { isDowntimeRegistrationEnabled } from "../downtimeConfig";
 import { isUuid, type EquipmentIncidentDto } from "../remote";
 import { loadIncidentPage, loadIncidentEquipmentLookup, type IncidentEquipmentLookup, type IncidentLoadFailure } from "../server";
 
 import IncidentApiDetailModal, { IncidentApiDetailButton } from "./IncidentApiDetailModal";
+import IncidentDowntimeRegister from "./IncidentDowntimeRegister";
 import { IncidentSummaryBar } from "./IncidentSummary";
 
 type SearchParams = Record<string, string | string[] | undefined>;
@@ -49,6 +51,9 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
   if (!list.ok) return <FailureNotice failure={list} />;
 
   const listQuery: Record<string, string> = equipmentId ? { [Q.equipmentId]: equipmentId } : {};
+  // 장애 등록: 기능 스위치가 켜졌을 때만 (기본 꺼짐). 장비 선택지는 이미 받은 우리 기관 장비 목록만 쓴다 (추가 요청 없음)
+  const canRegister = isDowntimeRegistrationEnabled();
+  const registerEquipments = equipmentLookup ? Object.entries(equipmentLookup).map(([id, item]) => ({ id, name: item.name, modality: item.modality })) : null;
 
   return (
     <div className="flex flex-col gap-5">
@@ -69,17 +74,21 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
             장비 장애 목록
             <span className="ml-2 text-base font-semibold tabular-nums text-primary">{list.totalElements}건</span>
           </h2>
-          <button
-            type="button"
-            disabled
-            aria-describedby="incident-register-unavailable"
-            className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-gray-200 px-3.5 text-sm font-bold text-gray-400"
-          >
-            <Plus className="size-4" aria-hidden="true" />
-            장비 장애 등록
-          </button>
+          {canRegister ? (
+            <IncidentDowntimeRegister equipments={registerEquipments} />
+          ) : (
+            <button
+              type="button"
+              disabled
+              aria-describedby="incident-register-unavailable"
+              className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-gray-200 px-3.5 text-sm font-bold text-gray-400"
+            >
+              <Plus className="size-4" aria-hidden="true" />
+              장비 장애 등록
+            </button>
+          )}
         </div>
-        <IncidentFilterBar equipmentId={equipmentId} lookup={equipmentLookup} />
+        <IncidentFilterBar equipmentId={equipmentId} lookup={equipmentLookup} canRegister={canRegister} />
 
         {rawEquipmentId !== undefined && (
           <p role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-gray-700">
@@ -126,7 +135,7 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
  * 검색 조건 (와이어프레임: 장애 상태 · 장비 · 기간 · 검색). 백엔드가 받는 장비 조건만 동작한다 (일반 GET 폼, 검색하면 첫 페이지).
  * 장애 상태는 OCCURRED 하나뿐이고 기간 조건은 백엔드에 없어 비활성으로 두고 이유를 보여 준다.
  */
-function IncidentFilterBar({ equipmentId, lookup }: { equipmentId: string | undefined; lookup: IncidentEquipmentLookup }) {
+function IncidentFilterBar({ equipmentId, lookup, canRegister }: { equipmentId: string | undefined; lookup: IncidentEquipmentLookup; canRegister: boolean }) {
   const control = "h-10 rounded-lg border border-line bg-white text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
   const disabledControl = "h-10 cursor-not-allowed rounded-lg border border-line bg-gray-50 text-sm text-gray-400";
   const options = lookup ? Object.entries(lookup).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko", { numeric: true })) : [];
@@ -165,7 +174,9 @@ function IncidentFilterBar({ equipmentId, lookup }: { equipmentId: string | unde
       </div>
       <p id="incident-register-unavailable" className="flex items-start gap-1.5 text-xs text-gray-500">
         <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
-        장비 조건만 서버에서 검색합니다. 장애 상태·기간 검색과 장비 장애 등록은 서버 기능이 준비되면 사용할 수 있습니다.
+        {canRegister
+          ? "장비 조건만 서버에서 검색합니다. 장애 상태·기간 검색은 서버 기능이 준비되면 사용할 수 있습니다."
+          : "장비 조건만 서버에서 검색합니다. 장애 상태·기간 검색과 장비 장애 등록은 서버 기능이 준비되면 사용할 수 있습니다."}
         {!lookup && " 장비 목록을 불러오지 못해 장비는 ID로 입력합니다."}
       </p>
     </form>
