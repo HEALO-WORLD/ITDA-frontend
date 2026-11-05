@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { ROUTES } from "@/constants/navigation";
 import { getExaminationAuthorizationHeaders } from "@/lib/auth/session";
 
+import { loadExaminationLookups } from "../lookups";
 import { loadExaminationPage, parsePageParam } from "../server";
 import ExaminationApiBoard from "./ExaminationApiBoard";
 
@@ -32,7 +33,8 @@ export default async function ExaminationApiSection({ searchParams }: Examinatio
   }
 
   const page = parsePageParam((await searchParams).page);
-  const result = await loadExaminationPage(page, authorization);
+  // 목록과 표시용 이름(검사 유형·장비, 요청 2회)을 함께 조회한다. 이름 조회가 실패해도 목록은 보여 준다
+  const [result, lookups] = await Promise.all([loadExaminationPage(page, authorization), loadExaminationLookups()]);
 
   if (!result.ok) {
     if (result.reason === "UNAUTHORIZED") {
@@ -55,6 +57,7 @@ export default async function ExaminationApiSection({ searchParams }: Examinatio
       totalElements={result.totalElements}
       page={result.page}
       totalPages={result.totalPages}
+      lookups={lookups}
     />
   );
 }
