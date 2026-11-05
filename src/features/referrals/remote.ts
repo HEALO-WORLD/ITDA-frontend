@@ -303,6 +303,197 @@ export async function fetchReferralHistories(
   return data;
 }
 
+// ── 재예약 요청 (feat/rescheduling-api에서 이식. Server Action: rescheduleActions.ts) ──
+
+/** URL·브라우저 입력의 의뢰 ID 검증 (UUID) */
+export const isReferralApiId = (value: unknown): value is string => isUuid(value);
+
+/**
+ * 백엔드 CreateReservationRequest (재예약 본문, referral-service dev a370615 확인). 모든 필드 필수.
+ * 시각은 시간대 없는 LocalDateTime 문자열(`YYYY-MM-DDTHH:mm[:ss[.fffffffff]]`)을 그대로 보낸다 (UTC 등으로 바꾸지 않는다).
+ */
+export interface RescheduleRequestDto {
+  slotId: string;
+  examInstitutionId: string;
+  equipmentId: string;
+  /** 백엔드 필드명은 examDate지만 타입은 LocalDateTime이다 (예시 값은 startTime과 같다) */
+  examDate: string;
+  startTime: string;
+  endTime: string;
+}
+
+export type RescheduleRequestField = keyof RescheduleRequestDto;
+
+const RESCHEDULE_FIELD_LABELS: Record<RescheduleRequestField, string> = {
+  slotId: "슬롯 ID",
+  examInstitutionId: "검사기관 ID",
+  equipmentId: "장비 ID",
+  examDate: "검사 일자",
+  startTime: "검사 시작 시간",
+  endTime: "검사 종료 시간",
+};
+
+/**
+ * 재예약 요청 값 검증 (요청 전). 통과하면 백엔드 DTO 필드만 담은 본문을 돌려준다 (다른 속성은 버린다).
+ * - ID 3개: UUID · 시각 3개: 시간대 없는 LocalDateTime 형식이고 실제 있는 날짜·시각
+ * - startTime < endTime (백엔드는 검사하지 않지만 시간이 뒤집힌 요청은 보내지 않는다)
+ */
+export function validateRescheduleRequest(
+  input: Record<RescheduleRequestField, unknown>,
+): { ok: true; body: RescheduleRequestDto } | { ok: false; field: RescheduleRequestField; message: string } {
+  for (const field of ["slotId", "examInstitutionId", "equipmentId"] as const) {
+    if (!isUuid(input[field])) return { ok: false, field, message: `${RESCHEDULE_FIELD_LABELS[field]} 형식이 올바르지 않습니다.` };
+  }
+  for (const field of ["examDate", "startTime", "endTime"] as const) {
+    if (!isValidLocalDateTime(input[field])) return { ok: false, field, message: `${RESCHEDULE_FIELD_LABELS[field]} 형식이 올바르지 않습니다.` };
+  }
+  const body: RescheduleRequestDto = {
+    slotId: input.slotId as string,
+    examInstitutionId: input.examInstitutionId as string,
+    equipmentId: input.equipmentId as string,
+    examDate: input.examDate as string,
+    startTime: input.startTime as string,
+    endTime: input.endTime as string,
+  };
+  if (toComparableDateTime(body.startTime) >= toComparableDateTime(body.endTime)) {
+    return { ok: false, field: "endTime", message: "검사 종료 시간은 시작 시간보다 뒤여야 합니다." };
+  }
+  return { ok: true, body };
+}
+
+/**
+ * 재예약 요청 `POST /api/v1/referrals/{referralId}/reschedule` (201, 응답 ReservationResponse).
+ * Gateway: REQUESTER·ADMIN. 서버가 의뢰 작성자 본인(X-User-Id)인지와 NEEDS_RESCHEDULE 상태인지 검사한다
+ * (본인이 아니면 404 REFERRAL_NOT_FOUND, 상태가 다르면 409 INVALID_REFERRAL_STATUS).
+ * 슬롯 확보(HOLD)는 서버가 비동기로 이어서 처리하므로 응답 예약은 보통 REQUESTED다 (확정이 아니다).
+ * 요청 전 검증에 걸리면 요청하지 않고 CONFIG, 응답이 계약과 다르거나 요청과 다른 예약이면 PARSE.
+ * 공통 클라이언트는 재시도하지 않는다. NETWORK·TIMEOUT·PARSE는 서버가 이미 접수했을 수 있다.
+ */
+export async function requestReschedule(
+  referralId: string,
+  input: Record<RescheduleRequestField, unknown>,
+  options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
+): Promise<ReservationResponseDto> {
+  requireApiFeature("referrals");
+  if (!isUuid(referralId)) throw new ApiError("CONFIG", "의뢰 ID 형식이 올바르지 않습니다.");
+  const checked = validateRescheduleRequest(input);
+  if (!checked.ok) throw new ApiError("CONFIG", checked.message);
+  const data = await apiRequestData<unknown>(`/api/v1/referrals/${encodeURIComponent(referralId)}/reschedule`, {
+    ...options,
+    method: "POST",
+    body: checked.body,
+  });
+  if (!isReservation(data) || !isRescheduledReservationOf(data, referralId, checked.body)) {
+    throw new ApiError("PARSE", "재예약 요청 결과를 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
+/** 응답 예약이 이번 요청으로 만든 예약인지 (의뢰·슬롯·기관·장비가 같고 시각이 같은지) */
+function isRescheduledReservationOf(data: ReservationResponseDto, referralId: string, body: RescheduleRequestDto): boolean {
+  const same = (a: string | null, b: string) => a !== null && a.toLowerCase() === b.toLowerCase();
+  const sameTime = (a: string | null, b: string) => a !== null && toComparableDateTime(a) === toComparableDateTime(b);
+  return (
+    same(data.referralId, referralId) &&
+    same(data.slotId, body.slotId) &&
+    same(data.examInstitutionId, body.examInstitutionId) &&
+    same(data.equipmentId, body.equipmentId) &&
+    sameTime(data.examDate, body.examDate) &&
+    sameTime(data.startTime, body.startTime) &&
+    sameTime(data.endTime, body.endTime)
+  );
+}
+
+/** 재예약 실패 분류 (Server Action 결과 분기용) */
+export type RescheduleFailureReason =
+  /** 요청하지 않음: 기능 꺼짐·Mock 모드·요청 값 오류 */
+  | "NOT_SENT"
+  /** 400: 서버 검증 실패(VALIDATION_FAILED)·형식 오류(INVALID_INPUT)·헤더 누락(MISSING_HEADER) */
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  /** 403: Gateway 역할 거부 (EXAMINER 등) */
+  | "FORBIDDEN"
+  /** 404: 의뢰 없음 또는 작성자 본인이 아님 (REFERRAL_NOT_FOUND) */
+  | "NOT_FOUND"
+  /** 409: 재조정 필요 상태가 아님 (INVALID_REFERRAL_STATUS, 이미 재예약했거나 상태가 바뀜) */
+  | "CONFLICT"
+  | "SERVER_ERROR"
+  /** 응답을 받지 못함 (연결 실패·시간 초과). 서버가 접수했을 수 있다 */
+  | "NETWORK"
+  /** 응답 형식 오류. 2xx였다면 접수됐을 수 있다 */
+  | "INVALID_RESPONSE";
+
+export function getRescheduleFailureReason(error: unknown): RescheduleFailureReason {
+  if (!isApiError(error)) return "SERVER_ERROR";
+  switch (error.kind) {
+    case "CONFIG":
+      return "NOT_SENT";
+    case "NETWORK":
+    case "TIMEOUT":
+    case "ABORTED":
+      return "NETWORK";
+    case "PARSE":
+      return "INVALID_RESPONSE";
+    case "HTTP":
+      if (error.status === 400) return "INVALID_REQUEST";
+      if (error.status === 401) return "UNAUTHORIZED";
+      if (error.status === 403) return "FORBIDDEN";
+      if (error.status === 404) return "NOT_FOUND";
+      if (error.status === 409) return "CONFLICT";
+      return "SERVER_ERROR";
+  }
+}
+
+/** 재예약 오류 코드별 안내 (백엔드 ErrorCode·Gateway 코드 기준) */
+const RESCHEDULE_ERROR_MESSAGES: Record<string, string> = {
+  VALIDATION_FAILED: "재예약 요청 값이 올바르지 않습니다. 슬롯을 다시 선택해 주세요.",
+  INVALID_INPUT: "재예약 요청 형식이 올바르지 않습니다.",
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  ACCESS_DENIED: "재예약은 의뢰기관 담당자만 요청할 수 있습니다.",
+  REFERRAL_NOT_FOUND: "의뢰를 찾을 수 없거나 재예약을 요청할 수 있는 의뢰가 아닙니다.",
+  INVALID_REFERRAL_STATUS: "재조정이 필요한 상태가 아니어서 재예약할 수 없습니다. 목록을 새로 고쳐 상태를 확인해 주세요.",
+};
+
+const RESCHEDULE_UNKNOWN_RESULT_MESSAGE =
+  "재예약 요청 결과를 확인하지 못했습니다. 이미 접수되었을 수 있으니 목록을 새로 고쳐 확인한 뒤 다시 시도해 주세요.";
+
+/** 재예약 실패 안내. 서버 메시지 본문을 그대로 보여 주지 않고, 알려진 코드만 정해 둔 문구로 바꾼다 */
+export function getRescheduleErrorMessage(error: unknown): string {
+  if (!isApiError(error)) return "재예약을 요청하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  const reason = getRescheduleFailureReason(error);
+  if (reason === "NETWORK" || reason === "INVALID_RESPONSE") return RESCHEDULE_UNKNOWN_RESULT_MESSAGE;
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && RESCHEDULE_ERROR_MESSAGES[error.code]) return RESCHEDULE_ERROR_MESSAGES[error.code];
+  return error.message;
+}
+
+/** 의뢰 단건 조회 오류 코드별 안내 (재예약 후보 확인용) */
+const REFERRAL_DETAIL_ERROR_MESSAGES: Record<string, string> = {
+  REFERRAL_NOT_FOUND: "의뢰를 찾을 수 없거나 조회할 수 있는 기관의 의뢰가 아닙니다.",
+  INVALID_INPUT: "의뢰 ID가 올바르지 않습니다.",
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  ACCESS_DENIED: "의뢰 정보를 조회할 권한이 없습니다.",
+};
+
+export function getReferralDetailErrorMessage(error: unknown): string {
+  if (!isApiError(error)) return "의뢰 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && REFERRAL_DETAIL_ERROR_MESSAGES[error.code]) return REFERRAL_DETAIL_ERROR_MESSAGES[error.code];
+  return error.message;
+}
+
+/** LocalDateTime 문자열이 형식에 맞고 실제 있는 날짜·시각인지 (시간대 변환 없이 숫자만 확인) */
+function isValidLocalDateTime(value: unknown): value is string {
+  if (typeof value !== "string" || !LOCAL_DATE_TIME.test(value)) return false;
+  const [year, month, day, hour, minute, second = 0] = value.split(/[-T:.]/).slice(0, 6).map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth && hour <= 23 && minute <= 59 && second <= 59;
+}
+
+/** 비교용으로 초·소수 초를 채운 `YYYY-MM-DDTHH:mm:ss.fffffffff` (시간대 변환 없음) */
+function toComparableDateTime(value: string): string {
+  const [dateTime, fraction = ""] = value.split(".");
+  return `${dateTime.length === 16 ? `${dateTime}:00` : dateTime}.${fraction.padEnd(9, "0")}`;
+}
+
 /** 장비 단건 (institution-service EquipmentDetailResponse 중 이름만 쓴다) */
 export interface EquipmentDetailDto {
   id: string;
