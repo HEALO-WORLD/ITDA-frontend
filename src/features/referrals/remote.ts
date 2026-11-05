@@ -1,5 +1,5 @@
 import { apiRequestData, type ApiRequestOptions } from "@/lib/api/client";
-import { requireApiFeature } from "@/lib/api/config";
+import { isApiFeature, requireApiFeature } from "@/lib/api/config";
 import { ApiError, isApiError } from "@/lib/api/errors";
 import type { PagedResponseDto } from "@/lib/api/types";
 
@@ -113,7 +113,8 @@ export async function fetchExamTypePage(
   { page = 0, size = EXAM_TYPE_MAX_PAGE_SIZE }: { page?: number; size?: number } = {},
   options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
 ): Promise<PagedResponseDto<ExamTypeDto>> {
-  requireApiFeature("referrals");
+  // 검사 유형 목록은 의뢰 목록(referrals)·검사기관 장비의 지원 검사 유형 선택(equipment)·검사 목록의 검사 유형명(examinations)이 함께 쓴다
+  if (!isApiFeature("referrals") && !isApiFeature("examinations")) requireApiFeature("equipment");
   if (!Number.isSafeInteger(page) || page < 0) throw new ApiError("CONFIG", `페이지 번호가 올바르지 않습니다: ${page}`);
   if (!Number.isSafeInteger(size) || size < 1 || size > EXAM_TYPE_MAX_PAGE_SIZE) {
     throw new ApiError("CONFIG", `페이지 크기는 1~${EXAM_TYPE_MAX_PAGE_SIZE}이어야 합니다: ${size}`);
@@ -164,7 +165,7 @@ export async function fetchReservation(
   reservationId: string,
   options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
 ): Promise<ReservationResponseDto> {
-  requireApiFeature("referrals");
+  requireReservationApi();
   if (!isUuid(reservationId)) throw new ApiError("CONFIG", `예약 ID 형식이 올바르지 않습니다: "${reservationId}"`);
   const data = await apiRequestData<unknown>(`/api/v1/referrals/reservations/${encodeURIComponent(reservationId)}`, options);
   if (!isReservation(data) || data.id.toLowerCase() !== reservationId.toLowerCase()) {
@@ -214,7 +215,7 @@ export async function fetchReservationPage(
   params: ReservationListParams = {},
   options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
 ): Promise<PagedResponseDto<ReservationResponseDto>> {
-  requireApiFeature("referrals");
+  requireReservationApi();
   const { referralId, examInstitutionId, equipmentId, status, failureReason, examDateFrom, examDateTo, page, size, sort } = params;
   for (const [label, id] of [["의뢰 ID", referralId], ["검사기관 ID", examInstitutionId], ["장비 ID", equipmentId]] as const) {
     if (id !== undefined && !isUuid(id)) throw new ApiError("CONFIG", `${label} 형식이 올바르지 않습니다.`);
@@ -332,6 +333,15 @@ export async function fetchMyPartnerships(options: Pick<ApiRequestOptions, "head
     throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
   }
   return data;
+}
+
+/**
+ * 예약 API(목록·단건)는 의뢰기관 의뢰 화면·관리자 화면(`referrals`)과 검사기관 확정 예약 화면(`reservations`)이 함께 쓴다.
+ * 둘 중 하나라도 API 대상이면 호출할 수 있다 (각 화면은 자기 기능 설정을 따로 확인한다).
+ */
+function requireReservationApi(): void {
+  if (isApiFeature("referrals")) return;
+  requireApiFeature("reservations");
 }
 
 // ── 요청 조건 확인 (계약과 다른 값은 보내지 않는다) ──
@@ -460,24 +470,26 @@ function isPage<T>(value: unknown, isItem: (item: unknown) => item is T): value 
 
 // ── 오류 안내 ──
 
-/** 백엔드·Gateway 오류 코드별 안내 (origin/dev 기준) */
-const ERROR_MESSAGES: Record<string, string> = {
-  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
-  INVALID_INPUT: "의뢰 목록 조회 요청이 올바르지 않습니다.",
-  ACCESS_DENIED: "의뢰 목록은 의뢰기관 담당자만 조회할 수 있습니다.",
-};
+/** 안내 문구에 쓰는 목록 이름 (의뢰 목록 화면 / 재조정·알림 화면의 재조정 필요 목록). 둘 다 받침으로 끝나 "은·을"을 쓴다 */
+export type ReferralListSubject = "의뢰 목록" | "재조정 필요 목록";
 
-const FALLBACK_MESSAGE = "의뢰 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.";
+/** 백엔드·Gateway 오류 코드별 안내 (origin/dev 기준) */
+const errorMessages = (subject: ReferralListSubject): Record<string, string> => ({
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  INVALID_INPUT: `${subject} 조회 요청이 올바르지 않습니다.`,
+  ACCESS_DENIED: `${subject}은 의뢰기관 담당자만 조회할 수 있습니다.`,
+});
 
 /**
  * 의뢰 목록 조회 실패 안내 문구.
  * 401(토큰 없음·만료)은 공통 문구(ApiError.message)를 쓰고, 400·403은 오류 코드로 원인을 구분한다.
  * 설정·응답 형식 오류는 내부 내용(응답 본문 등)을 보여 주지 않고 공통 문구를 쓴다.
  */
-export function getReferralErrorMessage(error: unknown): string {
-  if (!isApiError(error) || error.kind === "CONFIG" || error.kind === "PARSE") return FALLBACK_MESSAGE;
-  if (error.kind === "HTTP" && error.status !== 401 && error.code && ERROR_MESSAGES[error.code]) {
-    return ERROR_MESSAGES[error.code];
+export function getReferralErrorMessage(error: unknown, subject: ReferralListSubject = "의뢰 목록"): string {
+  if (!isApiError(error) || error.kind === "CONFIG" || error.kind === "PARSE") return `${subject}을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.`;
+  const messages = errorMessages(subject);
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && messages[error.code]) {
+    return messages[error.code];
   }
   return error.message;
 }

@@ -2,6 +2,7 @@ import "server-only";
 
 import { unstable_rethrow } from "next/navigation";
 
+import { EQUIPMENT_PAGE_MAX_SIZE, fetchEquipmentPage } from "@/features/equipment/remote";
 import type { PagedResponseDto } from "@/lib/api/types";
 import { isApiError } from "@/lib/api/errors";
 import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
@@ -153,4 +154,27 @@ function toFailure(error: unknown, action: IncidentApiAction): IncidentLoadFailu
     message: getIncidentErrorMessage(error, action),
     code,
   };
+}
+
+/** 장비 이름·종류 (장애 목록 표시·장비 필터 선택지용). 실패하면 null (목록은 그대로 보여 주고 장비 ID로 표시한다) */
+export type IncidentEquipmentLookup = Record<string, { name: string; modality: "CT" | "MRI" }> | null;
+
+/**
+ * 우리 기관 장비 목록 1회 `GET /api/v1/institutions/{users/me 기관}/equipments?size=100`.
+ * 행마다 장비 단건을 부르지 않는다. 기관 ID는 users/me 값만 쓴다.
+ */
+export async function loadIncidentEquipmentLookup(): Promise<IncidentEquipmentLookup> {
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return null;
+  try {
+    const own = access.user.institutionId.toLowerCase();
+    const data = await fetchEquipmentPage(access.user.institutionId, { page: 0, size: EQUIPMENT_PAGE_MAX_SIZE }, { headers: access.headers });
+    return Object.fromEntries(
+      data.contents.filter((item) => item.institutionId.toLowerCase() === own).map((item) => [item.id.toLowerCase(), { name: item.name, modality: item.modality }]),
+    );
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[incidents] 장비 이름 조회 실패:", isApiError(error) ? `${error.kind} ${error.status ?? ""} ${error.code ?? ""}` : "unknown");
+    return null;
+  }
 }

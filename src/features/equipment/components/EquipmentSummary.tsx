@@ -22,18 +22,29 @@ export default function EquipmentSummary({ organizationId }: EquipmentSummaryPro
     equipments.filter(({ examType }) => examType === type).length;
 
   return (
+    <EquipmentSummaryBar
+      mri={<>{countByType("MRI")}대</>}
+      ct={<>{countByType("CT")}대</>}
+      todaySlots={<TodayAvailableSlotCount organizationId={organizationId} />}
+    />
+  );
+}
+
+/** 요약 바 모양 (Mock·API 공용). 값을 알 수 없는 항목은 호출한 쪽이 안내 문구를 넣는다 (0으로 채우지 않는다) */
+export function EquipmentSummaryBar({ mri, ct, todaySlots }: { mri: ReactNode; ct: ReactNode; todaySlots: ReactNode }) {
+  return (
     <ul
       aria-label="장비 운영 요약"
       className="flex flex-wrap items-center gap-x-8 gap-y-3 rounded-xl border border-line bg-white px-6 py-4"
     >
       <SummaryItem icon={Magnet} label="MRI 장비">
-        {countByType("MRI")}대
+        {mri}
       </SummaryItem>
       <SummaryItem icon={ScanLine} label="CT 장비">
-        {countByType("CT")}대
+        {ct}
       </SummaryItem>
       <SummaryItem icon={CalendarCheck} label="오늘 예약 가능 슬롯">
-        <TodayAvailableSlotCount organizationId={organizationId} />
+        {todaySlots}
       </SummaryItem>
     </ul>
   );

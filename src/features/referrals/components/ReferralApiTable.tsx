@@ -52,7 +52,7 @@ const EMPTY_REASON: Record<Exclude<DetailCell["state"], "ok">, string> = {
   error: "정보를 불러오지 못함",
 };
 
-function DetailValue({ cell, format = (value) => value }: { cell: DetailCell; format?: (value: string) => string }) {
+export function DetailValue({ cell, format = (value) => value }: { cell: DetailCell; format?: (value: string) => string }) {
   if (cell.state === "ok") return <>{format(cell.value)}</>;
   return (
     <span title={EMPTY_REASON[cell.state]} className="text-gray-400">
