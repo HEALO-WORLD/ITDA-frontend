@@ -26,9 +26,19 @@ import {
   loadEquipmentDetailAction,
   loadExamTypeOptionsAction,
   updateEquipmentAction,
+  updateEquipmentExamTypeDurationAction,
   type EquipmentActionResult,
 } from "../actions";
-import { EQUIPMENT_MODALITIES, EQUIPMENT_NAME_MAX_LENGTH, validateEquipmentName, type EquipmentDto, type EquipmentModalityDto, type EquipmentStatusDto } from "../remote";
+import {
+  EQUIPMENT_MODALITIES,
+  EQUIPMENT_NAME_MAX_LENGTH,
+  parseDurationInput,
+  validateDurationMinutes,
+  validateEquipmentName,
+  type EquipmentDto,
+  type EquipmentModalityDto,
+  type EquipmentStatusDto,
+} from "../remote";
 import type { EquipmentDetailResult, ExamTypeOptionsResult } from "../server";
 
 /** 장비 상태 (EquipmentStatus. 상태 변경 API는 없다) */
@@ -160,25 +170,91 @@ export function EquipmentFormDialog({ equipment, onClose, onDone }: { equipment?
   );
 }
 
+/** 소요 시간(분) 입력 칸. 값은 문자열로 두고 저장할 때 parseDurationInput + validateDurationMinutes로 검사한다 */
+export function DurationInput({
+  id,
+  label,
+  value,
+  onChange,
+  error,
+  disabled,
+  className = "",
+}: {
+  id: string;
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+  error?: string | null;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <span className={`inline-flex items-center gap-1.5 ${className}`}>
+      <input
+        id={id}
+        type="number"
+        inputMode="numeric"
+        min={1}
+        step={1}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        aria-label={label}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-error` : undefined}
+        className={`${controlClass} h-10! w-24! text-right tabular-nums ${error ? "border-red-500!" : ""}`}
+      />
+      <span className="text-sm text-gray-600" aria-hidden="true">
+        분
+      </span>
+    </span>
+  );
+}
+
+/** 입력 문자열 → 검사 결과 (값 또는 오류 문구) */
+export function readDuration(value: string): { value: number; error: null } | { value: null; error: string } {
+  const parsed = parseDurationInput(value);
+  const error = validateDurationMinutes(parsed);
+  return error ? { value: null, error } : { value: parsed as number, error: null };
+}
+
 /**
  * 장비 상세 + 지원 검사 유형. 열 때 상세 Server Function을 한 번 부른다 (장비 확인 1 + 검사 유형 1).
  * 검사 유형 선택지는 '검사 유형 추가'를 누를 때만 불러온다 (검사 유형 목록 1). 같은 장비 종류만, 이미 연결된 유형은 뺀다.
- * 검사 유형 자체를 새로 만드는 기능은 두지 않는다 (정책 미확정).
+ * - 추가: 검사 유형 + 이 장비에서의 소요 시간(분, 1 이상 정수) 모두 필수
+ * - 소요 시간 수정: 행마다 [수정] → 입력 → [저장] (PATCH 1회). 성공·404·409 뒤에는 서버 목록을 다시 받는다
+ * 검사 유형 자체를 새로 만들거나 연결을 끊는 기능은 두지 않는다 (API 없음).
  */
-export function EquipmentDetailDialog({ equipment, onClose, onEditInfo }: { equipment: EquipmentDto; onClose: () => void; onEditInfo?: () => void }) {
+export function EquipmentDetailDialog({
+  equipment,
+  onClose,
+  onEditInfo,
+  onChanged,
+}: {
+  equipment: EquipmentDto;
+  onClose: () => void;
+  onEditInfo?: () => void;
+  /** 지원 검사 유형이 바뀌었을 때 (목록 미리보기 다시 조회용) */
+  onChanged?: () => void;
+}) {
   const [options, setOptions] = useState<ExamTypeOptionsResult | null>(null);
   const [adding, setAdding] = useState(false);
   const [examTypeId, setExamTypeId] = useState("");
+  const [minutes, setMinutes] = useState("");
+  const [addErrors, setAddErrors] = useState<{ examTypeId?: string | null; durationMinutes?: string | null }>({});
   const [addResult, setAddResult] = useState<EquipmentActionResult | null>(null);
+  const [editing, setEditing] = useState<{ examTypeId: string; value: string; error: string | null } | null>(null);
+  const [editResult, setEditResult] = useState<EquipmentActionResult | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
 
-  // 열 때 한 번 조회하고, 추가 결과를 반영할 때 reload()로 다시 조회한다 (늦게 온 이전 응답은 버린다)
+  // 열 때 한 번 조회하고, 추가·수정 결과를 반영할 때 reload()로 다시 조회한다 (늦게 온 이전 응답은 버린다)
   const { value: detail, retry: reload } = useDetailResult<EquipmentDetailResult>(equipment.id, () => loadEquipmentDetailAction(equipment.id), NETWORK_FAILURE);
 
   const startAdding = async () => {
     setAdding(true);
     setAddResult(null);
+    setEditing(null);
     if (options?.ok) return;
     setOptions(null);
     try {
@@ -188,30 +264,71 @@ export function EquipmentDetailDialog({ equipment, onClose, onEditInfo }: { equi
     }
   };
 
-  const add = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  /** 처리 중 표시 + 중복 요청 막기 */
+  const guarded = async (task: () => Promise<void>) => {
     if (pendingRef.current) return;
-    if (!examTypeId) {
-      setAddResult({ ok: false, reason: "INVALID", message: "검사 유형을 선택해 주세요." });
-      return;
-    }
     pendingRef.current = true;
     setPending(true);
-    setAddResult(null);
     try {
-      const result = await addEquipmentExamTypeAction(equipment.id, examTypeId);
-      setAddResult(result);
-      // 성공·중복(409)·없음(404)이면 서버 목록을 다시 받아 맞춘다
-      if (result.ok || result.reason === "CONFLICT" || result.reason === "NOT_FOUND") {
-        setExamTypeId("");
-        reload();
-      }
-    } catch {
-      setAddResult({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
+      await task();
     } finally {
       pendingRef.current = false;
       setPending(false);
     }
+  };
+
+  /** 성공·중복(409)·없음(404)이면 서버 목록을 다시 받아 맞춘다 */
+  const needsReload = (result: EquipmentActionResult) => result.ok || result.reason === "CONFLICT" || result.reason === "NOT_FOUND";
+
+  const add = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (pendingRef.current) return;
+    const duration = readDuration(minutes);
+    const errors = { examTypeId: examTypeId ? null : "검사 유형을 선택해 주세요.", durationMinutes: duration.error };
+    setAddErrors(errors);
+    setAddResult(null);
+    if (errors.examTypeId || errors.durationMinutes) return;
+    void guarded(async () => {
+      try {
+        const result = await addEquipmentExamTypeAction(equipment.id, { examTypeId, durationMinutes: duration.value });
+        setAddResult(result);
+        if (!result.ok && result.fieldErrors) setAddErrors(result.fieldErrors);
+        if (needsReload(result)) {
+          setExamTypeId("");
+          setMinutes("");
+          reload();
+          onChanged?.();
+        }
+      } catch {
+        setAddResult({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
+      }
+    });
+  };
+
+  const saveDuration = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editing || pendingRef.current) return;
+    const duration = readDuration(editing.value);
+    if (duration.error) {
+      setEditing({ ...editing, error: duration.error });
+      return;
+    }
+    const target = editing;
+    setEditResult(null);
+    void guarded(async () => {
+      try {
+        const result = await updateEquipmentExamTypeDurationAction(equipment.id, target.examTypeId, duration.value);
+        setEditResult(result);
+        if (needsReload(result)) {
+          setEditing(null);
+          reload();
+        } else if (!result.ok && result.reason === "INVALID") {
+          setEditing({ ...target, error: result.message });
+        }
+      } catch {
+        setEditResult({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
+      }
+    });
   };
 
   const current = detail?.ok ? detail.equipment : equipment;
@@ -291,16 +408,70 @@ export function EquipmentDetailDialog({ equipment, onClose, onEditInfo }: { equi
                   </tr>
                 </thead>
                 <tbody>
-                  {detail.examTypes.map((item) => (
-                    <tr key={item.id} className={rowClass}>
-                      <td className={`${tdClass} font-medium text-gray-900`}>{item.examTypeName}</td>
-                      <td className={tdClass}>{item.modality}</td>
-                      <td className={`${tdClass} text-right tabular-nums`}>{item.durationMinutes}분</td>
-                    </tr>
-                  ))}
+                  {detail.examTypes.map((item) => {
+                    const isEditing = editing?.examTypeId === item.examTypeId;
+                    const inputId = `equipment-duration-${item.examTypeId}`;
+                    return (
+                      <tr key={item.id} className={rowClass}>
+                        <td className={`${tdClass} font-medium text-gray-900`}>{item.examTypeName}</td>
+                        <td className={tdClass}>{item.modality}</td>
+                        <td className={`${tdClass} text-right`}>
+                          {isEditing ? (
+                            <form onSubmit={saveDuration} noValidate className="flex flex-col items-end gap-1.5">
+                              <div className="flex items-center justify-end gap-2">
+                                <DurationInput
+                                  id={inputId}
+                                  label={`${item.examTypeName} 소요 시간(분)`}
+                                  value={editing.value}
+                                  onChange={(value) => setEditing({ ...editing, value, error: null })}
+                                  error={editing.error}
+                                  disabled={pending}
+                                />
+                                <button type="submit" disabled={pending} className={`${primaryButtonClass} h-9!`}>
+                                  {pending ? "저장 중…" : "저장"}
+                                </button>
+                                <button type="button" onClick={() => setEditing(null)} disabled={pending} className={`${secondaryButtonClass} h-9!`}>
+                                  취소
+                                </button>
+                              </div>
+                              {editing.error && (
+                                <p id={`${inputId}-error`} className="text-xs text-red-600">
+                                  {editing.error}
+                                </p>
+                              )}
+                            </form>
+                          ) : (
+                            <span className="inline-flex items-center justify-end gap-3">
+                              <span className={`tabular-nums ${item.durationMinutes === null ? "text-gray-400" : ""}`}>
+                                {item.durationMinutes === null ? "미설정" : `${item.durationMinutes}분`}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAdding(false);
+                                  setEditResult(null);
+                                  setEditing({ examTypeId: item.examTypeId, value: item.durationMinutes === null ? "" : String(item.durationMinutes), error: null });
+                                }}
+                                disabled={pending}
+                                aria-label={`${item.examTypeName} 소요 시간 수정`}
+                                className="text-sm font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:text-gray-400"
+                              >
+                                수정
+                              </button>
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+          )}
+          {editResult && (
+            <p role={editResult.ok ? "status" : "alert"} className={`rounded-lg px-3 py-2 text-sm ${editResult.ok ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
+              {editResult.message}
+            </p>
           )}
           {detail?.ok && detail.examTypesTruncated && <p className="text-xs text-gray-500">연결된 검사 유형이 많아 처음 100개만 보여 줍니다.</p>}
 
@@ -320,19 +491,58 @@ export function EquipmentDetailDialog({ equipment, onClose, onEditInfo }: { equi
               ) : available.length === 0 ? (
                 <p role="status" className="text-sm text-gray-600">{equipment.modality} 검사 유형이 모두 이 장비에 연결되어 있습니다.</p>
               ) : (
-                <div className="flex flex-col gap-1.5">
-                  <label htmlFor="equipment-exam-type" className="text-sm font-medium text-gray-700">
-                    추가할 검사 유형 ({equipment.modality})
-                  </label>
-                  <select id="equipment-exam-type" value={examTypeId} onChange={(event) => setExamTypeId(event.target.value)} disabled={pending} className={controlClass}>
-                    <option value="">선택해 주세요</option>
-                    {available.map((item) => (
-                      <option key={item.id} value={item.id}>
-                        {item.name}
-                      </option>
-                    ))}
-                  </select>
-                  {options.truncated && <p className="text-xs text-gray-500">검사 유형이 많아 처음 100개 안에서만 고를 수 있습니다.</p>}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+                  <div className="flex min-w-0 flex-col gap-1.5">
+                    <label htmlFor="equipment-exam-type" className="text-sm font-medium text-gray-700">
+                      추가할 검사 유형 ({equipment.modality}) <span className="text-red-600" aria-hidden="true">*</span>
+                    </label>
+                    <select
+                      id="equipment-exam-type"
+                      value={examTypeId}
+                      onChange={(event) => {
+                        setExamTypeId(event.target.value);
+                        setAddErrors((prev) => ({ ...prev, examTypeId: null }));
+                      }}
+                      disabled={pending}
+                      aria-invalid={addErrors.examTypeId ? true : undefined}
+                      aria-describedby={addErrors.examTypeId ? "equipment-exam-type-error" : undefined}
+                      className={controlClass}
+                    >
+                      <option value="">선택해 주세요</option>
+                      {available.map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.name}
+                        </option>
+                      ))}
+                    </select>
+                    {addErrors.examTypeId && (
+                      <p id="equipment-exam-type-error" className="text-sm text-red-600">
+                        {addErrors.examTypeId}
+                      </p>
+                    )}
+                    {options.truncated && <p className="text-xs text-gray-500">검사 유형이 많아 처음 100개 안에서만 고를 수 있습니다.</p>}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="equipment-exam-type-minutes" className="text-sm font-medium text-gray-700">
+                      소요 시간(분) <span className="text-red-600" aria-hidden="true">*</span>
+                    </label>
+                    <DurationInput
+                      id="equipment-exam-type-minutes"
+                      label="추가할 검사 유형의 소요 시간(분)"
+                      value={minutes}
+                      onChange={(value) => {
+                        setMinutes(value);
+                        setAddErrors((prev) => ({ ...prev, durationMinutes: null }));
+                      }}
+                      error={addErrors.durationMinutes}
+                      disabled={pending}
+                    />
+                    {addErrors.durationMinutes && (
+                      <p id="equipment-exam-type-minutes-error" className="text-sm text-red-600">
+                        {addErrors.durationMinutes}
+                      </p>
+                    )}
+                  </div>
                 </div>
               )}
               {addResult && (
