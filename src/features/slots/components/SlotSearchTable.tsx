@@ -10,6 +10,13 @@ interface SlotSearchTableProps {
   onRequestReservation: (slotId: string) => void;
   /** 선택 버튼 문구 (재조정 모드에서 신규 예약 요청과 구분) */
   actionLabel?: string;
+  /**
+   * 선택 버튼을 모두 비활성화하는 이유 (API 모드: 실제 슬롯 예약 요청 미연동).
+   * 버튼 title과 aria-describedby(actionNoteId)로 이유를 알린다
+   */
+  actionDisabledReason?: string;
+  /** 표 밖에 표시한 비활성 안내 요소의 id */
+  actionNoteId?: string;
 }
 
 const thClass = "border-b border-line px-6 py-3 text-left text-[13px] font-semibold text-gray-500";
@@ -19,6 +26,8 @@ export default function SlotSearchTable({
   slots,
   onRequestReservation,
   actionLabel = "예약 요청",
+  actionDisabledReason,
+  actionNoteId,
 }: SlotSearchTableProps) {
   return (
     <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
@@ -48,7 +57,9 @@ export default function SlotSearchTable({
               <td className={`${tdClass} text-center`}>
                 <button
                   type="button"
-                  disabled={!slot.isAvailable}
+                  disabled={!slot.isAvailable || Boolean(actionDisabledReason)}
+                  title={actionDisabledReason}
+                  aria-describedby={actionDisabledReason ? actionNoteId : undefined}
                   onClick={() => onRequestReservation(slot.id)}
                   className="h-12 w-[136px] rounded-lg bg-primary text-[15px] font-semibold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
                 >

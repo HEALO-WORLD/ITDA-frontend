@@ -14,7 +14,19 @@ import { useFailedEquipmentIds } from "@/features/incidents/useMockIncidents";
 import type { RescheduleCause } from "@/features/notifications/types";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
+import { addDays, getSeoulNow } from "@/lib/date/seoulDate";
+
 import { IS_MOCK_DATA, searchSlots } from "../api";
+import {
+  API_SEARCH_RANGE_DAYS,
+  createLatestGuard,
+  fetchApiSlotSearch,
+  filterApiSearchResults,
+  getCriteriaSearchWindow,
+  type SearchDateWindow,
+  type SlotSearchClientFailure,
+} from "../apiSearchClient";
+import type { ApiExamSlot } from "../apiSlots";
 import type { ExamSlot, PartnerOrganization, SlotSearchCriteria } from "../types";
 
 import SlotSearchFilter, { INITIAL_SLOT_CRITERIA } from "./SlotSearchFilter";
@@ -29,13 +41,21 @@ interface SlotSearchProps {
   rescheduleTarget?: ReferralSummary | "INVALID" | null;
   /** 재조정 대상 예약의 장애 장비. 재조정 모드에서만 검색·달력에서 제외한다 */
   failedEquipments?: RescheduleCause[];
+  /**
+   * 데이터 출처. mock(기본): 기존 Mock 데모. api: 실제 슬롯 검색 (Route Handler `/referring/slots/search` 경유).
+   * API 모드에서는 Mock 검색·Mock 의뢰 생성(ReferralCreateForm)을 쓰지 않는다
+   */
+  dataSource?: "mock" | "api";
+  /** API 모드에서 재조정 대상(?rescheduleReferralId)이 있었을 때: 대체 슬롯 선택이 아직 연결되지 않았다고 안내한다 */
+  isApiRescheduleRequested?: boolean;
 }
 
 type SearchState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "success"; slots: ExamSlot[] }
-  | { status: "error" };
+  | { status: "success"; slots: ExamSlot[]; window?: SearchDateWindow }
+  /** failure: API 모드 실패 구분 (Mock 모드는 없음) */
+  | { status: "error"; failure?: SlotSearchClientFailure };
 
 /** 제외 장비 없음 (렌더링마다 새 배열이 생기지 않도록 공유) */
 const NO_EXCLUDED_EQUIPMENTS: RescheduleCause[] = [];
@@ -64,7 +84,13 @@ export default function SlotSearch({
   organizations,
   rescheduleTarget = null,
   failedEquipments = NO_EXCLUDED_EQUIPMENTS,
+  dataSource = "mock",
+  isApiRescheduleRequested = false,
 }: SlotSearchProps) {
+  const isApi = dataSource === "api";
+  /** API 검색: 가장 최근 요청만 반영 (이전 요청은 취소) */
+  const [apiGuard] = useState(createLatestGuard);
+  useEffect(() => () => apiGuard.cancel(), [apiGuard]);
   const rescheduleReferral =
     rescheduleTarget && rescheduleTarget !== "INVALID" ? rescheduleTarget : null;
   // 일반 검색에는 제외 조건을 적용하지 않는다
@@ -95,7 +121,7 @@ export default function SlotSearch({
   const [seenFailureKey, setSeenFailureKey] = useState(failedEquipmentKey);
   if (seenFailureKey !== failedEquipmentKey) {
     setSeenFailureKey(failedEquipmentKey);
-    if (requestedSlot && failedEquipmentIds.has(requestedSlot.equipmentId)) {
+    if (!isApi && requestedSlot && failedEquipmentIds.has(requestedSlot.equipmentId)) {
       // 신규 의뢰 모달에서 작성 중이던 입력만 보관한다 (재조정 모드에는 입력 항목이 없다)
       const shouldPreserve = !rescheduleReferral && !isDraftCompleted && hasDraftInput(draft);
       setPreservedDraft(shouldPreserve ? draft : null);
@@ -117,6 +143,8 @@ export default function SlotSearch({
   useEffect(() => {
     if (refreshedKeyRef.current === slotDataKey) return;
     refreshedKeyRef.current = slotDataKey;
+    // API 모드: Mock 저장소 변경으로 실제 결과를 Mock 검색 결과로 바꾸지 않는다
+    if (isApi) return;
     const criteria = lastCriteriaRef.current;
     if (!criteria) return;
     let isCurrent = true;
@@ -124,20 +152,45 @@ export default function SlotSearch({
       .then((slots) => {
         if (isCurrent) setSearch((prev) => (prev.status === "success" ? { status: "success", slots } : prev));
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       isCurrent = false;
     };
-  }, [slotDataKey, excludedEquipmentIds]);
+  }, [slotDataKey, excludedEquipmentIds, isApi]);
 
   // 모달(자식)이 닫힌 뒤 안내로 포커스를 옮긴다
   useEffect(() => {
     if (interruptedNotice) noticeRef.current?.focus();
   }, [interruptedNotice]);
 
+  /**
+   * API 모드 검색: 날짜를 고르면 그 날짜 하루, 없으면 오늘부터 31일 (서울 기준).
+   * 검사기관·CT/MRI는 서버 조건으로 보내고, 시간대는 받은 결과에서 거른다. 실패하면 Mock 결과를 보이지 않는다
+   */
+  const runApiSearch = async (criteria: SlotSearchCriteria) => {
+    const { signal, isLatest } = apiGuard.start();
+    setSearch({ status: "loading" });
+    const window = getCriteriaSearchWindow(criteria.date, getSeoulNow().dateKey);
+    const result = await fetchApiSlotSearch(
+      {
+        ...window,
+        institutionId: criteria.organizationId || undefined,
+        modality: criteria.examType || undefined,
+      },
+      { signal },
+    );
+    if (!isLatest()) return; // 더 최근 검색·초기화가 있으면 반영하지 않는다
+    if (result.ok) {
+      setSearch({ status: "success", slots: filterApiSearchResults(result.slots, criteria, getSeoulNow().dateTime), window });
+    } else if (result.reason !== "ABORTED") {
+      setSearch({ status: "error", failure: result });
+    }
+  };
+
   const handleSearch = async (criteria: SlotSearchCriteria) => {
     lastCriteriaRef.current = criteria;
     setInterruptedNotice(null);
+    if (isApi) return runApiSearch(criteria);
     setSearch({ status: "loading" });
     try {
       const slots = await searchSlots(criteria, { excludedEquipmentIds });
@@ -153,6 +206,15 @@ export default function SlotSearch({
    */
   const handleRequestReservation = (slotId: string) => {
     if (search.status !== "success") return;
+    // API 모드: 실제 슬롯을 실제 의뢰 생성(ApiReferralCreateForm)으로 넘긴다 (Mock 입력 복원은 쓰지 않는다)
+    if (isApi) {
+      const apiSlot = search.slots.find((item) => item.id === slotId) ?? null;
+      if (apiSlot) {
+        apiRequestCreatedRef.current = false;
+        setRequestedSlot(apiSlot);
+      }
+      return;
+    }
     const slot = search.slots.find((item) => item.id === slotId) ?? null;
     if (!slot) return;
     setDraft(preservedDraft ?? EMPTY_DRAFT);
@@ -166,6 +228,16 @@ export default function SlotSearch({
    * 공통 Modal은 프로그램으로 닫을 때도 dialog close 이벤트로 onClose를 부르므로,
    * 장애로 이미 닫은 뒤(requestedSlot이 없을 때) 들어온 호출은 무시해 보관한 입력이 지워지지 않게 한다
    */
+  /** API 모드 의뢰 모달: 요청 중이면 닫지 않는다. 접수됐으면 닫을 때 같은 조건으로 다시 검색한다 (그 슬롯은 더는 예약 가능이 아닐 수 있다) */
+  const apiRequestBusyRef = useRef(false);
+  const apiRequestCreatedRef = useRef(false);
+  const closeApiRequest = () => {
+    if (!requestedSlot || apiRequestBusyRef.current) return;
+    setRequestedSlot(null);
+    const criteria = lastCriteriaRef.current;
+    if (apiRequestCreatedRef.current && criteria) void runApiSearch(criteria);
+  };
+
   const closeRequest = () => {
     if (!requestedSlot) return;
     setRequestedSlot(null);
@@ -197,11 +269,30 @@ export default function SlotSearch({
         </div>
       )}
 
+      {isApiRescheduleRequested && (
+        <div
+          role="status"
+          className="flex flex-col gap-3 rounded-xl border border-amber-300 bg-amber-50 px-6 py-4 text-[15px] text-amber-900 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+            재조정 대체 슬롯 선택(재예약 요청)은 아직 이 화면에 연결되지 않았습니다. 일반 검사 슬롯 검색으로 표시합니다.
+          </p>
+          <Link
+            href={ROUTES.referring.notifications}
+            className="shrink-0 font-semibold underline underline-offset-4"
+          >
+            재조정·알림으로 이동
+          </Link>
+        </div>
+      )}
+
       <SlotSearchFilter
         organizations={organizations}
         isSearching={search.status === "loading"}
         onSearch={handleSearch}
         onReset={() => {
+          if (isApi) apiGuard.cancel();
           lastCriteriaRef.current = null;
           setInterruptedNotice(null);
           setPreservedDraft(null);
@@ -212,6 +303,7 @@ export default function SlotSearch({
         }
         isExamTypeLocked={rescheduleReferral !== null}
         excludedEquipmentIds={excludedEquipmentIds}
+        dataSource={dataSource}
       />
 
       <section
@@ -223,7 +315,7 @@ export default function SlotSearch({
             <h2 id="slot-result-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
               검색 결과
             </h2>
-            {IS_MOCK_DATA && (
+            {IS_MOCK_DATA && !isApi && (
               <span className="rounded border border-dashed border-amber-400 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-800">
                 개발용 예시 데이터
               </span>
@@ -258,33 +350,65 @@ export default function SlotSearch({
           </div>
         )}
         {search.status === "idle" && (
-          <ResultMessage>검색 조건을 선택한 후 검색 버튼을 눌러 주세요.</ResultMessage>
+          <ResultMessage>
+            검색 조건을 선택한 후 검색 버튼을 눌러 주세요.
+            {isApi && ` 날짜를 선택하지 않으면 오늘부터 ${API_SEARCH_RANGE_DAYS}일 동안의 슬롯을 검색합니다.`}
+          </ResultMessage>
         )}
         {search.status === "loading" && (
           <ResultMessage>검사 슬롯을 검색하고 있습니다.</ResultMessage>
         )}
-        {search.status === "error" && (
-          <ResultMessage tone="error">
-            검사 슬롯을 불러오지 못했습니다. 잠시 후 다시 검색해 주세요.
-          </ResultMessage>
+        {search.status === "error" &&
+          (search.failure ? (
+            <ApiFailureMessage failure={search.failure} />
+          ) : (
+            <ResultMessage tone="error">
+              검사 슬롯을 불러오지 못했습니다. 잠시 후 다시 검색해 주세요.
+            </ResultMessage>
+          ))}
+        {search.status === "success" && isApi && search.window && (
+          <p className="-mt-3 mb-4 text-sm text-gray-500">
+            검색 기간: {formatSearchWindow(search.window)} (한국 시간 기준, 예약 가능한 슬롯만 표시)
+          </p>
         )}
         {search.status === "success" &&
           (search.slots.length > 0 ? (
-            <SlotSearchTable
-              slots={search.slots}
-              onRequestReservation={handleRequestReservation}
-              actionLabel={rescheduleReferral ? "대체 슬롯 선택" : undefined}
-            />
+            <>
+              <SlotSearchTable
+                slots={search.slots}
+                onRequestReservation={handleRequestReservation}
+                actionLabel={rescheduleReferral ? "대체 슬롯 선택" : undefined}
+              />
+            </>
           ) : (
             <ResultMessage>
               {excludedEquipments.length > 0
                 ? "장애 장비를 제외하면 선택한 조건에 해당하는 대체 슬롯이 없습니다. 날짜나 검사기관을 바꿔 다시 검색해 주세요."
-                : "선택한 조건에 해당하는 검사 슬롯이 없습니다."}
+                : isApi
+                  ? "검색 기간에 선택한 조건으로 예약 가능한 검사 슬롯이 없습니다."
+                  : "선택한 조건에 해당하는 검사 슬롯이 없습니다."}
             </ResultMessage>
           ))}
       </section>
 
-      {rescheduleReferral ? (
+      {isApi ? (
+        <Modal
+          open={requestedSlot !== null}
+          title="새 검사 의뢰"
+          description="선택한 검사 슬롯으로 의뢰 정보를 입력합니다."
+          closeOnBackdrop={false}
+          onClose={closeApiRequest}
+        >
+          {requestedSlot && (
+            <div role="status" className="py-6 text-center text-sm text-gray-600">
+              실제 의뢰·예약 요청 기능은 아직 연동되지 않았습니다.
+              <p className="mt-2">
+                슬롯 검색 기능만 이용할 수 있습니다.
+              </p>
+            </div>
+          )}
+        </Modal>
+      ) : rescheduleReferral ? (
         <Modal
           open={requestedSlot !== null}
           title="예약 변경 확인"
@@ -370,6 +494,29 @@ function RescheduleBanner({
   );
 }
 
+/** 검색 기간 표시: 종료일(제외)의 전날까지 */
+function formatSearchWindow({ startDate, endDateExclusive }: SearchDateWindow): string {
+  const lastDate = addDays(endDateExclusive, -1);
+  return lastDate === startDate ? startDate : `${startDate} ~ ${lastDate}`;
+}
+
+/** API 모드 검색 실패 안내 (로그인 만료면 로그인 화면 링크) */
+function ApiFailureMessage({ failure }: { failure: SlotSearchClientFailure }) {
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] text-red-600"
+    >
+      <p>{failure.message}</p>
+      {failure.reason === "UNAUTHORIZED" && (
+        <Link href={ROUTES.login} className="font-semibold text-primary underline underline-offset-4">
+          로그인 화면으로 이동
+        </Link>
+      )}
+    </div>
+  );
+}
+
 function ResultMessage({
   children,
   tone = "default",
@@ -380,9 +527,8 @@ function ResultMessage({
   return (
     <p
       role={tone === "error" ? "alert" : "status"}
-      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${
-        tone === "error" ? "text-red-600" : "text-gray-500"
-      }`}
+      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${tone === "error" ? "text-red-600" : "text-gray-500"
+        }`}
     >
       {children}
     </p>

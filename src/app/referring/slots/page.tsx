@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Suspense } from "react";
 
 import PageHeader from "@/components/layout/PageHeader";
@@ -9,12 +10,15 @@ import { RESCHEDULE_QUERY_KEY } from "@/features/referrals/reschedule";
 import type { ReferralSummary } from "@/features/referrals/types";
 import { getPartnerOrganizations } from "@/features/slots/api";
 import SlotSearch from "@/features/slots/components/SlotSearch";
+import { isApiSlotSearchAvailable, loadApiSlotSearchOrganizations } from "@/features/slots/server";
+import { ROUTES } from "@/constants/navigation";
 import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
 
 /**
  * 검사 슬롯 검색 (S02).
  * `?rescheduleReferralId=`가 있으면 재조정 대체 슬롯 선택 모드로 동작한다.
- * API 모드에서는 슬롯 검색 API가 없어 준비 중으로 안내한다 (재조정 모드 포함, Mock 데이터를 쓰지 않는다).
+ * API 모드: 협력 검사기관은 서버에서 조회하고, 검색·달력은 Client Component가 `/referring/slots/search`(GET Route Handler)로 조회한다.
+ * 실제 슬롯 예약 요청·재조정 대체 슬롯 선택은 아직 연결하지 않았다 (Mock 데이터를 쓰지 않는다).
  * 쿼리는 요청 시점 값이므로 검색 영역을 Suspense 안에서 렌더링한다.
  */
 export default function SlotSearchPage({ searchParams }: PageProps<"/referring/slots">) {
@@ -42,8 +46,21 @@ export default function SlotSearchPage({ searchParams }: PageProps<"/referring/s
 
 async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/slots">, "searchParams">) {
   const rescheduleReferralId = (await searchParams)[RESCHEDULE_QUERY_KEY];
-  // API 모드에서는 슬롯 검색 API가 없어 Mock 기관·슬롯·의뢰·알림으로 화면을 채우지 않는다 (재조정 모드 포함)
-  if (getScreenDataSource(null) === "not-ready") return <FeatureNotReady />;
+  const source = getScreenDataSource("slots");
+  if (source !== "mock") {
+    // API 모드: 검색에 필요한 기능(slots·partnerships·equipment)이 모두 켜져 있어야 한다. Mock 기관·슬롯·의뢰·알림을 쓰지 않는다
+    if (source === "not-ready" || !isApiSlotSearchAvailable()) return <FeatureNotReady />;
+    const result = await loadApiSlotSearchOrganizations();
+    if (!result.ok) return <ApiLoadFailure reason={result.reason} message={result.message} />;
+    // 재조정 대체 슬롯 선택은 아직 연결하지 않았다: 일반 검색으로 보여 주고 안내한다 (Mock 재조정 대상 조회를 하지 않는다)
+    return (
+      <SlotSearch
+        dataSource="api"
+        organizations={result.organizations}
+        isApiRescheduleRequested={rescheduleReferralId !== undefined && rescheduleReferralId !== ""}
+      />
+    );
+  }
   const [organizations, rescheduleTarget, notifications] = await Promise.all([
     getPartnerOrganizations(),
     resolveRescheduleTarget(rescheduleReferralId),
@@ -66,6 +83,24 @@ async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/sl
       rescheduleTarget={rescheduleTarget}
       failedEquipments={failedEquipments}
     />
+  );
+}
+
+/** API 모드에서 검색 조건(협력 검사기관)을 불러오지 못했을 때 (Mock으로 채우지 않는다) */
+function ApiLoadFailure({ reason, message }: { reason: string; message: string }) {
+  const isSignedOut = reason === "SIGNED_OUT" || reason === "UNAUTHORIZED";
+  return (
+    <div
+      role="alert"
+      className="flex flex-col items-center gap-3 rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-red-600"
+    >
+      <p>{isSignedOut ? "로그인 정보가 만료되었습니다. 다시 로그인해 주세요." : `협력 검사기관 정보를 불러오지 못했습니다. ${message}`}</p>
+      {isSignedOut && (
+        <Link href={ROUTES.login} className="font-semibold text-primary underline underline-offset-4">
+          로그인 화면으로 이동
+        </Link>
+      )}
+    </div>
   );
 }
 
