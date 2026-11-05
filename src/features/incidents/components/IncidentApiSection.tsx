@@ -1,25 +1,18 @@
+import { CalendarDays, ChevronDown, Info, Plus, Search } from "lucide-react";
 import Link from "next/link";
-import type { ReactNode } from "react";
+
+import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 
 import { parsePageParam } from "@/features/examinations/server";
 import NotificationPagination from "@/features/notifications/components/NotificationPagination";
 import { ROUTES } from "@/constants/navigation";
 import { formatDateTime } from "@/lib/format/date";
 
-import {
-  INCIDENT_PROCESSING_STATUSES,
-  isUuid,
-  type EquipmentIncidentDetailDto,
-  type EquipmentIncidentDto,
-  type IncidentProcessingStatusDto,
-  type IncidentReferralDto,
-} from "../remote";
-import {
-  loadIncidentDetail,
-  loadIncidentPage,
-  loadIncidentReferralPage,
-  type IncidentLoadFailure,
-} from "../server";
+import { isUuid, type EquipmentIncidentDto } from "../remote";
+import { loadIncidentPage, loadIncidentEquipmentLookup, type IncidentEquipmentLookup, type IncidentLoadFailure } from "../server";
+
+import IncidentApiDetailModal, { IncidentApiDetailButton } from "./IncidentApiDetailModal";
+import { IncidentSummaryBar } from "./IncidentSummary";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -31,25 +24,18 @@ interface IncidentApiSectionProps {
 const Q = {
   page: "page",
   equipmentId: "equipmentId",
-  incidentId: "incidentId",
-  referralStatus: "referralStatus",
-  referralPage: "referralPage",
 } as const;
-
-const PROCESSING_LABELS: Record<IncidentProcessingStatusDto, string> = {
-  PENDING: "대기",
-  PROCESSING: "처리 중",
-  SUCCEEDED: "처리 완료",
-  FAILED: "실패",
-};
 
 /**
  * 장비 장애·재조정 (API 모드). cookies()·searchParams를 읽으므로 페이지의 Suspense 안에서 렌더링한다.
  *
  * - 목록: `?page=`(1부터) 백엔드 페이지, `?equipmentId=` 장비 필터 (백엔드 지원 필터. 장애 상태는 OCCURRED 하나뿐이라 필터를 두지 않는다)
- * - 상세: `?incidentId=`면 장애 상세와 영향 의뢰 처리 현황(`?referralStatus=`·`?referralPage=`)을 함께 보여 준다
+ * - 상세: [상세]를 누르면 `?incidentId=`를 붙여 중앙 대화상자(IncidentApiDetailModal)로 장애 상세·영향 의뢰 처리 현황을 보여 준다
+ *   (영향 의뢰 조건 `?referralStatus=`·`?referralPage=`). 대화상자가 열 때만 조회하므로 목록은 다시 그리지 않는다
  * - 접근 제어는 Gateway(토큰·역할)와 백엔드(기관 범위)가 한다. 프론트는 역할을 추정하지 않고 결과(401·403·404)를 안내한다
- * - 백엔드에 없는 기능·정보는 두지 않는다: 장애 등록·복구, 요약, 발생일 기간 검색, 장애번호·장비명, 영향 예약의 의뢰번호·예약 일시
+ * - 배포 와이어프레임(Mock 화면)과 같은 구성: 요약 바 → 장애 목록 카드(검색 조건·장애 등록 버튼·표)
+ *   장비명·검사 유형은 우리 기관 장비 목록 1회로 찾는다 (행마다 요청하지 않는다). 못 찾으면 장비 ID로 보인다
+ * - 백엔드에 없는 기능은 모양만 두고 비활성·안내: 장애 등록(장애 생성 API 없음)·복구, 발생일 기간 검색, 복구 완료·재조정 필요 집계
  * - 실패해도 Mock 데이터로 대체하지 않는다
  */
 export default async function IncidentApiSection({ searchParams }: IncidentApiSectionProps) {
@@ -57,22 +43,8 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
   const page = parsePageParam(params[Q.page]);
   const rawEquipmentId = first(params[Q.equipmentId]);
   const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : undefined;
-  const rawIncidentId = first(params[Q.incidentId]);
-  const rawReferralStatus = first(params[Q.referralStatus]);
-  const referralStatus = INCIDENT_PROCESSING_STATUSES.find((status) => status === rawReferralStatus);
-  const referralPage = parsePageParam(params[Q.referralPage]);
 
-  const [list, detail] = await Promise.all([
-    loadIncidentPage(page, equipmentId),
-    rawIncidentId === undefined
-      ? null
-      : isUuid(rawIncidentId)
-        ? Promise.all([
-            loadIncidentDetail(rawIncidentId),
-            loadIncidentReferralPage(rawIncidentId, referralPage, referralStatus),
-          ])
-        : ("INVALID_ID" as const),
-  ]);
+  const [list, equipmentLookup] = await Promise.all([loadIncidentPage(page, equipmentId), loadIncidentEquipmentLookup()]);
 
   if (!list.ok) return <FailureNotice failure={list} />;
 
@@ -80,14 +52,34 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
 
   return (
     <div className="flex flex-col gap-5">
+      <IncidentSummaryBar
+        items={[
+          { label: equipmentId ? "이 장비의 장애 이력" : "장애 이력", value: `${list.totalElements}건`, valueClass: list.totalElements > 0 ? "text-red-600" : "text-gray-900" },
+          { label: "복구 완료 이력", value: "조회 준비 중", valueClass: "text-base! font-semibold text-gray-400" },
+          { label: "재조정 필요 예약", value: "상세에서 확인", valueClass: "text-base! font-semibold text-gray-400" },
+        ]}
+        note="장애 복구 기능과 재조정 필요 예약 집계 API가 서버에 아직 없어 장애 이력 건수만 표시합니다. 영향받은 의뢰는 각 장애의 [상세]에서 확인할 수 있습니다."
+      />
       <section
         aria-labelledby="incident-api-list-title"
         className="min-w-0 rounded-xl border border-line bg-white px-4 pb-4 pt-5 sm:px-6"
       >
-        <h2 id="incident-api-list-title" className="mb-3 text-lg font-bold text-gray-900">
-          장애 목록
-          <span className="ml-2 text-base font-semibold tabular-nums text-primary">{list.totalElements}건</span>
-        </h2>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h2 id="incident-api-list-title" className="text-lg font-bold text-gray-900">
+            장비 장애 목록
+            <span className="ml-2 text-base font-semibold tabular-nums text-primary">{list.totalElements}건</span>
+          </h2>
+          <button
+            type="button"
+            disabled
+            aria-describedby="incident-register-unavailable"
+            className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-gray-200 px-3.5 text-sm font-bold text-gray-400"
+          >
+            <Plus className="size-4" aria-hidden="true" />
+            장비 장애 등록
+          </button>
+        </div>
+        <IncidentFilterBar equipmentId={equipmentId} lookup={equipmentLookup} />
 
         {rawEquipmentId !== undefined && (
           <p role="status" className="mb-3 flex flex-wrap items-center gap-2 text-sm text-gray-700">
@@ -116,8 +108,7 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
         ) : (
           <IncidentApiTable
             rows={list.items}
-            selectedId={isUuid(rawIncidentId) ? rawIncidentId : null}
-            detailHref={(incidentId) => `${toHref({ ...listQuery, [Q.page]: String(page + 1), [Q.incidentId]: incidentId })}#incident-detail`}
+            lookup={equipmentLookup}
             equipmentHref={(id) => toHref({ [Q.equipmentId]: id })}
           />
         )}
@@ -125,63 +116,89 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
         <NotificationPagination page={list.page} totalPages={list.totalPages} query={listQuery} label="장애 목록 페이지" />
       </section>
 
-      {detail !== null && (
-        <section
-          id="incident-detail"
-          aria-labelledby="incident-detail-title"
-          className="min-w-0 rounded-xl border border-line bg-white px-4 pb-4 pt-5 sm:px-6"
-        >
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 id="incident-detail-title" className="text-lg font-bold text-gray-900">
-              장애 상세
-            </h2>
-            <Link href={toHref({ ...listQuery, [Q.page]: String(page + 1) })} className={smallLinkClass}>
-              상세 닫기
-            </Link>
-          </div>
-          {detail === "INVALID_ID" ? (
-            <InlineError>장애 ID 형식이 올바르지 않습니다.</InlineError>
-          ) : (
-            <IncidentApiDetail
-              detail={detail[0]}
-              referrals={detail[1]}
-              referralStatus={referralStatus}
-              baseQuery={{ ...listQuery, [Q.page]: String(page + 1), [Q.incidentId]: rawIncidentId as string }}
-            />
-          )}
-        </section>
-      )}
+      {/* 상세 대화상자 (?incidentId=): 장비 이름은 이미 받은 장비 목록으로 찾는다 (추가 요청 없음) */}
+      <IncidentApiDetailModal equipmentNames={equipmentLookup} />
     </div>
+  );
+}
+
+/**
+ * 검색 조건 (와이어프레임: 장애 상태 · 장비 · 기간 · 검색). 백엔드가 받는 장비 조건만 동작한다 (일반 GET 폼, 검색하면 첫 페이지).
+ * 장애 상태는 OCCURRED 하나뿐이고 기간 조건은 백엔드에 없어 비활성으로 두고 이유를 보여 준다.
+ */
+function IncidentFilterBar({ equipmentId, lookup }: { equipmentId: string | undefined; lookup: IncidentEquipmentLookup }) {
+  const control = "h-10 rounded-lg border border-line bg-white text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
+  const disabledControl = "h-10 cursor-not-allowed rounded-lg border border-line bg-gray-50 text-sm text-gray-400";
+  const options = lookup ? Object.entries(lookup).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko", { numeric: true })) : [];
+  return (
+    <form role="search" aria-label="장비 장애 검색 조건" method="get" className="mb-4 flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative">
+          <select aria-label="장애 상태 (장애 발생 하나뿐이라 선택할 수 없음)" disabled className={`${disabledControl} appearance-none pl-3 pr-9`}>
+            <option>전체 상태</option>
+          </select>
+          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-gray-300" aria-hidden="true" />
+        </div>
+        {lookup ? (
+          <div className="relative">
+            <select name="equipmentId" aria-label="장비" defaultValue={equipmentId ?? ""} className={`${control} max-w-[240px] cursor-pointer appearance-none pl-3 pr-9`}>
+              <option value="">전체 장비</option>
+              {options.map(([id, item]) => (
+                <option key={id} value={id}>
+                  {item.name} ({item.modality})
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
+          </div>
+        ) : (
+          <input type="search" name="equipmentId" aria-label="장비 ID" defaultValue={equipmentId ?? ""} placeholder="장비 ID (전체 UUID)" className={`${control} w-[260px] px-3`} />
+        )}
+        <button type="button" disabled className={`${disabledControl} inline-flex items-center gap-2 px-3`} aria-label="기간 (서버 기능 준비 중)">
+          <CalendarDays className="size-4" aria-hidden="true" />
+          전체 기간
+        </button>
+        <button type="submit" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-bold text-white transition-colors hover:bg-primary-hover">
+          <Search className="size-4" aria-hidden="true" />
+          검색
+        </button>
+      </div>
+      <p id="incident-register-unavailable" className="flex items-start gap-1.5 text-xs text-gray-500">
+        <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
+        장비 조건만 서버에서 검색합니다. 장애 상태·기간 검색과 장비 장애 등록은 서버 기능이 준비되면 사용할 수 있습니다.
+        {!lookup && " 장비 목록을 불러오지 못해 장비는 ID로 입력합니다."}
+      </p>
+    </form>
   );
 }
 
 function IncidentApiTable({
   rows,
-  selectedId,
-  detailHref,
+  lookup,
   equipmentHref,
 }: {
   rows: EquipmentIncidentDto[];
-  selectedId: string | null;
-  detailHref: (incidentId: string) => string;
+  lookup: IncidentEquipmentLookup;
   equipmentHref: (equipmentId: string) => string;
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
-      <table className="w-full min-w-[1000px] table-fixed border-collapse">
+      <table className="w-full min-w-[1040px] table-fixed border-collapse">
         <colgroup>
-          <col className="w-[160px]" />
-          <col className="w-[330px]" />
+          <col className="w-[156px]" />
           <col />
-          <col className="w-[290px]" />
-          <col className="w-[100px]" />
-          <col className="w-[96px]" />
+          <col className="w-[88px]" />
+          <col className="w-[156px]" />
+          <col className="w-[280px]" />
+          <col className="w-[104px]" />
+          <col className="w-[88px]" />
         </colgroup>
         <thead className="bg-gray-50">
           <tr>
+            <th scope="col" className={thClass}>장애번호</th>
+            <th scope="col" className={thClass}>장비명</th>
+            <th scope="col" className={thClass}>검사 유형</th>
             <th scope="col" className={thClass}>장애 발생일시</th>
-            <th scope="col" className={thClass}>장비 ID</th>
-            <th scope="col" className={thClass}>장애 사유</th>
             <th scope="col" className={thClass}>영향 구간</th>
             <th scope="col" className={`${thClass} text-center!`}>장애 상태</th>
             <th scope="col" className={`${thClass} text-center!`}>상세</th>
@@ -189,24 +206,31 @@ function IncidentApiTable({
         </thead>
         <tbody>
           {rows.map((incident) => {
-            const isSelected = incident.incidentId.toLowerCase() === selectedId?.toLowerCase();
+            const equipment = lookup?.[incident.equipmentId.toLowerCase()];
             return (
               <tr
                 key={incident.incidentId}
-                className={`border-t border-line transition-colors ${isSelected ? "bg-primary-soft" : "hover:bg-gray-50"}`}
+                className="border-t border-line transition-colors hover:bg-gray-50"
               >
-                <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{formatDateTime(incident.occurredAt)}</td>
+                <td className={`${tdClass} whitespace-nowrap`}>
+                  <ReferralIdCopyButton referralId={incident.incidentId} label="장애번호" />
+                </td>
                 <td className={tdClass}>
-                  <code className="block truncate font-mono text-xs text-gray-700" title={incident.equipmentId}>
-                    {incident.equipmentId}
-                  </code>
+                  {equipment ? (
+                    <p className="truncate font-semibold text-gray-900" title={equipment.name}>
+                      {equipment.name}
+                    </p>
+                  ) : (
+                    <code className="block truncate font-mono text-xs text-gray-700" title={incident.equipmentId}>
+                      {incident.equipmentId}
+                    </code>
+                  )}
                   <Link href={equipmentHref(incident.equipmentId)} className="text-xs font-medium text-primary hover:underline">
                     이 장비의 장애만 보기
                   </Link>
                 </td>
-                <td className={`${tdClass} truncate`} title={incident.reason}>
-                  {incident.reason || <span className="text-gray-400">-</span>}
-                </td>
+                <td className={`${tdClass} whitespace-nowrap`}>{equipment?.modality ?? <span className="text-gray-400">-</span>}</td>
+                <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{formatDateTime(incident.occurredAt)}</td>
                 <td className={`${tdClass} whitespace-nowrap tabular-nums text-sm`}>
                   {formatDateTime(incident.startAt)} ~ {formatDateTime(incident.endAt)}
                 </td>
@@ -214,147 +238,13 @@ function IncidentApiTable({
                   <IncidentApiStatusBadge status={incident.status} />
                 </td>
                 <td className={`${tdClass} text-center`}>
-                  <Link
-                    href={detailHref(incident.incidentId)}
-                    aria-label={`${formatDateTime(incident.occurredAt)} 장애 상세 보기`}
-                    aria-current={isSelected ? "true" : undefined}
-                    className="inline-flex h-9 items-center whitespace-nowrap rounded-md border border-primary bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary"
-                  >
-                    상세
-                  </Link>
+                  <IncidentApiDetailButton incidentId={incident.incidentId} label={`${formatDateTime(incident.occurredAt)} 장애 상세 보기`} />
                 </td>
               </tr>
             );
           })}
         </tbody>
       </table>
-    </div>
-  );
-}
-
-function IncidentApiDetail({
-  detail,
-  referrals,
-  referralStatus,
-  baseQuery,
-}: {
-  detail: { ok: true; incident: EquipmentIncidentDetailDto } | IncidentLoadFailure;
-  referrals: Awaited<ReturnType<typeof loadIncidentReferralPage>>;
-  referralStatus: IncidentProcessingStatusDto | undefined;
-  baseQuery: Record<string, string>;
-}) {
-  if (!detail.ok) return <FailureNotice failure={detail} />;
-  const { incident } = detail;
-  const referralQuery = referralStatus ? { ...baseQuery, [Q.referralStatus]: referralStatus } : baseQuery;
-
-  return (
-    <div className="flex flex-col gap-5">
-      <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-[15px] sm:grid-cols-2">
-        <Field label="장애 ID">
-          <code className="font-mono text-xs">{incident.incidentId}</code>
-        </Field>
-        <Field label="장비 ID">
-          <code className="font-mono text-xs">{incident.equipmentId}</code>
-        </Field>
-        <Field label="장애 상태">
-          <IncidentApiStatusBadge status={incident.status} />
-        </Field>
-        <Field label="장애 발생일시">{formatDateTime(incident.occurredAt)}</Field>
-        <Field label="영향 구간">
-          {formatDateTime(incident.startAt)} ~ {formatDateTime(incident.endAt)}
-        </Field>
-        <Field label="등록·수정 일시">
-          {formatDateTime(incident.createdAt)} / {formatDateTime(incident.updatedAt)}
-        </Field>
-        <Field label="장애 사유" wide>
-          {incident.reason || "-"}
-        </Field>
-      </dl>
-
-      <div>
-        <h3 className="mb-2 text-base font-bold text-gray-900">영향받은 의뢰 후속 처리</h3>
-        <ul className="mb-3 flex flex-wrap gap-2 text-sm" aria-label="후속 처리 건수">
-          <CountChip label="전체" value={incident.totalReferrals} />
-          <CountChip label={PROCESSING_LABELS.PENDING} value={incident.pendingCount} />
-          <CountChip label={PROCESSING_LABELS.PROCESSING} value={incident.processingCount} />
-          <CountChip label={PROCESSING_LABELS.SUCCEEDED} value={incident.completedCount} />
-          <CountChip label={PROCESSING_LABELS.FAILED} value={incident.failedCount} />
-        </ul>
-
-        <nav aria-label="후속 처리 상태 필터" className="mb-3 flex flex-wrap gap-1.5">
-          {[undefined, ...INCIDENT_PROCESSING_STATUSES].map((status) => {
-            const active = status === referralStatus;
-            return (
-              <Link
-                key={status ?? "ALL"}
-                href={`${toHref(status ? { ...baseQuery, [Q.referralStatus]: status } : baseQuery)}#incident-detail`}
-                aria-current={active ? "true" : undefined}
-                className={`inline-flex h-9 items-center whitespace-nowrap rounded-lg border px-3.5 text-sm font-semibold transition-colors ${
-                  active ? "border-primary bg-primary text-white" : "border-line bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                {status ? PROCESSING_LABELS[status] : "전체"}
-              </Link>
-            );
-          })}
-        </nav>
-
-        {!referrals.ok ? (
-          <FailureNotice failure={referrals} />
-        ) : referrals.items.length === 0 ? (
-          <p role="status" className="rounded-lg border border-dashed border-line px-6 py-10 text-center text-[15px] text-gray-500">
-            {referralStatus ? "이 상태의 영향 의뢰가 없습니다." : "영향받은 의뢰가 없습니다."}
-          </p>
-        ) : (
-          <>
-            <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
-              <table className="w-full min-w-[1000px] border-collapse">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th scope="col" className={thClass}>의뢰 ID</th>
-                    <th scope="col" className={thClass}>예약 ID</th>
-                    <th scope="col" className={thClass}>처리 상태</th>
-                    <th scope="col" className={thClass}>결과 코드</th>
-                    <th scope="col" className={`${thClass} text-center!`}>재시도</th>
-                    <th scope="col" className={thClass}>다음 재시도</th>
-                    <th scope="col" className={thClass}>처리 완료</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {referrals.items.map((item: IncidentReferralDto) => (
-                    <tr key={item.id} className="border-t border-line">
-                      <td className={tdClass}>
-                        <code className="font-mono text-xs">{item.referralId}</code>
-                      </td>
-                      <td className={tdClass}>
-                        <code className="font-mono text-xs">{item.reservationId}</code>
-                      </td>
-                      <td className={`${tdClass} whitespace-nowrap`}>{PROCESSING_LABELS[item.processingStatus]}</td>
-                      <td className={tdClass}>
-                        {item.resultCode ? <code className="font-mono text-xs">{item.resultCode}</code> : <Dash />}
-                      </td>
-                      <td className={`${tdClass} text-center tabular-nums`}>{item.retryCount}</td>
-                      <td className={`${tdClass} whitespace-nowrap tabular-nums`}>
-                        {item.nextRetryAt ? formatDateTime(item.nextRetryAt) : <Dash />}
-                      </td>
-                      <td className={`${tdClass} whitespace-nowrap tabular-nums`}>
-                        {item.processedAt ? formatDateTime(item.processedAt) : <Dash />}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <NotificationPagination
-              page={referrals.page}
-              totalPages={referrals.totalPages}
-              query={referralQuery}
-              pageParam={Q.referralPage}
-              label="영향 의뢰 목록 페이지"
-            />
-          </>
-        )}
-      </div>
     </div>
   );
 }
@@ -422,35 +312,6 @@ function FailureNotice({ failure }: { failure: IncidentLoadFailure }) {
       )}
     </div>
   );
-}
-
-function InlineError({ children }: { children: ReactNode }) {
-  return (
-    <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-      {children}
-    </p>
-  );
-}
-
-function Field({ label, wide = false, children }: { label: string; wide?: boolean; children: ReactNode }) {
-  return (
-    <div className={wide ? "sm:col-span-2" : undefined}>
-      <dt className="text-sm text-gray-500">{label}</dt>
-      <dd className="mt-0.5 break-words text-gray-900">{children}</dd>
-    </div>
-  );
-}
-
-function CountChip({ label, value }: { label: string; value: number }) {
-  return (
-    <li className="rounded-md bg-gray-100 px-3 py-1.5 text-gray-700">
-      {label} <span className="font-semibold tabular-nums text-gray-900">{value}</span>
-    </li>
-  );
-}
-
-function Dash() {
-  return <span className="text-gray-400">-</span>;
 }
 
 function first(value: string | string[] | undefined): string | undefined {
