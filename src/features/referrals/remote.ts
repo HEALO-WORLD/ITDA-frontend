@@ -703,3 +703,147 @@ export function toReferralDisplayStatus(status: ReferralStatusDto): ReferralDisp
       return null;
   }
 }
+
+// ── 의뢰 생성 + 첫 예약 접수 POST /api/v1/referrals ──
+
+/** 환자명 최대 길이 (referral-service Referral.patientName 컬럼 length = 20) */
+export const PATIENT_NAME_MAX_LENGTH = 20;
+
+/**
+ * 백엔드 CreateReferralRequest (referral-service dev d243245 ReferralController·ReferralService.createReferral 기준).
+ * - referringInstitutionId: 요청자 소속 기관과 같아야 한다 (다르면 403 REFERRAL_FORBIDDEN)
+ * - idempotencyKey: 같은 키 + 같은 내용(작성자·기관·검사 유형·환자명·슬롯)이면 기존 의뢰를 그대로 돌려주고(201),
+ *   같은 키로 내용이 다르면 409 REFERRAL_IDEMPOTENCY_CONFLICT
+ * - reservation: 재예약과 같은 CreateReservationRequest (시각은 서울 LocalDateTime)
+ * 의뢰 목적 필드는 없다.
+ */
+export interface CreateReferralRequestDto {
+  referringInstitutionId: string;
+  examTypeId: string;
+  patientName: string;
+  idempotencyKey: string;
+  reservation: RescheduleRequestDto;
+}
+
+/** 환자명 확인: 앞뒤 공백 제거 후 1~20자, 제어 문자 없음. 문제가 있으면 안내 문구 */
+export function validatePatientName(value: unknown): string | null {
+  if (typeof value !== "string" || value.trim() === "") return "환자 이름을 입력해 주세요.";
+  const name = value.trim();
+  if ([...name].length > PATIENT_NAME_MAX_LENGTH) return `환자 이름은 ${PATIENT_NAME_MAX_LENGTH}자 이하로 입력해 주세요.`;
+  if (/[\u0000-\u001f\u007f]/.test(name)) return "환자 이름에 사용할 수 없는 문자가 있습니다.";
+  return null;
+}
+
+/** 생성 요청 값 검증 (요청 전). 통과하면 백엔드 DTO 필드만 담은 본문 (환자명은 앞뒤 공백 제거) */
+export function validateCreateReferralRequest(
+  input: { referringInstitutionId: unknown; examTypeId: unknown; patientName: unknown; idempotencyKey: unknown; reservation: Record<RescheduleRequestField, unknown> },
+): { ok: true; body: CreateReferralRequestDto } | { ok: false; field: string; message: string } {
+  if (!isUuid(input.referringInstitutionId)) return { ok: false, field: "referringInstitutionId", message: "의뢰기관 정보를 확인할 수 없습니다." };
+  if (!isUuid(input.examTypeId)) return { ok: false, field: "examTypeId", message: "검사 유형 정보가 올바르지 않습니다." };
+  const nameError = validatePatientName(input.patientName);
+  if (nameError) return { ok: false, field: "patientName", message: nameError };
+  if (!isUuid(input.idempotencyKey)) return { ok: false, field: "idempotencyKey", message: "요청 키가 올바르지 않습니다. 화면을 새로고침해 주세요." };
+  const reservation = validateRescheduleRequest(input.reservation);
+  if (!reservation.ok) return { ok: false, field: `reservation.${reservation.field}`, message: reservation.message };
+  return {
+    ok: true,
+    body: {
+      referringInstitutionId: input.referringInstitutionId,
+      examTypeId: input.examTypeId,
+      patientName: (input.patientName as string).trim(),
+      idempotencyKey: input.idempotencyKey,
+      reservation: reservation.body,
+    },
+  };
+}
+
+/**
+ * 의뢰 생성 + 첫 예약 접수 `POST /api/v1/referrals` (201, 응답 ReferralResponse). Gateway: REQUESTER·ADMIN.
+ * 201은 '접수'다: 슬롯 확보(HOLD)·확정은 Kafka·Outbox로 비동기 처리된다 (확정이 아니다).
+ * 요청 전 검증에 걸리면 요청하지 않고 CONFIG. 응답이 계약과 다르거나 요청과 다른 의뢰(기관·검사 유형·환자명)면 PARSE.
+ * 공통 클라이언트는 재시도하지 않는다. NETWORK·TIMEOUT·PARSE·5xx는 서버가 이미 접수했을 수 있다 (같은 멱등 키로만 다시 보낸다).
+ */
+export async function createReferral(
+  input: Parameters<typeof validateCreateReferralRequest>[0],
+  options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
+): Promise<ReferralResponseDto> {
+  requireApiFeature("referrals");
+  const checked = validateCreateReferralRequest(input);
+  if (!checked.ok) throw new ApiError("CONFIG", checked.message);
+  const data = await apiRequestData<unknown>("/api/v1/referrals", { ...options, method: "POST", body: checked.body });
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  if (
+    !isReferral(data) ||
+    !same(data.referringInstitutionId, checked.body.referringInstitutionId) ||
+    !same(data.examTypeId, checked.body.examTypeId) ||
+    data.patientName !== checked.body.patientName
+  ) {
+    throw new ApiError("PARSE", "의뢰 접수 결과를 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
+/** 의뢰 생성 실패 분류 */
+export type CreateReferralFailureReason =
+  | "NOT_SENT"
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  /** 403 PARTNERSHIP_NOT_ACTIVE: 검사기관과 ACTIVE 협약이 아님 */
+  | "PARTNERSHIP_NOT_ACTIVE"
+  /** 403 REFERRAL_FORBIDDEN·Gateway 역할 거부 등 */
+  | "FORBIDDEN"
+  /** 409 REFERRAL_IDEMPOTENCY_CONFLICT: 같은 요청 키로 다른 내용이 이미 접수됨 */
+  | "IDEMPOTENCY_CONFLICT"
+  | "CONFLICT"
+  /** 5xx: 처리 여부를 확인해야 한다 (같은 키로만 다시 보낸다) */
+  | "SERVER_ERROR"
+  /** 응답을 받지 못함 (연결 실패·시간 초과). 서버가 접수했을 수 있다 */
+  | "NETWORK"
+  | "TIMEOUT"
+  /** 응답 형식 오류. 2xx였다면 접수됐을 수 있다 */
+  | "INVALID_RESPONSE";
+
+/** 결과를 알 수 없어 같은 멱등 키로 다시 확인해야 하는 실패 */
+export const CREATE_REFERRAL_UNCERTAIN: ReadonlySet<CreateReferralFailureReason> = new Set(["SERVER_ERROR", "NETWORK", "TIMEOUT", "INVALID_RESPONSE"]);
+
+const CREATE_REFERRAL_ERROR_MESSAGES: Record<string, string> = {
+  VALIDATION_FAILED: "의뢰 요청 값이 올바르지 않습니다. 입력 내용을 확인해 주세요.",
+  INVALID_INPUT: "의뢰 요청 형식이 올바르지 않습니다.",
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  REFERRAL_FORBIDDEN: "본인 소속 기관으로만 의뢰를 만들 수 있습니다.",
+  ACCESS_DENIED: "의뢰는 의뢰기관 담당자만 요청할 수 있습니다.",
+  PARTNERSHIP_NOT_ACTIVE: "협약 중인 검사기관이 아니어서 의뢰할 수 없습니다. 협약 상태를 확인해 주세요.",
+  REFERRAL_IDEMPOTENCY_CONFLICT: "같은 요청 키로 다른 내용의 의뢰가 이미 접수되었습니다. 의뢰 목록을 확인한 뒤 다시 시도해 주세요.",
+  INSTITUTION_SERVICE_UNAVAILABLE: "기관 정보를 확인할 수 없어 처리 여부가 불확실합니다. 같은 요청으로 다시 확인해 주세요.",
+};
+
+export function getCreateReferralFailure(error: unknown): { reason: CreateReferralFailureReason; message: string; code: string | null } {
+  const uncertain = "의뢰 접수 결과를 확인하지 못했습니다. 이미 접수되었을 수 있으니 [같은 요청으로 다시 확인]을 누르거나 의뢰 목록을 확인해 주세요.";
+  if (!isApiError(error)) return { reason: "SERVER_ERROR", message: uncertain, code: null };
+  const code = error.code ?? null;
+  const known = code ? CREATE_REFERRAL_ERROR_MESSAGES[code] : undefined;
+  switch (error.kind) {
+    case "CONFIG":
+      return { reason: "NOT_SENT", message: error.message, code };
+    case "NETWORK":
+    case "ABORTED":
+      return { reason: "NETWORK", message: uncertain, code };
+    case "TIMEOUT":
+      return { reason: "TIMEOUT", message: uncertain, code };
+    case "PARSE":
+      return { reason: "INVALID_RESPONSE", message: uncertain, code };
+    case "HTTP": {
+      const status = error.status ?? 0;
+      if (status === 400) return { reason: "INVALID_REQUEST", message: known ?? "의뢰 요청 값이 올바르지 않습니다.", code };
+      if (status === 401) return { reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었습니다. 다시 로그인해 주세요.", code };
+      if (status === 403) return { reason: code === "PARTNERSHIP_NOT_ACTIVE" ? "PARTNERSHIP_NOT_ACTIVE" : "FORBIDDEN", message: known ?? "의뢰를 요청할 권한이 없습니다.", code };
+      if (status === 409) {
+        return code === "REFERRAL_IDEMPOTENCY_CONFLICT"
+          ? { reason: "IDEMPOTENCY_CONFLICT", message: known!, code }
+          : { reason: "CONFLICT", message: known ?? "의뢰를 처리할 수 없는 상태입니다. 목록을 새로 고쳐 확인해 주세요.", code };
+      }
+      if (status >= 500) return { reason: "SERVER_ERROR", message: known ?? uncertain, code };
+      return { reason: "SERVER_ERROR", message: uncertain, code };
+    }
+  }
+}
