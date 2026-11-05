@@ -2,6 +2,9 @@ import { apiRequestData, type ApiRequestOptions } from "@/lib/api/client";
 import { requireApiFeature } from "@/lib/api/config";
 import { ApiError, isApiError } from "@/lib/api/errors";
 import type { PagedResponseDto } from "@/lib/api/types";
+import { compareInstants, parseOffsetDateTime } from "@/features/referrals/offsetDateTime";
+
+import { DOWNTIME_REASON_MAX_LENGTH } from "./downtimeRules";
 
 /**
  * 장비 장애 조회 실제 API (referral-service, Gateway 경유).
@@ -242,4 +245,174 @@ export function getIncidentErrorMessage(error: unknown, action: IncidentApiActio
     return ERROR_MESSAGES[error.code];
   }
   return error.message;
+}
+
+// ── 장비 장애(중단) 등록 POST /api/v1/equipment-downtimes (slot-service) ──
+
+/**
+ * 백엔드 EquipmentDowntimeCreateRequest (로컬 itda feat/equipment-downtime 기준, dev 미병합).
+ * 시각은 오프셋을 포함한 OffsetDateTime 문자열 (`+09:00`을 명시한다). 기관 ID·역할은 보내지 않는다 (Gateway가 JWT로 붙인다).
+ */
+export interface CreateEquipmentDowntimeRequestDto {
+  equipmentId: string;
+  startedAt: string;
+  endedAt: string;
+  reason: string;
+}
+
+/** 등록으로 상태를 유지한 HELD·BOOKED 슬롯 (예약·의뢰 후속 처리는 referral-service가 비동기로 한다) */
+export interface DowntimeConflictedSlotDto {
+  slotId: string;
+  status: "HELD" | "BOOKED";
+  reservationId: string | null;
+}
+
+/**
+ * 백엔드 EquipmentDowntimeCreateResponse (201). id는 slot-service 중단 ID다:
+ * referral-service 장애 조회 ID(incidentId)와 다르므로 장애 상세 조회에 쓰지 않는다.
+ */
+export interface EquipmentDowntimeCreateResponseDto {
+  id: string;
+  equipmentId: string;
+  startedAt: string;
+  endedAt: string;
+  reason: string;
+  /** 이번 등록으로 AVAILABLE → UNAVAILABLE이 된 슬롯 수 */
+  affectedSlotCount: number;
+  conflictedSlots: DowntimeConflictedSlotDto[];
+}
+
+const sameUuid = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+
+function sameInstant(a: unknown, b: string): boolean {
+  const left = parseOffsetDateTime(a);
+  const right = parseOffsetDateTime(b);
+  return left !== null && right !== null && compareInstants(left, right) === 0;
+}
+
+function isConflictedSlot(value: unknown): value is DowntimeConflictedSlotDto {
+  return (
+    isRecord(value) &&
+    isUuid(value.slotId) &&
+    (value.status === "HELD" || value.status === "BOOKED") &&
+    (value.reservationId === null || isUuid(value.reservationId))
+  );
+}
+
+/** 응답이 계약 형태이고 이번 요청(장비·구간·사유)의 결과인지 (다르면 보정하지 않고 PARSE) */
+export function isDowntimeCreateResponseOf(value: unknown, request: CreateEquipmentDowntimeRequestDto): value is EquipmentDowntimeCreateResponseDto {
+  return (
+    isRecord(value) &&
+    isUuid(value.id) &&
+    isUuid(value.equipmentId) &&
+    sameUuid(value.equipmentId, request.equipmentId) &&
+    sameInstant(value.startedAt, request.startedAt) &&
+    sameInstant(value.endedAt, request.endedAt) &&
+    value.reason === request.reason &&
+    isCount(value.affectedSlotCount) &&
+    Array.isArray(value.conflictedSlots) &&
+    value.conflictedSlots.every(isConflictedSlot)
+  );
+}
+
+/**
+ * 요청 전 검증 (UUID·OffsetDateTime·구간·사유). 통과하면 백엔드 필드만 담은 본문 (사유는 앞뒤 공백 제거).
+ * 종료 > 현재 조건은 시각에 따라 바뀌므로 서버 처리(downtimeServer)가 화면 규칙으로 확인하고, 최종 판단은 백엔드가 한다.
+ */
+export function validateCreateDowntimeRequest(
+  input: Record<keyof CreateEquipmentDowntimeRequestDto, unknown>,
+): { ok: true; body: CreateEquipmentDowntimeRequestDto } | { ok: false; field: keyof CreateEquipmentDowntimeRequestDto; message: string } {
+  if (!isUuid(input.equipmentId)) return { ok: false, field: "equipmentId", message: "장비 정보가 올바르지 않습니다." };
+  const start = parseOffsetDateTime(input.startedAt);
+  if (!start) return { ok: false, field: "startedAt", message: "장애 시작 일시 형식이 올바르지 않습니다." };
+  const end = parseOffsetDateTime(input.endedAt);
+  if (!end) return { ok: false, field: "endedAt", message: "장애 종료 예정 일시 형식이 올바르지 않습니다." };
+  if (compareInstants(start, end) >= 0) return { ok: false, field: "endedAt", message: "종료 예정 일시는 장애 시작 일시 이후여야 합니다." };
+  if (typeof input.reason !== "string" || input.reason.trim() === "") return { ok: false, field: "reason", message: "장애 사유를 입력해 주세요." };
+  const reason = input.reason.trim();
+  if (reason.length > DOWNTIME_REASON_MAX_LENGTH) return { ok: false, field: "reason", message: `장애 사유는 ${DOWNTIME_REASON_MAX_LENGTH}자 이하로 입력해 주세요.` };
+  return { ok: true, body: { equipmentId: input.equipmentId, startedAt: input.startedAt as string, endedAt: input.endedAt as string, reason } };
+}
+
+/**
+ * 장비 장애(중단) 등록 `POST /api/v1/equipment-downtimes` (201). Gateway: EXAMINER·ADMIN.
+ * 백엔드: EXAMINER는 자기 기관 장비만(아니면 403), 겹치는 중단이 있으면 409 DOWNTIME_OVERLAP.
+ * 공통 클라이언트는 재시도하지 않는다. 멱등 키가 없으므로 NETWORK·TIMEOUT·PARSE·5xx 뒤에는 자동으로 다시 보내지 않는다.
+ */
+export async function createEquipmentDowntime(
+  input: Record<keyof CreateEquipmentDowntimeRequestDto, unknown>,
+  options: RequestOptions = {},
+): Promise<EquipmentDowntimeCreateResponseDto> {
+  requireApiFeature("incidents");
+  const checked = validateCreateDowntimeRequest(input);
+  if (!checked.ok) throw new ApiError("CONFIG", checked.message);
+  const data = await apiRequestData<unknown>("/api/v1/equipment-downtimes", { ...options, method: "POST", body: checked.body });
+  if (!isDowntimeCreateResponseOf(data, checked.body)) {
+    throw new ApiError("PARSE", "장애 등록 결과를 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
+/** 장애 등록 실패 분류 */
+export type DowntimeCreateFailureReason =
+  | "NOT_SENT"
+  | "INVALID_REQUEST"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "NOT_FOUND"
+  /** 409 DOWNTIME_OVERLAP: 같은 장비에 기간이 겹치는 중단이 이미 있음 (앞서 보낸 등록일 수도 있다) */
+  | "OVERLAP"
+  | "CONFLICT"
+  /** 502·503 REFERENCE_*: 기관 서비스 확인 실패. 저장 전 단계라 등록되지 않았다 */
+  | "REFERENCE_UNAVAILABLE"
+  /** 그 밖의 5xx: 처리 여부를 알 수 없다 */
+  | "SERVER_ERROR"
+  | "NETWORK"
+  | "TIMEOUT"
+  | "INVALID_RESPONSE";
+
+/** 등록됐을 수 있어 목록 확인이 필요한 실패 (자동 재전송 금지) */
+export const DOWNTIME_CREATE_UNCERTAIN: ReadonlySet<DowntimeCreateFailureReason> = new Set(["SERVER_ERROR", "NETWORK", "TIMEOUT", "INVALID_RESPONSE"]);
+
+const UNCERTAIN_MESSAGE =
+  "등록 결과를 확인하지 못했습니다. 이미 등록되었을 수 있으니 다시 등록하기 전에 장애 목록을 새로고침해 확인해 주세요. (장애 목록 반영에는 시간이 걸릴 수 있습니다)";
+
+export function getDowntimeCreateFailure(error: unknown): { reason: DowntimeCreateFailureReason; message: string; field?: "startedAt" | "endedAt" | "reason" | "equipmentId" } {
+  if (!isApiError(error)) return { reason: "SERVER_ERROR", message: UNCERTAIN_MESSAGE };
+  switch (error.kind) {
+    case "CONFIG":
+      return { reason: "NOT_SENT", message: error.message };
+    case "NETWORK":
+    case "ABORTED":
+      return { reason: "NETWORK", message: UNCERTAIN_MESSAGE };
+    case "TIMEOUT":
+      return { reason: "TIMEOUT", message: UNCERTAIN_MESSAGE };
+    case "PARSE":
+      return { reason: "INVALID_RESPONSE", message: UNCERTAIN_MESSAGE };
+    case "HTTP": {
+      const status = error.status ?? 0;
+      const code = error.code;
+      if (status === 400) {
+        if (code === "DOWNTIME_INVALID_TIME_RANGE") return { reason: "INVALID_REQUEST", field: "endedAt", message: "종료 예정 일시는 장애 시작 일시 이후여야 합니다." };
+        if (code === "DOWNTIME_END_NOT_FUTURE") return { reason: "INVALID_REQUEST", field: "endedAt", message: "종료 예정 일시는 현재 시각 이후여야 합니다. 종료 예정 일시를 다시 입력해 주세요." };
+        if (code === "MISSING_HEADER") return { reason: "UNAUTHORIZED", message: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요." };
+        return { reason: "INVALID_REQUEST", message: "입력값이 올바르지 않습니다. 장비·시각·사유를 확인해 주세요." };
+      }
+      if (status === 401) return { reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었습니다. 다시 로그인해 주세요." };
+      if (status === 403) return { reason: "FORBIDDEN", message: "장비 장애를 등록할 권한이 없거나 우리 기관 장비가 아닙니다." };
+      if (status === 404) return { reason: "NOT_FOUND", message: "장비를 찾을 수 없습니다. 장비 목록을 새로고침해 주세요." };
+      if (status === 409) {
+        return code === "DOWNTIME_OVERLAP"
+          ? {
+              reason: "OVERLAP",
+              message: "같은 장비에 기간이 겹치는 장애가 이미 등록되어 있어 등록하지 않았습니다. 앞서 보낸 등록이 처리되었을 수 있으니 장애 목록을 확인해 주세요.",
+            }
+          : { reason: "CONFLICT", message: "현재 상태에서는 장애를 등록할 수 없습니다. 화면을 새로고침한 뒤 다시 시도해 주세요." };
+      }
+      if ((status === 502 || status === 503) && (code === "REFERENCE_SERVICE_UNAVAILABLE" || code === "REFERENCE_RESPONSE_INVALID")) {
+        return { reason: "REFERENCE_UNAVAILABLE", message: "장비 소속을 확인하지 못해 장애를 등록하지 않았습니다. 잠시 후 다시 시도해 주세요." };
+      }
+      return { reason: "SERVER_ERROR", message: UNCERTAIN_MESSAGE };
+    }
+  }
 }
