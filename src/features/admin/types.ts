@@ -9,6 +9,6 @@ export type AdminActionResult =
       ok: false;
       reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "NETWORK" | "ERROR";
       message: string;
-      /** 입력 칸별 오류 문구 (기관 등록·수정) */
-      fieldErrors?: Partial<Record<"name" | "type" | "address" | "careInstitutionCode", string | null>>;
+      /** 입력 칸별 오류 문구 (기관 등록·수정, 검사 유형 등록·수정) */
+      fieldErrors?: Partial<Record<"name" | "type" | "address" | "careInstitutionCode" | "modality", string | null>>;
     };

@@ -9,7 +9,12 @@ import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import {
   approveUser,
+  createExamType,
   createInstitution,
+  EXAM_TYPE_NAME_MAX_LENGTH,
+  isExamTypeModality,
+  updateExamTypeName,
+  validateExamTypeName,
   deleteInstitution,
   isAdminEntityId,
   isRegistrableInstitutionType,
@@ -84,6 +89,45 @@ export async function deleteInstitutionAction(institutionId: unknown): Promise<A
   if (blocked) return blocked;
   if (!isAdminEntityId(institutionId)) return invalid("기관 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
   return run("delete", () => "기관을 삭제했습니다.", (headers) => deleteInstitution(institutionId, { headers }), "기관 삭제에 실패했습니다.");
+}
+
+/** 공통 검사 유형 등록 (검사명·종류. 소요 시간은 받지 않는다: 장비별 연결에서 정한다) */
+export async function createExamTypeAction(input: unknown): Promise<AdminActionResult> {
+  const blocked = await checkOrigin();
+  if (blocked) return blocked;
+  const { name, modality } = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+  const fieldErrors = { name: validateExamTypeName(name), modality: isExamTypeModality(modality) ? null : "검사 종류(CT·MRI)를 선택해 주세요." };
+  if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
+  return examTypeResult(
+    await run(
+      "exam-type-create",
+      () => "검사 유형을 등록했습니다.",
+      (headers) => createExamType({ name: name as string, modality: modality as "CT" | "MRI" }, { headers }),
+      "검사 유형 등록에 실패했습니다.",
+    ),
+  );
+}
+
+/** 공통 검사 유형 이름 수정 (이름만. 종류 변경·삭제 API는 없다) */
+export async function updateExamTypeAction(examTypeId: unknown, input: unknown): Promise<AdminActionResult> {
+  const blocked = await checkOrigin();
+  if (blocked) return blocked;
+  if (!isAdminEntityId(examTypeId)) return invalid("검사 유형 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
+  const { name } = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+  const nameError = validateExamTypeName(name);
+  if (nameError) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors: { name: nameError } };
+  return examTypeResult(
+    await run("exam-type-update", () => "검사 유형 이름을 수정했습니다.", (headers) => updateExamTypeName(examTypeId, name as string, { headers }), "검사 유형 수정에 실패했습니다."),
+  );
+}
+
+/** 검사 유형 전용 안내: 404(RESOURCE_NOT_FOUND)·400(INVALID_INPUT)은 공통 문구 대신 검사 유형 문구로 바꾼다 */
+function examTypeResult(result: AdminActionResult): AdminActionResult {
+  if (result.ok) return result;
+  if (result.reason === "NOT_FOUND") return { ...result, message: "검사 유형을 찾을 수 없습니다. 삭제되었을 수 있어 목록을 다시 불러왔습니다." };
+  if (result.reason === "INVALID") return { ...result, message: `검사명은 공백이 아닌 ${EXAM_TYPE_NAME_MAX_LENGTH}자 이하로 입력해 주세요.` };
+  if (result.reason === "CONFLICT") return { ...result, message: "검사 유형이 다른 곳에서 바뀌어 처리하지 못했습니다. 목록을 다시 불러왔습니다." };
+  return result;
 }
 
 async function checkOrigin(): Promise<AdminActionResult | null> {
