@@ -21,6 +21,8 @@ interface DatePickerProps {
   /** 선택한 날짜. 빈 문자열은 미선택 */
   value: DateKey | "";
   onChange: (value: DateKey | "") => void;
+  /** 표시 중인 달이 변경될 때 호출 */
+  onViewMonthChange?: (year: number, month: number) => void;
   /** 날짜별 선택 불가 사유. null을 반환하면 선택 가능 */
   getDisabledReason?: (dateKey: DateKey) => string | null;
   /** 오늘(한국 시간) 이전 날짜 선택 불가 */
@@ -67,6 +69,7 @@ export default function DatePicker({
   disablePast = false,
   placeholder = "날짜 선택",
   disabledNote,
+  onViewMonthChange
 }: DatePickerProps) {
   const labelId = useId();
   const dialogId = useId();
@@ -119,6 +122,18 @@ export default function DatePicker({
     event.preventDefault();
     moveFocus(getNext(focusedKey));
   };
+
+  const onViewMonthChangeRef = useRef(onViewMonthChange);
+
+  useEffect(() => {
+    onViewMonthChangeRef.current = onViewMonthChange;
+  }, [onViewMonthChange]);
+
+  useEffect(() => {
+    if (!isOpen || view.year === 0 || view.month === 0) return;
+
+    onViewMonthChangeRef.current?.(view.year, view.month);
+  }, [isOpen, view.year, view.month]);
 
   // 열 때와 키보드 이동 시에만 날짜 버튼으로 포커스를 옮긴다 (월 이동 버튼 클릭 시에는 유지)
   useEffect(() => {
@@ -262,9 +277,8 @@ export default function DatePicker({
                           title={reason ?? undefined}
                           onClick={() => select(key)}
                           onFocus={() => setFocusedKey(key)}
-                          className={`flex h-10 w-full items-center justify-center rounded-md text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${stateClass} ${
-                            isToday && !isSelected ? "ring-1 ring-inset ring-primary" : ""
-                          }`}
+                          className={`flex h-10 w-full items-center justify-center rounded-md text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${stateClass} ${isToday && !isSelected ? "ring-1 ring-inset ring-primary" : ""
+                            }`}
                         >
                           {parseDateKey(key).day}
                         </button>
