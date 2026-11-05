@@ -82,17 +82,12 @@ export default function ExaminationApiActions({ examination }: ExaminationApiAct
           결과 등록
         </button>
       )}
-      {/* 상태 변경·결과 등록 결과 (성공: status, 실패: alert). 서버 문구만 보이고 응답 본문은 담지 않는다 */}
-      {outcome &&
-        (outcome.ok ? (
-          <p role="status" className="max-w-[240px] text-xs text-emerald-700">
-            {outcome.message}
-          </p>
-        ) : (
-          <p role="alert" className="max-w-[240px] text-xs text-red-600">
-            {outcome.message}
-          </p>
-        ))}
+      {/* 실패 메시지만 표시하고 성공 메시지는 표시하지 않음 */}
+      {outcome && !outcome.ok && (
+        <p role="alert" className="max-w-[240px] text-xs text-red-600">
+          {outcome.message}
+        </p>
+      )}
 
       <Modal
         open={registerOpen}
