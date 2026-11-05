@@ -6,9 +6,11 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import Modal from "@/components/ui/Modal";
 import { ROUTES } from "@/constants/navigation";
-import ApiReferralCreateForm from "@/features/referrals/components/ApiReferralCreateForm";
 import ReferralCreateForm from "@/features/referrals/components/ReferralCreateForm";
+import ApiReferralCreateForm from "@/features/referrals/components/ApiReferralCreateForm";
+import ApiRescheduleConfirm from "@/features/referrals/components/ApiRescheduleConfirm";
 import RescheduleSlotConfirm from "@/features/referrals/components/RescheduleSlotConfirm";
+import type { ApiRescheduleTarget, ApiRescheduleTargetResult } from "@/features/referrals/rescheduleTarget";
 import type { ReferralDraft, ReferralSummary } from "@/features/referrals/types";
 import { useSlotDataKey } from "@/features/equipment/useLiveEquipments";
 import { useFailedEquipmentIds } from "@/features/incidents/useMockIncidents";
@@ -28,6 +30,9 @@ import {
   type SlotSearchClientFailure,
 } from "../apiSearchClient";
 import type { ApiExamSlot } from "../apiSlots";
+import type { SlotExamTypeOption } from "../examTypeFilter";
+import { useMockSlotExamTypes } from "../useMockSlotExamTypes";
+import { MOCK_EXAM_TYPES } from "@/lib/dev/mockExamTypes";
 import type { ExamSlot, PartnerOrganization, SlotSearchCriteria } from "../types";
 
 import SlotSearchFilter, { INITIAL_SLOT_CRITERIA } from "./SlotSearchFilter";
@@ -47,14 +52,27 @@ interface SlotSearchProps {
    * API 모드에서는 Mock 검색·Mock 의뢰 생성(ReferralCreateForm)을 쓰지 않는다
    */
   dataSource?: "mock" | "api";
-  /** API 모드에서 재조정 대상(?rescheduleReferralId)이 있었을 때: 대체 슬롯 선택이 아직 연결되지 않았다고 안내한다 */
+  /** API 모드에서 재조정 대상(?rescheduleReferralId)이 있었지만 재예약 기능(referrals)이 API 대상이 아닐 때: 연결되지 않았다고 안내한다 */
   isApiRescheduleRequested?: boolean;
+  /**
+   * API 재조정 모드: 서버가 조회한 대상 의뢰(NEEDS_RESCHEDULE 확인) 또는 조회 실패. null이면 일반 검색.
+   * 대상이 있으면 검사 유형을 의뢰 값으로 고정하고, 슬롯 선택 시 ApiRescheduleConfirm(후보 확인 → 재예약 요청)을 연다
+   */
+  apiReschedule?: ApiRescheduleTargetResult | null;
+  /** API 모드 세부 검사 항목 선택지 (서버가 조회한 협력 기관 장비의 지원 검사 유형). null = 조회 실패. Mock 모드는 개발용 장비에서 계산한다 */
+  examTypeOptions?: SlotExamTypeOption[] | null;
+  /**
+   * 재조정·알림 화면의 대화상자 안에서 쓸 때: 페이지용 재조정 안내 배너(다른 화면으로 가는 링크 포함)를 숨긴다
+   * (대화상자가 기존 예약 정보를 따로 보여 준다). 검색·선택·확인·재예약 동작은 같다
+   */
+  embedded?: boolean;
 }
 
 type SearchState =
   | { status: "idle" }
   | { status: "loading" }
-  | { status: "success"; slots: ExamSlot[]; window?: SearchDateWindow }
+  /** examTypeSelected: 이 결과를 세부 검사 항목을 골라 검색했는지 (빈 결과 안내용) */
+  | { status: "success"; slots: ExamSlot[]; window?: SearchDateWindow; examTypeSelected?: boolean }
   /** failure: API 모드 실패 구분 (Mock 모드는 없음) */
   | { status: "error"; failure?: SlotSearchClientFailure };
 
@@ -87,8 +105,28 @@ export default function SlotSearch({
   failedEquipments = NO_EXCLUDED_EQUIPMENTS,
   dataSource = "mock",
   isApiRescheduleRequested = false,
+  apiReschedule = null,
+  examTypeOptions: apiExamTypeOptions = null,
+  embedded = false,
 }: SlotSearchProps) {
   const isApi = dataSource === "api";
+  const mockExamTypeOptions = useMockSlotExamTypes(organizations, !isApi);
+  const examTypeOptions = isApi ? apiExamTypeOptions : mockExamTypeOptions;
+  /** API 재조정 대상 (조회 성공일 때만) */
+  const apiTarget = isApi && apiReschedule?.ok ? apiReschedule.target : null;
+  /**
+   * 재조정 시 고정할 세부 검사 항목: API는 의뢰의 examTypeId(서버 검색 조건으로도 고정), Mock은 Mock 의뢰의 항목.
+   * Mock 의뢰에 항목이 없으면 기존처럼 CT·MRI만 고정한다
+   */
+  const mockRescheduleItem =
+    !isApi && rescheduleTarget && rescheduleTarget !== "INVALID" && rescheduleTarget.examTypeId
+      ? MOCK_EXAM_TYPES.find((type) => type.id === rescheduleTarget.examTypeId)
+      : undefined;
+  const lockedExamTypeItem = apiTarget
+    ? { id: apiTarget.examTypeId, name: apiTarget.examTypeName ?? "기존 의뢰의 검사 항목" }
+    : mockRescheduleItem
+      ? { id: mockRescheduleItem.id, name: mockRescheduleItem.name }
+      : null;
   /** API 검색: 가장 최근 요청만 반영 (이전 요청은 취소) */
   const [apiGuard] = useState(createLatestGuard);
   useEffect(() => () => apiGuard.cancel(), [apiGuard]);
@@ -101,6 +139,8 @@ export default function SlotSearch({
     [excludedEquipments],
   );
   const [search, setSearch] = useState<SearchState>({ status: "idle" });
+  /** API 재조정 확인 대화상자의 회차 (슬롯을 고를 때마다 늘려 확인 상태를 새로 시작한다) */
+  const [rescheduleRound, setRescheduleRound] = useState(0);
   /** 예약 요청을 누른 슬롯. 의뢰 생성 모달에 읽기 전용으로 표시한다 */
   const [requestedSlot, setRequestedSlot] = useState<ExamSlot | null>(null);
   const [interruptedNotice, setInterruptedNotice] = useState<string | null>(null);
@@ -151,9 +191,9 @@ export default function SlotSearch({
     let isCurrent = true;
     searchSlots(criteria, { excludedEquipmentIds })
       .then((slots) => {
-        if (isCurrent) setSearch((prev) => (prev.status === "success" ? { status: "success", slots } : prev));
+        if (isCurrent) setSearch((prev) => (prev.status === "success" ? { ...prev, slots } : prev));
       })
-      .catch(() => {});
+      .catch(() => { });
     return () => {
       isCurrent = false;
     };
@@ -177,12 +217,14 @@ export default function SlotSearch({
         ...window,
         institutionId: criteria.organizationId || undefined,
         modality: criteria.examType || undefined,
+        // 세부 검사 항목: 재조정은 의뢰의 항목으로 고정(같은 CT·MRI라도 다른 항목은 제외), 일반 검색은 고른 항목
+        examTypeId: apiTarget?.examTypeId ?? (criteria.examTypeId || undefined),
       },
       { signal },
     );
     if (!isLatest()) return; // 더 최근 검색·초기화가 있으면 반영하지 않는다
     if (result.ok) {
-      setSearch({ status: "success", slots: filterApiSearchResults(result.slots, criteria, getSeoulNow().dateTime), window });
+      setSearch({ status: "success", slots: filterApiSearchResults(result.slots, criteria, getSeoulNow().dateTime), window, examTypeSelected: Boolean(criteria.examTypeId) && !apiTarget });
     } else if (result.reason !== "ABORTED") {
       setSearch({ status: "error", failure: result });
     }
@@ -195,7 +237,7 @@ export default function SlotSearch({
     setSearch({ status: "loading" });
     try {
       const slots = await searchSlots(criteria, { excludedEquipmentIds });
-      setSearch({ status: "success", slots });
+      setSearch({ status: "success", slots, examTypeSelected: Boolean(criteria.examTypeId) && !rescheduleReferral });
     } catch {
       setSearch({ status: "error" });
     }
@@ -212,6 +254,7 @@ export default function SlotSearch({
       const apiSlot = search.slots.find((item) => item.id === slotId) ?? null;
       if (apiSlot) {
         apiRequestCreatedRef.current = false;
+        setRescheduleRound((round) => round + 1);
         setRequestedSlot(apiSlot);
       }
       return;
@@ -248,8 +291,8 @@ export default function SlotSearch({
   };
 
   return (
-    <div className="flex flex-col gap-8">
-      {rescheduleReferral && (
+    <div className={embedded ? "flex flex-col gap-5" : "flex flex-col gap-8"}>
+      {rescheduleReferral && !embedded && (
         <RescheduleBanner referral={rescheduleReferral} excludedEquipments={excludedEquipments} />
       )}
       {rescheduleTarget === "INVALID" && (
@@ -267,6 +310,28 @@ export default function SlotSearch({
           >
             재조정·알림으로 이동
           </Link>
+        </div>
+      )}
+
+      {apiTarget && !embedded && <ApiRescheduleBanner target={apiTarget} />}
+      {isApi && apiReschedule && !apiReschedule.ok && (
+        <div
+          role="alert"
+          className="flex flex-col gap-3 rounded-xl bg-red-50 px-6 py-4 text-[15px] text-red-700 sm:flex-row sm:items-center sm:justify-between"
+        >
+          <p className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
+            {apiReschedule.message} 일반 검사 슬롯 검색으로 표시합니다.
+          </p>
+          {apiReschedule.reason === "SIGNED_OUT" || apiReschedule.reason === "UNAUTHORIZED" ? (
+            <Link href={ROUTES.login} className="shrink-0 font-semibold underline underline-offset-4">
+              로그인 화면으로 이동
+            </Link>
+          ) : (
+            <Link href={ROUTES.referring.notifications} className="shrink-0 font-semibold underline underline-offset-4">
+              재조정·알림으로 이동
+            </Link>
+          )}
         </div>
       )}
 
@@ -300,11 +365,18 @@ export default function SlotSearch({
           setSearch({ status: "idle" });
         }}
         initialCriteria={
-          rescheduleReferral ? { ...INITIAL_SLOT_CRITERIA, examType: rescheduleReferral.examType } : undefined
+          rescheduleReferral
+            ? { ...INITIAL_SLOT_CRITERIA, examType: rescheduleReferral.examType, examTypeId: lockedExamTypeItem?.id ?? "" }
+            : apiTarget
+              ? { ...INITIAL_SLOT_CRITERIA, examType: apiTarget.modality ?? "", examTypeId: apiTarget.examTypeId }
+              : undefined
         }
-        isExamTypeLocked={rescheduleReferral !== null}
+        isExamTypeLocked={rescheduleReferral !== null || apiTarget !== null}
         excludedEquipmentIds={excludedEquipmentIds}
         dataSource={dataSource}
+        apiExamTypeId={apiTarget?.examTypeId}
+        examTypeOptions={examTypeOptions}
+        lockedExamTypeItem={lockedExamTypeItem}
       />
 
       <section
@@ -378,12 +450,14 @@ export default function SlotSearch({
               <SlotSearchTable
                 slots={search.slots}
                 onRequestReservation={handleRequestReservation}
-                actionLabel={rescheduleReferral ? "대체 슬롯 선택" : undefined}
+                actionLabel={rescheduleReferral || apiTarget ? "대체 슬롯 선택" : undefined}
               />
             </>
           ) : (
             <ResultMessage>
-              {excludedEquipments.length > 0
+              {search.examTypeSelected
+                ? "선택한 검사 항목으로 예약 가능한 검사 슬롯이 없습니다. 다른 검사 항목이나 날짜를 선택해 주세요."
+                : excludedEquipments.length > 0
                 ? "장애 장비를 제외하면 선택한 조건에 해당하는 대체 슬롯이 없습니다. 날짜나 검사기관을 바꿔 다시 검색해 주세요."
                 : isApi
                   ? "검색 기간에 선택한 조건으로 예약 가능한 검사 슬롯이 없습니다."
@@ -392,7 +466,24 @@ export default function SlotSearch({
           ))}
       </section>
 
-      {isApi ? (
+      {isApi && apiTarget ? (
+        // 대화상자(제목·하단 버튼 포함)는 ApiRescheduleConfirm이 그린다. 닫을 때도 같은 대화상자를 닫아 포커스를 돌려주고,
+        // 슬롯을 새로 고를 때마다 key로 상태(확인·요청·상태 재조회)를 처음부터 시작한다
+        <ApiRescheduleConfirm
+          key={rescheduleRound}
+          open={requestedSlot !== null}
+          target={apiTarget}
+          slot={requestedSlot as ApiExamSlot | null}
+          organizations={organizations}
+          onCancel={closeApiRequest}
+          onBusyChange={(busy) => {
+            apiRequestBusyRef.current = busy;
+          }}
+          onAccepted={() => {
+            apiRequestCreatedRef.current = true;
+          }}
+        />
+      ) : isApi ? (
         <Modal
           open={requestedSlot !== null}
           title="새 검사 의뢰"
@@ -401,6 +492,7 @@ export default function SlotSearch({
           onClose={closeApiRequest}
         >
           {requestedSlot && (
+            // 일반 검색의 새 검사 의뢰 (재조정 모드는 위의 ApiRescheduleConfirm: 서로 다른 Server Function을 쓴다)
             <ApiReferralCreateForm
               slot={requestedSlot as ApiExamSlot}
               onCancel={closeApiRequest}
@@ -499,6 +591,35 @@ function RescheduleBanner({
   );
 }
 
+/** API 재조정 모드 안내 (Mock RescheduleBanner와 같은 모양, 서버가 조회한 대상 의뢰 값만 쓴다) */
+function ApiRescheduleBanner({ target }: { target: ApiRescheduleTarget }) {
+  const current = target.currentReservation;
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-primary/30 bg-primary-soft px-6 py-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex items-start gap-3">
+        <RefreshCw className="mt-0.5 size-6 shrink-0 text-primary" aria-hidden="true" />
+        <div>
+          <p className="text-[17px] font-bold text-gray-900">기존 예약을 변경할 새로운 검사 슬롯을 선택해 주세요.</p>
+          <p className="mt-1 text-[15px] text-gray-700">
+            재조정 대상 · {target.examTypeName ?? "검사 유형 확인 불가"}
+            {target.modality ? ` (${target.modality})` : ""}
+            {current?.startTime ? ` · 기존 예약 ${formatDateTimeWithWeekday(current.startTime.slice(0, 16))}` : ""}
+          </p>
+          <p className="mt-0.5 text-sm text-gray-500">
+            검사 유형은 기존 의뢰와 같게 고정됩니다. 슬롯을 고르면 서버에서 예약 가능 여부·장비 상태를 다시 확인합니다.
+          </p>
+        </div>
+      </div>
+      <Link
+        href={ROUTES.referring.notifications}
+        className="inline-flex h-10 shrink-0 items-center justify-center rounded-lg border border-line bg-white px-4 text-[15px] font-semibold text-gray-700 hover:bg-gray-50"
+      >
+        재조정 화면으로 돌아가기
+      </Link>
+    </div>
+  );
+}
+
 /** 검색 기간 표시: 종료일(제외)의 전날까지 */
 function formatSearchWindow({ startDate, endDateExclusive }: SearchDateWindow): string {
   const lastDate = addDays(endDateExclusive, -1);
@@ -532,9 +653,8 @@ function ResultMessage({
   return (
     <p
       role={tone === "error" ? "alert" : "status"}
-      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${
-        tone === "error" ? "text-red-600" : "text-gray-500"
-      }`}
+      className={`rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] ${tone === "error" ? "text-red-600" : "text-gray-500"
+        }`}
     >
       {children}
     </p>

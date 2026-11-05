@@ -9,10 +9,10 @@ interface ModalProps {
   /** 제목 오른쪽에 붙는 요소 (예: 상태 배지) */
   titleAddon?: ReactNode;
   /**
-   * 최대 너비. md = 560px(기본), lg = 680px, xl = 780px (정보가 많은 상세 화면), form2 = 980px (2단 입력 폼: 장비 등록),
-   * 2xl = 1024px (관리자 2단 상세), 3xl = 1160px (관리자 의뢰 상세)
+   * 최대 너비. md = 560px(기본), lg = 680px, xl = 780px (정보가 많은 상세 화면), compare = 880px (좌우 비교 확인: 예약 변경), form2 = 980px (2단 입력 폼: 장비 등록),
+   * 2xl = 1024px (관리자 2단 상세), detail = 1080px (의뢰 상세: 2열 + 이력), 3xl = 1160px (관리자 의뢰 상세)
    */
-  size?: "md" | "lg" | "xl" | "form2" | "2xl" | "3xl";
+  size?: "md" | "lg" | "xl" | "compare" | "form2" | "2xl" | "detail" | "3xl";
   onClose: () => void;
   /** 바깥(배경) 클릭으로 닫기. 입력 중인 폼은 false 권장 */
   closeOnBackdrop?: boolean;
@@ -25,8 +25,12 @@ const WIDTH_CLASS = {
   md: "w-[min(560px,calc(100%-32px))]",
   lg: "w-[min(680px,calc(100%-32px))]",
   xl: "w-[min(780px,calc(100%-24px))]",
+  /** 두 항목을 좌우로 비교하는 확인 화면 (예약 변경 확인) */
+  compare: "w-[min(880px,calc(100%-24px))]",
   form2: "w-[min(980px,calc(100%-24px))]",
   "2xl": "w-[min(1024px,calc(100%-24px))]",
+  /** 2열 상세 + 전체 너비 이력 (의뢰 상세) */
+  detail: "w-[min(1080px,calc(100%-24px))]",
   "3xl": "w-[min(1160px,calc(100%-24px))]",
 } as const;
 

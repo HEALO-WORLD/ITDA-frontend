@@ -9,7 +9,7 @@ import ApiRescheduleSection, { ApiRescheduleAlert } from "@/features/notificatio
 import NotificationList from "@/features/notifications/components/NotificationList";
 import RescheduleAlert from "@/features/notifications/components/RescheduleAlert";
 import RescheduleTable from "@/features/notifications/components/RescheduleTable";
-import { getEquipmentFailureExamTypes } from "@/features/notifications/reschedule";
+import { getEquipmentFailureExamTypes, getFailedEquipments } from "@/features/notifications/reschedule";
 import { getRescheduleRequiredReferrals } from "@/features/referrals/api";
 import { getScreenDataSource } from "@/lib/api/config";
 
@@ -21,7 +21,8 @@ import { getScreenDataSource } from "@/lib/api/config";
  * API 모드(notifications): 알림 내역은 알림 API로 조회한다.
  * API 응답에는 재조정 원인(장애 장비)이 없으므로 원인을 표시하지 않는다 (Mock 알림의 장비로 대신하지 않는다).
  * API 모드(referrals): 재조정 필요 목록은 의뢰 목록 API(status=NEEDS_RESCHEDULE)로 조회한다 (ApiRescheduleSection, Mock 목록을 쓰지 않는다).
- *   대체 슬롯 선택(재예약)은 슬롯 조회·재예약 연결 전이라 버튼을 비활성으로 둔다. 기능이 꺼져 있으면 준비 중으로 안내한다.
+ *   [새 슬롯 검색]은 페이지를 옮기지 않고 대체 슬롯 검색 대화상자를 연다 (슬롯 검색 화면과 같은 SlotSearch 재조정 모드).
+ * 배치: 재조정 안내 → 재조정 필요 목록(전체 너비) → 알림 내역 (재조정 업무가 화면의 중심이다)
  */
 export default async function NotificationsPage({ searchParams }: PageProps<"/referring/notifications">) {
   // 영역마다 데이터 출처를 정한다: Mock 모드 → Mock, API 모드 → 연결된 API 또는 준비 중 (API 모드에서는 Mock을 쓰지 않는다)
@@ -32,6 +33,8 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/re
     notificationSource === "mock" ? getNotifications() : [],
   ]);
   const failureExamTypes = getEquipmentFailureExamTypes(rescheduleReferrals, notifications);
+  // Mock: 대체 슬롯 검색에서 제외할 의뢰별 장애 장비 (슬롯 검색 화면의 Mock 재조정 모드와 같은 계산)
+  const failedEquipmentsByReferral = Object.fromEntries(rescheduleReferrals.map((referral) => [referral.id, getFailedEquipments(referral.id, notifications)]));
 
   return (
     <>
@@ -50,9 +53,13 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/re
           </Suspense>
         )}
 
-        <div className="grid grid-cols-1 items-start gap-6 2xl:grid-cols-[minmax(0,2fr)_minmax(340px,1fr)]">
+        <div className="flex flex-col gap-6">
           {rescheduleSource === "mock" ? (
-            <RescheduleTable referrals={rescheduleReferrals} isEquipmentFailure={failureExamTypes !== null} />
+            <RescheduleTable
+              referrals={rescheduleReferrals}
+              isEquipmentFailure={failureExamTypes !== null}
+              failedEquipmentsByReferral={failedEquipmentsByReferral}
+            />
           ) : rescheduleSource === "api" ? (
             <Suspense
               fallback={
@@ -85,7 +92,9 @@ export default async function NotificationsPage({ searchParams }: PageProps<"/re
 
         <p className="flex items-center gap-3 rounded-xl bg-primary-soft px-6 py-4 text-[15px] text-gray-700">
           <Info className="size-6 shrink-0 text-primary" aria-hidden="true" />
-          {rescheduleSource !== "mock" ? (
+          {rescheduleSource === "api" ? (
+            <span>[새 슬롯 검색]에서 같은 검사 유형의 대체 슬롯을 골라 예약 변경을 요청할 수 있습니다. 요청이 접수된 뒤 예약 확정은 순차적으로 처리됩니다.</span>
+          ) : rescheduleSource !== "mock" ? (
             <span>새 슬롯 선택과 예약 변경 요청은 서버 기능이 준비된 뒤 이용할 수 있습니다.</span>
           ) : (
             <span>

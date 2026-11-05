@@ -30,6 +30,8 @@ export interface SlotSearchRouteParams {
   endDateExclusive: DateKey;
   institutionId?: string;
   modality?: ExamType;
+  /** 세부 검사 항목(ExamType) UUID. 일반 검색: 사용자가 고른 항목, 재조정: 의뢰의 검사 항목으로 고정. 서버 검색 조건으로 보낸다 */
+  examTypeId?: string;
 }
 
 /** Route Handler 성공 응답 */
@@ -110,6 +112,7 @@ export function buildSlotSearchUrl(params: SlotSearchRouteParams): string {
   const query = new URLSearchParams({ startDate: params.startDate, endDateExclusive: params.endDateExclusive });
   if (params.institutionId) query.set("institutionId", params.institutionId);
   if (params.modality) query.set("modality", params.modality);
+  if (params.examTypeId) query.set("examTypeId", params.examTypeId);
   return `${SLOT_SEARCH_ROUTE}?${query.toString()}`;
 }
 
@@ -273,11 +276,12 @@ const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 /** 검사 종류·검사기관·시간대 조건 (날짜 제외). 기관 UUID는 대소문자를 구분하지 않는다 */
 export function matchesApiSlotFilter(
   slot: ApiExamSlot,
-  filter: Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay">,
+  filter: Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay" | "examTypeId">,
 ): boolean {
   return (
     (!filter.examType || slot.examType === filter.examType) &&
     (!filter.organizationId || sameId(slot.organizationId, filter.organizationId)) &&
+    (!filter.examTypeId || sameId(slot.examTypeId, filter.examTypeId)) &&
     (!filter.timeOfDay || getTimeOfDay(slot.startAt) === filter.timeOfDay)
   );
 }
@@ -299,7 +303,7 @@ export function filterApiSearchResults(slots: readonly ApiExamSlot[], criteria: 
 /** 달력: 날짜별 예약 가능 슬롯 수 (조건 + 아직 시작하지 않은 슬롯). 없는 날짜 = 예약 가능한 슬롯 없음 */
 export function countApiSlotsByDate(
   slots: readonly ApiExamSlot[],
-  filter: Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay">,
+  filter: Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay" | "examTypeId">,
   nowDateTime: string,
 ): Record<DateKey, number> {
   const counts: Record<DateKey, number> = {};

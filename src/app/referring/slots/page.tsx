@@ -7,6 +7,7 @@ import { getNotifications } from "@/features/notifications/api";
 import { getFailedEquipments } from "@/features/notifications/reschedule";
 import { getReferralById } from "@/features/referrals/api";
 import { RESCHEDULE_QUERY_KEY } from "@/features/referrals/reschedule";
+import { loadApiRescheduleTarget } from "@/features/referrals/rescheduleTarget";
 import type { ReferralSummary } from "@/features/referrals/types";
 import { getPartnerOrganizations } from "@/features/slots/api";
 import SlotSearch from "@/features/slots/components/SlotSearch";
@@ -18,7 +19,7 @@ import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
  * 검사 슬롯 검색 (S02).
  * `?rescheduleReferralId=`가 있으면 재조정 대체 슬롯 선택 모드로 동작한다.
  * API 모드: 협력 검사기관은 서버에서 조회하고, 검색·달력은 Client Component가 `/referring/slots/search`(GET Route Handler)로 조회한다.
- * 실제 슬롯 예약 요청·재조정 대체 슬롯 선택은 아직 연결하지 않았다 (Mock 데이터를 쓰지 않는다).
+ * API 재조정 모드: 대상 의뢰를 서버에서 조회(NEEDS_RESCHEDULE 확인)하고, 검사 유형을 의뢰 값으로 고정해 대체 슬롯을 고른다 (Mock 데이터를 쓰지 않는다).
  * 쿼리는 요청 시점 값이므로 검색 영역을 Suspense 안에서 렌더링한다.
  */
 export default function SlotSearchPage({ searchParams }: PageProps<"/referring/slots">) {
@@ -50,14 +51,23 @@ async function SlotSearchSection({ searchParams }: Pick<PageProps<"/referring/sl
   if (source !== "mock") {
     // API 모드: 검색에 필요한 기능(slots·partnerships·equipment)이 모두 켜져 있어야 한다. Mock 기관·슬롯·의뢰·알림을 쓰지 않는다
     if (source === "not-ready" || !isApiSlotSearchAvailable()) return <FeatureNotReady />;
-    const result = await loadApiSlotSearchOrganizations();
+    const isRescheduleRequested = rescheduleReferralId !== undefined && rescheduleReferralId !== "";
+    // 재예약 Server Function은 referrals·slots·equipment가 모두 API 대상이어야 한다. 아니면 일반 검색 + 안내 (Mock 의뢰를 쓰지 않는다)
+    const canReschedule = isRescheduleRequested && isApiFeature("referrals");
+    const [result, reschedule] = await Promise.all([
+      loadApiSlotSearchOrganizations(),
+      canReschedule ? loadApiRescheduleTarget(rescheduleReferralId) : Promise.resolve(null),
+    ]);
     if (!result.ok) return <ApiLoadFailure reason={result.reason} message={result.message} />;
-    // 재조정 대체 슬롯 선택은 아직 연결하지 않았다: 일반 검색으로 보여 주고 안내한다 (Mock 재조정 대상 조회를 하지 않는다)
+    // 재조정 대상이 바뀌면 검색 상태를 초기화한다
     return (
       <SlotSearch
+        key={reschedule?.ok ? reschedule.target.referralId : String(rescheduleReferralId ?? "")}
         dataSource="api"
         organizations={result.organizations}
-        isApiRescheduleRequested={rescheduleReferralId !== undefined && rescheduleReferralId !== ""}
+        examTypeOptions={result.examTypes}
+        apiReschedule={reschedule}
+        isApiRescheduleRequested={isRescheduleRequested && !canReschedule}
       />
     );
   }

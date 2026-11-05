@@ -21,18 +21,19 @@ export type DateAvailability = Record<DateKey, DateAvailabilityStatus>;
  * 달력 계산에 쓰는 조건 (날짜 제외).
  * `예약 가능한 슬롯만 보기`는 넣지 않는다: 달력은 원래 예약 가능한 슬롯이 있는 날만 선택 가능으로 표시한다.
  */
-export type AvailabilityFilter = Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay">;
+export type AvailabilityFilter = Pick<SlotSearchCriteria, "examType" | "organizationId" | "timeOfDay" | "examTypeId">;
 
 /** 시작 시각(`YYYY-MM-DDTHH:mm`)으로 시간대를 판단한다. 기관 운영시간과 무관하게 12:00 기준 */
 export function getTimeOfDay(startAt: string): TimeOfDay {
   return startAt.slice(11, 16) < "12:00" ? "AM" : "PM";
 }
 
-/** 검사 유형·기관·시간대 조건 일치 여부 (날짜 조건 제외) */
+/** 검사 유형·기관·세부 검사 항목·시간대 조건 일치 여부 (날짜 조건 제외) */
 export function matchesSlotFilter(slot: ExamSlot, filter: AvailabilityFilter): boolean {
   return (
     (!filter.examType || slot.examType === filter.examType) &&
     (!filter.organizationId || slot.organizationId === filter.organizationId) &&
+    (!filter.examTypeId || slot.examTypeId === filter.examTypeId) &&
     (!filter.timeOfDay || getTimeOfDay(slot.startAt) === filter.timeOfDay)
   );
 }

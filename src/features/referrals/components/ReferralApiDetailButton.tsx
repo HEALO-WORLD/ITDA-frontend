@@ -9,9 +9,9 @@ import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import { loadReferralDetailAction } from "../actions";
 import { abbreviateReferralId } from "../referralId";
-import type { DetailCell, ReferralDetailLoadResult } from "../server";
+import type { DetailCell, ReferralDetail, ReferralDetailLoadResult } from "../server";
 
-import { DetailError, DetailFooter, DetailLoading, Empty, FailureReasonNotice, HistoryTimeline, Info, Section, SectionNote } from "./ReferralDetailParts";
+import { DetailError, DetailLoading, Empty, FailureReasonNotice, HistoryTimeline, Info, Section, SectionNote } from "./ReferralDetailParts";
 import ReferralIdCopyButton from "./ReferralIdCopyButton";
 import ReferralStatusBadge from "./ReferralStatusBadge";
 import ReservationStatusBadge from "./ReservationStatusBadge";
@@ -27,11 +27,18 @@ interface ReferralApiDetailButtonProps {
 
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
 
+/** 섹션 카드 (2열에서 같은 높이) */
+const cardClass = "h-full min-w-0 rounded-xl border border-line bg-white px-5 py-5";
+/** 하단 닫기 (기존 DetailFooter 버튼과 같은 모양, 대화상자 고정 하단 영역에 둔다) */
+const closeButtonClass =
+  "inline-flex h-10 items-center rounded-lg border border-line bg-white px-5 text-sm font-semibold text-gray-700 shadow-sm hover:bg-gray-50";
+
 const cell = (value: DetailCell) => (value.state === "ok" ? value.value : <Empty reason={value.state} />);
 
 /**
  * 의뢰 목록(API 모드)의 '상세' 버튼과 상세 대화상자.
- * 헤더: 제목 · 의뢰 번호(축약, 전체 UUID 복사) · 의뢰 상태 배지 · 닫기 / 본문: 검사 정보 · 예약 정보 · 상태 변경 이력(타임라인).
+ * 헤더: 제목 · 의뢰 상태 배지 · 의뢰 번호(축약, 전체 UUID 복사) · 닫기
+ * 본문: [검사 정보 | 예약 정보] (넓은 화면 2열, 좁은 화면 1열) → 상태 변경 이력(타임라인, 전체 너비) / 하단(고정): 닫기.
  * 열 때 Server Function으로 한 건만 조회한다 (의뢰·변경 이력·현재 예약·검사기관·장비). 예약 상태와 관계없이 열 수 있다.
  * 응답에 없는 값은 만들지 않고 '정보 없음 / 찾을 수 없음 / 조회 실패'로 구분한다. 이력은 백엔드가 준 것만 보인다. 조회 전용이다.
  * 모양 조각(섹션·정보 칸·타임라인 등)은 관리자 의뢰 상세 모달과 함께 쓴다 (ReferralDetailParts).
@@ -55,11 +62,6 @@ export default function ReferralApiDetailButton({ referralId, examTypeLabel, bad
     }
   };
 
-  const detail = result?.ok ? result.detail : null;
-  const reservation = detail?.reservation;
-  const createdAt = detail?.histories?.find((h) => h.reason === "REFERRAL_CREATED")?.occurredAt;
-  const reservationEmpty = (key: string) => <Empty key={key} reason={reservation?.state === "ok" ? "none" : (reservation?.state ?? "none")} />;
-
   return (
     <>
       <button type="button" onClick={show} aria-label={`${abbreviateReferralId(referralId)} 상세`} className={detailButtonClass}>
@@ -67,7 +69,7 @@ export default function ReferralApiDetailButton({ referralId, examTypeLabel, bad
       </button>
       <Modal
         open={open}
-        size="xl"
+        size="detail"
         title="의뢰 상세"
         titleAddon={
           <>
@@ -78,61 +80,88 @@ export default function ReferralApiDetailButton({ referralId, examTypeLabel, bad
           </>
         }
         onClose={() => setOpen(false)}
+        footer={
+          <button type="button" onClick={() => setOpen(false)} className={closeButtonClass}>
+            닫기
+          </button>
+        }
       >
         {!result ? (
           <DetailLoading />
         ) : !result.ok ? (
           <DetailError message={result.message} onRetry={show} />
         ) : (
-          <div className="flex flex-col gap-5">
-            <Section icon={Stethoscope} title="검사 정보">
-              <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
-                <Info label="환자명" strong>{detail!.patientName}</Info>
-                <Info label="검사 유형" strong>{examTypeLabel}</Info>
-                <Info label="검사기관">{reservation?.state === "ok" ? cell(reservation.examInstitution) : reservationEmpty("i")}</Info>
-                <Info label="검사 장비">{reservation?.state === "ok" ? cell(reservation.equipment) : reservationEmpty("e")}</Info>
-                <Info label="검사 일시">
-                  {reservation?.state === "ok" && reservation.startTime ? formatDateTimeWithWeekday(reservation.startTime) : reservationEmpty("t")}
-                </Info>
-                <Info label="의뢰 요청 일시">{createdAt ? formatDateTimeWithWeekday(createdAt) : <Empty reason={detail!.histories ? "none" : "error"} />}</Info>
-              </dl>
-            </Section>
-
-            <Section icon={CalendarClock} title="예약 정보">
-              {reservation?.state === "ok" ? (
-                <div className="flex flex-col gap-4">
-                  {reservation.failureReason && <FailureReasonNotice reason={reservation.failureReason} />}
-                  <dl className="grid grid-cols-2 gap-x-8 gap-y-4 sm:grid-cols-4">
-                    <Info label="현재 예약 상태"><ReservationStatusBadge status={reservation.reservationStatus} /></Info>
-                    <Info label="예약 시도">{reservation.attemptNo}번째 시도</Info>
-                    <Info label="예약 확정 시각">{reservation.confirmedAt ? formatDateTimeWithWeekday(reservation.confirmedAt) : <Empty reason="none" />}</Info>
-                    <Info label="종료 시각">{reservation.endedAt ? formatDateTimeWithWeekday(reservation.endedAt) : <Empty reason="none" />}</Info>
-                  </dl>
-                </div>
-              ) : (
-                <SectionNote>
-                  {reservation?.state === "none"
-                    ? "연결된 예약이 없습니다."
-                    : reservation?.state === "missing"
-                      ? "예약 정보를 찾을 수 없습니다."
-                      : "예약 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."}
-                </SectionNote>
-              )}
-            </Section>
-
-            <Section icon={RefreshCw} title="상태 변경 이력">
-              {!detail!.histories ? (
-                <SectionNote>변경 이력을 불러오지 못했습니다.</SectionNote>
-              ) : detail!.histories.length === 0 ? (
-                <SectionNote>변경 이력이 없습니다.</SectionNote>
-              ) : (
-                <HistoryTimeline histories={detail!.histories} />
-              )}
-            </Section>
-          </div>
+          <ReferralDetailContent detail={result.detail} examTypeLabel={examTypeLabel} />
         )}
-        <DetailFooter onClose={() => setOpen(false)} />
       </Modal>
     </>
+  );
+}
+
+/** 상세 본문 (조회 결과 화면 배치만. 테스트에서도 같은 구성을 그린다) */
+export function ReferralDetailContent({ detail, examTypeLabel }: { detail: ReferralDetail; examTypeLabel: string }) {
+  const reservation = detail.reservation;
+  const createdAt = detail.histories?.find((h) => h.reason === "REFERRAL_CREATED")?.occurredAt;
+  const reservationEmpty = (key: string) => <Empty key={key} reason={reservation.state === "ok" ? "none" : reservation.state} />;
+  return (
+    <div className="flex flex-col gap-5">
+      {/* 첫 줄: 검사 정보 | 예약 정보 (같은 높이), 좁은 화면은 세로 */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+      <div className={cardClass}>
+      <Section icon={Stethoscope} title="검사 정보">
+        <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+          <Info label="환자명" strong>{detail.patientName}</Info>
+          <Info label="검사 유형" strong>
+            {/* 긴 검사 항목 이름은 단어 중간에서 끊지 않는다 */}
+            <span className="break-keep">{examTypeLabel}</span>
+          </Info>
+          <Info label="검사기관">{reservation.state === "ok" ? cell(reservation.examInstitution) : reservationEmpty("i")}</Info>
+          <Info label="검사 장비">{reservation.state === "ok" ? cell(reservation.equipment) : reservationEmpty("e")}</Info>
+          <Info label="검사 일시">
+            {reservation.state === "ok" && reservation.startTime ? formatDateTimeWithWeekday(reservation.startTime) : reservationEmpty("t")}
+          </Info>
+          <Info label="의뢰 요청 일시">{createdAt ? formatDateTimeWithWeekday(createdAt) : <Empty reason={detail.histories ? "none" : "error"} />}</Info>
+        </dl>
+      </Section>
+      </div>
+
+      <div className={cardClass}>
+      <Section icon={CalendarClock} title="예약 정보">
+        {reservation.state === "ok" ? (
+          <div className="flex flex-col gap-4">
+            {reservation.failureReason && <FailureReasonNotice reason={reservation.failureReason} />}
+            <dl className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
+              <Info label="현재 예약 상태"><ReservationStatusBadge status={reservation.reservationStatus} /></Info>
+              <Info label="예약 시도">{reservation.attemptNo}번째 시도</Info>
+              <Info label="예약 확정 시각">{reservation.confirmedAt ? formatDateTimeWithWeekday(reservation.confirmedAt) : <Empty reason="none" />}</Info>
+              <Info label="종료 시각">{reservation.endedAt ? formatDateTimeWithWeekday(reservation.endedAt) : <Empty reason="none" />}</Info>
+            </dl>
+          </div>
+        ) : (
+          <SectionNote>
+            {reservation.state === "none"
+              ? "연결된 예약이 없습니다."
+              : reservation.state === "missing"
+                ? "예약 정보를 찾을 수 없습니다."
+                : "예약 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."}
+          </SectionNote>
+        )}
+      </Section>
+      </div>
+      </div>
+
+      {/* 둘째 줄: 상태 변경 이력 (전체 너비, 길어지면 대화상자 본문만 스크롤) */}
+      <div className={cardClass}>
+      <Section icon={RefreshCw} title="상태 변경 이력">
+        {!detail.histories ? (
+          <SectionNote>변경 이력을 불러오지 못했습니다.</SectionNote>
+        ) : detail.histories.length === 0 ? (
+          <SectionNote>변경 이력이 없습니다.</SectionNote>
+        ) : (
+          <HistoryTimeline histories={detail.histories} />
+        )}
+      </Section>
+      </div>
+    </div>
   );
 }

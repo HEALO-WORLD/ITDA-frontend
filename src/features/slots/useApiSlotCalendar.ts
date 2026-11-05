@@ -29,7 +29,8 @@ export type ApiCalendarMonthState =
   /** 다 지난 달·검색 가능 기간 밖 (조회하지 않는다) */
   | { status: "out-of-range" };
 
-export function useApiSlotCalendar(enabled: boolean) {
+/** examTypeId: 재조정 모드에서 의뢰의 검사 유형만 조회한다 (바뀌면 컴포넌트를 새로 만든다: 받은 달을 섞지 않는다) */
+export function useApiSlotCalendar(enabled: boolean, examTypeId?: string) {
   const [months, setMonths] = useState<Record<string, ApiCalendarMonthState>>({});
   /** 받은 월·요청 중인 월 (같은 월을 겹쳐 요청하지 않는다). 렌더링에는 쓰지 않는다 */
   const settledRef = useRef(new Set<string>());
@@ -58,7 +59,7 @@ export function useApiSlotCalendar(enabled: boolean) {
       const controller = new AbortController();
       pendingRef.current.set(key, controller);
       setMonths((prev) => ({ ...prev, [key]: { status: "loading" } }));
-      void fetchApiSlotSearch(window, { signal: controller.signal }).then((result) => {
+      void fetchApiSlotSearch(examTypeId ? { ...window, examTypeId } : window, { signal: controller.signal }).then((result) => {
         if (pendingRef.current.get(key) !== controller) return;
         pendingRef.current.delete(key);
         if (result.ok) {
@@ -69,7 +70,7 @@ export function useApiSlotCalendar(enabled: boolean) {
         }
       });
     },
-    [enabled],
+    [enabled, examTypeId],
   );
 
   return { months, requestMonth };

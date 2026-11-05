@@ -1,7 +1,7 @@
 import { getFailedEquipmentIds } from "@/features/incidents/mockIncidentStore";
 import { mockOnly } from "@/lib/api/config";
 import { getSeoulNow } from "@/lib/date/seoulDate";
-import { getAllMockSlots } from "@/features/equipment/mockEquipmentStore";
+import { equipmentChangeStore, getAllMockSlots } from "@/features/equipment/mockEquipmentStore";
 import { MOCK_PARTNER_ORGANIZATIONS } from "@/lib/dev/mockSlots";
 
 import {
@@ -13,6 +13,7 @@ import {
   type AvailabilityFilter,
   type DateAvailability,
 } from "./availability";
+import { withMockExamTypes } from "./mockSlotExamTypes";
 import type { ExamSlot, PartnerOrganization, SlotSearchCriteria } from "./types";
 
 /**
@@ -42,7 +43,8 @@ export interface SlotQueryOptions {
 function getMockSlotsWithFailures(): ExamSlot[] {
   // 원본 Mock + 검사기관에서 생성한 슬롯(개발용 Mock 저장소)
   const { dateTime } = getSeoulNow();
-  return applyEquipmentFailures(getAllMockSlots(), getFailedEquipmentIds(), dateTime);
+  // 세부 검사 항목: 장비의 지원 검사 유형 중 하나 (mockSlotExamTypes, 같은 슬롯은 항상 같은 항목)
+  return withMockExamTypes(applyEquipmentFailures(getAllMockSlots(), getFailedEquipmentIds(), dateTime), equipmentChangeStore.read());
 }
 
 /** 제외 장비를 뺀 Mock 슬롯 */

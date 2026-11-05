@@ -8,7 +8,7 @@ import { TextInput } from "@/components/ui/FormControls";
 import { ROUTES } from "@/constants/navigation";
 import type { ApiExamSlot } from "@/features/slots/apiSlots";
 import { createSubmitLock } from "@/features/slots/submitLock";
-import { formatDateTimeWithWeekday } from "@/lib/format/date";
+import { formatDateLong } from "@/lib/format/date";
 
 import { createReferralAction, loadReferralProgressAction } from "../createActions";
 import type { CreateReferralActionResult, ReferralProgressResult } from "../createServer";
@@ -94,9 +94,11 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
         <DetailList
           items={[
             ["검사기관", slot.organizationName],
+            ["검사 유형", slot.examType],
+            ["세부 검사 항목", slot.examTypeName],
             ["검사 장비", slot.equipmentName],
-            ["검사 유형", `${slot.examTypeName} (${slot.examType})`],
-            ["검사 일시", `${formatDateTimeWithWeekday(slot.startAt)} ~ ${slot.endAt.slice(11, 16)}`],
+            ["검사 날짜", formatDateLong(slot.startAt.slice(0, 10))],
+            ["검사 시간", `${slot.startAt.slice(11, 16)} ~ ${slot.endAt.slice(11, 16)}`],
           ]}
         />
       </section>
