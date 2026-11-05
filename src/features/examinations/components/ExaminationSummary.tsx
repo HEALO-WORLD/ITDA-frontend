@@ -3,10 +3,14 @@ import type { ExaminationSummaryCounts } from "../types";
 /**
  * 검사 현황 요약 바 (집계 기준은 query.ts의 summarizeExaminations, 검색 조건과 무관).
  * 검사 진행 상태(대기·진행 중·완료)와 결과 등록 상태(미등록)는 따로 센다.
+ * scope: 집계 범위 안내 (API 모드는 전체 건수 API가 없어 현재 페이지만 센다). 없으면 Mock 화면 그대로
  */
-export default function ExaminationSummary({ counts }: { counts: ExaminationSummaryCounts }) {
+export default function ExaminationSummary({ counts, scope }: { counts: ExaminationSummaryCounts; scope?: string }) {
   return (
     <section aria-label="검사 현황 요약" className="rounded-xl border border-line bg-white px-6 py-4">
+      {scope && (
+        <p className="mb-3 inline-flex rounded-md bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">{scope}</p>
+      )}
       <ul className="flex flex-wrap items-center gap-x-8 gap-y-3">
         <SummaryItem label="검사 대기" value={counts.waiting} valueClass="text-gray-900" />
         <SummaryItem label="검사 진행 중" value={counts.inProgress} valueClass="text-primary" />

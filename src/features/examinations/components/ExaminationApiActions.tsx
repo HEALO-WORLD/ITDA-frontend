@@ -22,7 +22,7 @@ interface ExaminationApiActionsProps {
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
 
 const buttonClass =
-  "h-8 whitespace-nowrap rounded-md bg-primary px-3 text-sm font-semibold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400";
+  "h-9 whitespace-nowrap rounded-lg bg-primary px-3.5 text-sm font-semibold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400";
 
 /**
  * API 모드 검사 목록의 행별 처리 (검사 시작·검사 완료·결과 등록).
@@ -82,10 +82,6 @@ export default function ExaminationApiActions({ examination }: ExaminationApiAct
           결과 등록
         </button>
       )}
-      {!next && !canRegister && <span className="text-xs text-gray-400">-</span>}
-      <p role={outcome && !outcome.ok ? "alert" : "status"} className={`text-xs ${outcome?.ok ? "text-green-700" : "text-red-600"}`}>
-        {outcome?.message}
-      </p>
 
       <Modal
         open={registerOpen}

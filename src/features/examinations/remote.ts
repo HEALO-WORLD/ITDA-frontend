@@ -13,7 +13,7 @@ import type { ExamProgressStatus } from "./types";
  * - 검사 목록 조회 `fetchExaminationPage`
  * - 검사 상태 변경 `changeExaminationStatus`, 검사 결과 등록 `createExaminationResult` (actions.ts에서 호출)
  * - Mock 모드 화면은 api.ts·progress.ts·register.ts를 그대로 쓴다. 의뢰 ID나 Mock ID를 검사 ID 대신 보내지 않는다.
- * - 검사 결과 조회(GET …/results)는 연결하지 않았다.
+ * - 검사 결과 조회 `fetchExaminationResult` (상세 대화상자에서 결과가 등록된 검사만, resultActions.ts에서 호출)
  *
  * 인증: Gateway가 `Authorization: Bearer <JWT>`를 검증하고 X-Institution-Id·X-Role을 붙인다.
  * 프론트는 이 X- 헤더들을 만들지 않는다. 토큰은 서버 전용 모듈에서 `headers`로 넘긴다 (getExaminationAuthorizationHeaders).
@@ -377,5 +377,59 @@ export function getExaminationResultErrorMessage(error: unknown): string {
   if (error.kind === "HTTP" && error.status !== 401 && error.code && RESULT_CREATE_ERROR_MESSAGES[error.code]) {
     return RESULT_CREATE_ERROR_MESSAGES[error.code];
   }
+  return error.message;
+}
+
+// ── 검사 결과 조회 ──
+
+/** 검사 결과 (백엔드 ExaminationResultResponse). 시각은 시간대 표기 없는 LocalDateTime 문자열 */
+export interface ExaminationResultDto {
+  id: string;
+  examinationId: string;
+  referralId: string;
+  summary: string;
+  notes: string | null;
+  registeredAt: string;
+}
+
+/**
+ * 검사 결과 조회 `GET /api/v1/examinations/{examinationId}/results`.
+ * Gateway: EXAMINER만. 서비스가 역할·검사 수행 기관을 확인한다 (403 EXAMINATION_RESULT_READ_ACCESS_DENIED, 404 EXAMINATION_RESULT_NOT_FOUND).
+ */
+export async function fetchExaminationResult(
+  examinationId: string,
+  options: Pick<ApiRequestOptions, "headers" | "signal"> = {},
+): Promise<ExaminationResultDto> {
+  requireApiFeature("examinations");
+  if (!UUID_PATTERN.test(examinationId)) throw new ApiError("CONFIG", "검사 ID 형식이 올바르지 않습니다.");
+  const data = await apiRequestData<unknown>(`/api/v1/examinations/${encodeURIComponent(examinationId)}/results`, options);
+  if (!isExaminationResult(data) || data.examinationId.toLowerCase() !== examinationId.toLowerCase()) {
+    throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
+  }
+  return data;
+}
+
+function isExaminationResult(value: unknown): value is ExaminationResultDto {
+  if (typeof value !== "object" || value === null) return false;
+  const data = value as Record<string, unknown>;
+  return (
+    [data.id, data.examinationId, data.referralId].every((id) => typeof id === "string" && UUID_PATTERN.test(id)) &&
+    typeof data.summary === "string" &&
+    isNullableString(data.notes) &&
+    typeof data.registeredAt === "string"
+  );
+}
+
+const RESULT_READ_ERROR_MESSAGES: Record<string, string> = {
+  EXAMINATION_RESULT_READ_ACCESS_DENIED: "우리 기관이 수행한 검사의 결과만 조회할 수 있습니다.",
+  ACCESS_DENIED: "검사 결과는 검사기관 담당자만 조회할 수 있습니다.",
+  EXAMINATION_NOT_FOUND: "검사를 찾을 수 없습니다.",
+  EXAMINATION_RESULT_NOT_FOUND: "등록된 검사 결과가 없습니다.",
+};
+
+/** 검사 결과 조회 실패 안내. 알려진 코드만 정해 둔 문구로 바꾸고 서버 메시지 본문은 보여 주지 않는다 */
+export function getExaminationResultReadErrorMessage(error: unknown): string {
+  if (!isApiError(error) || error.kind === "CONFIG" || error.kind === "PARSE") return "검사 결과를 불러오지 못했습니다.";
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && RESULT_READ_ERROR_MESSAGES[error.code]) return RESULT_READ_ERROR_MESSAGES[error.code];
   return error.message;
 }
