@@ -2,7 +2,7 @@ import "server-only";
 
 import { unstable_rethrow } from "next/navigation";
 
-import { fetchEquipmentPage, EQUIPMENT_PAGE_MAX_SIZE } from "@/features/equipment/remote";
+import { fetchEquipmentExamTypePage, fetchEquipmentPage, EQUIPMENT_PAGE_MAX_SIZE } from "@/features/equipment/remote";
 import { fetchMyPartnershipList } from "@/features/partnerships/remote";
 import { EXAM_TYPE_MAX_PAGE_SIZE, fetchExamTypePage, type ExamTypeDto } from "@/features/referrals/remote";
 import { isApiFeature, type ApiFeature } from "@/lib/api/config";
@@ -25,6 +25,7 @@ import {
   type SlotSearchWindow,
 } from "./apiSlots";
 import { getSlotSearchErrorMessage, getSlotSearchFailureReason, isSlotApiId, searchSlots, SLOT_SEARCH_MAX_SIZE, type SlotDetailDto } from "./remote";
+import { collectExamTypeOptions, type SlotExamTypeOption } from "./examTypeFilter";
 import type { ExamType, PartnerOrganization } from "./types";
 
 /**
@@ -53,11 +54,13 @@ export function isApiSlotSearchAvailable(): boolean {
 }
 
 /**
- * 검색 조건 선택지(ACTIVE 협력 검사기관)만 조회 (화면 첫 렌더링용). 요청 1건: GET /partnerships/me?status=ACTIVE
+ * 검색 조건 선택지 (화면 첫 렌더링용): ACTIVE 협력 검사기관 + 그 기관들이 실제 지원하는 세부 검사 항목.
+ * 요청: GET /partnerships/me?status=ACTIVE 1건 + loadPartnerExamTypes (기관별 장비 목록 + 운영 중 장비별 지원 검사 유형)
  * 순서는 loadApiSlotSearch와 같다: 기능 설정 → users/me로 REQUESTER 확인 → 조회
+ * - 세부 검사 항목 조회만 실패하면 examTypes = null (기관 선택지·검색은 그대로, 항목 선택은 비활성. Mock 항목으로 채우지 않는다)
  */
 export async function loadApiSlotSearchOrganizations(): Promise<
-  { ok: true; organizations: PartnerOrganization[] } | SlotSearchLoadFailure
+  { ok: true; organizations: PartnerOrganization[]; examTypes: SlotExamTypeOption[] | null } | SlotSearchLoadFailure
 > {
   if (!isApiSlotSearchAvailable()) {
     return { ok: false, reason: "NOT_AVAILABLE", message: "슬롯 검색 API가 아직 연결되지 않았습니다." };
@@ -66,10 +69,51 @@ export async function loadApiSlotSearchOrganizations(): Promise<
   if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
   try {
     const partnerships = await fetchMyPartnershipList({ status: "ACTIVE" }, { headers: access.headers });
-    return { ok: true, organizations: toPartnerOrganizations(partnerships) };
+    const organizations = toPartnerOrganizations(partnerships);
+    return { ok: true, organizations, examTypes: await loadPartnerExamTypes(organizations, access.headers) };
   } catch (error) {
     unstable_rethrow(error);
     return toSlotSearchFailure(error);
+  }
+}
+
+/**
+ * 협력 기관의 세부 검사 항목 (검색 조건 선택지).
+ * 기관별 장비 목록 → 운영 중(OPERATIONAL) 장비마다 지원 검사 유형 GET /equipments/{id}/exam-types (동시 4건)
+ * → examTypeId로 중복 제거하고 지원 기관을 모은다. 다른 기관 장비·다른 장비의 연결이 섞이면 쓰지 않는다 (null).
+ * 요청 수 = 기관 수 × 장비 페이지 + 운영 중 장비 수 × 지원 유형 페이지 (장비가 많으면 늘어난다: 목록 API에 지원 유형이 없다)
+ */
+async function loadPartnerExamTypes(organizations: PartnerOrganization[], headers: HeadersInit): Promise<SlotExamTypeOption[] | null> {
+  try {
+    const sameId = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+    const lists = await mapWithConcurrency(organizations, EQUIPMENT_CONCURRENCY, (organization) =>
+      collectAllPages((page) => fetchEquipmentPage(organization.id, { page, size: EQUIPMENT_PAGE_MAX_SIZE }, { headers }), MAX_LIST_PAGES),
+    );
+    if (organizations.some((organization, index) => lists[index].some((item) => !sameId(item.institutionId, organization.id)))) {
+      console.error("[slots] 세부 검사 항목: 다른 기관 장비가 섞여 쓰지 않음");
+      return null;
+    }
+    // SEARCH는 운영 중 장비의 슬롯만 돌려준다: 운영 중이 아닌 장비의 검사 항목은 선택지에 넣지 않는다
+    const operational = lists.flat().filter((item) => item.status === "OPERATIONAL");
+    const supported = await mapWithConcurrency(operational, EQUIPMENT_CONCURRENCY, (equipment) =>
+      collectAllPages((page) => fetchEquipmentExamTypePage(equipment.id, { page, size: EQUIPMENT_PAGE_MAX_SIZE }, { headers }), MAX_LIST_PAGES),
+    );
+    if (operational.some((equipment, index) => supported[index].some((link) => !sameId(link.equipmentId, equipment.id)))) {
+      console.error("[slots] 세부 검사 항목: 다른 장비의 지원 검사 유형이 섞여 쓰지 않음");
+      return null;
+    }
+    return collectExamTypeOptions(
+      operational.flatMap((equipment, index) =>
+        supported[index]
+          // 장비 종류와 다른 검사 유형은 계약 위반이라 쓰지 않는다 (백엔드도 같은 modality만 연결한다)
+          .filter((link) => link.modality === equipment.modality)
+          .map((link) => ({ organizationId: equipment.institutionId, examTypeId: link.examTypeId, examTypeName: link.examTypeName, examType: link.modality })),
+      ),
+    );
+  } catch (error) {
+    unstable_rethrow(error);
+    console.error("[slots] 세부 검사 항목 조회 실패:", isApiError(error) ? `${error.kind} ${error.status ?? ""} ${error.code ?? ""}`.trim() : "unknown");
+    return null;
   }
 }
 

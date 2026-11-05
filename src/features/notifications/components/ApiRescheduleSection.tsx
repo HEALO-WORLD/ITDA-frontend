@@ -1,14 +1,17 @@
-import { cache } from "react";
+import { cache, type ReactNode } from "react";
 
 import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 import { examTypeLabel, ReferralFailureNotice } from "@/features/referrals/components/ReferralApiSection";
 import { DetailValue, toBadgeStatus } from "@/features/referrals/components/ReferralApiTable";
 import ReferralStatusBadge from "@/features/referrals/components/ReferralStatusBadge";
+import { abbreviateReferralId } from "@/features/referrals/referralId";
+import type { DetailCell } from "@/features/referrals/server";
 import { loadExamTypes, loadReferralTablePage } from "@/features/referrals/server";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import NotificationPagination from "./NotificationPagination";
 import RescheduleAlert from "./RescheduleAlert";
+import { RescheduleSearchButton, RescheduleSearchProvider } from "./RescheduleSearchDialog";
 
 /** 재조정 목록 페이지 쿼리 (오른쪽 알림 내역의 `?page=`와 겹치지 않게 따로 둔다, 1부터) */
 export const RESCHEDULE_PAGE_PARAM = "reschedulePage";
@@ -44,14 +47,25 @@ export async function ApiRescheduleAlert({ searchParams }: { searchParams: Promi
   return <RescheduleAlert count={result.totalElements} failureExamTypes={null} isMockData={false} />;
 }
 
-const thClass = "whitespace-nowrap border-b border-line px-3 py-3 text-left text-[13px] font-semibold text-gray-500";
-const tdClass = "px-3 py-3.5 text-sm text-gray-700";
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <dt className="text-sm font-medium text-gray-500">{label}</dt>
+      <dd className="mt-0.5 break-words text-gray-900">{children}</dd>
+    </div>
+  );
+}
+
+/** 대화상자 요약용 문자열 (값이 없으면 표와 같은 표시) */
+function cellText(cell: DetailCell): string {
+  return cell.state === "ok" ? cell.value : cell.state === "none" ? "—" : "확인 불가";
+}
 
 /**
- * 예약 재조정 필요 목록 (API 모드). 모양·열은 Mock RescheduleTable과 같다:
- * 예약번호(현재 예약 ID 축약·복사, 예약 전이면 —) | 검사기관 | 검사유형 | 기존 예약일시 | 상태 | 작업.
+ * 예약 재조정 필요 목록 (API 모드). 전체 너비 카드 목록 (가로 스크롤 없음, 좁은 화면은 세로 배치):
+ * 예약번호(현재 예약 ID 축약·복사, 예약 전이면 —) · 검사기관 · 검사유형 · 기존 예약일시 · 상태 | [새 슬롯 검색].
  * - 건수·페이지는 백엔드 응답 기준. 0건이면 "재조정이 필요한 예약이 없습니다."
- * - [새 슬롯 검색]은 비활성: 슬롯 목록 조회 API와 재예약(POST /referrals/{id}/reschedule) 연결 전이라 잘못된 예약이 생기지 않게 막는다
+ * - [새 슬롯 검색]: 페이지를 옮기지 않고 대체 슬롯 검색 대화상자를 연다 (의뢰 ID 기준, RescheduleSearchDialog)
  * - 환자명은 이 표에 보이지 않는다 (Mock 표에도 없다)
  */
 export default async function ApiRescheduleSection({ searchParams }: { searchParams: Promise<SearchParams> }) {
@@ -63,6 +77,7 @@ export default async function ApiRescheduleSection({ searchParams }: { searchPar
   const keep: Record<string, string> = typeof params.page === "string" && params.page ? { page: params.page } : {};
 
   return (
+    <RescheduleSearchProvider>
     <section aria-labelledby="reschedule-title" className="rounded-xl border border-line bg-white px-5 pb-6 pt-7 sm:px-6">
       <h2 id="reschedule-title" className="text-lg font-semibold text-gray-900 sm:text-xl">
         예약 재조정 필요
@@ -78,62 +93,47 @@ export default async function ApiRescheduleSection({ searchParams }: { searchPar
           {result.page > 0 ? "이 페이지에 재조정이 필요한 예약이 없습니다." : "재조정이 필요한 예약이 없습니다."}
         </p>
       ) : (
-        <>
-          <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
-            <table className="w-full min-w-[680px] border-collapse">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th scope="col" className={thClass}>예약번호</th>
-                  <th scope="col" className={thClass}>검사기관</th>
-                  <th scope="col" className={thClass}>검사유형</th>
-                  <th scope="col" className={thClass}>기존 예약일시</th>
-                  <th scope="col" className={`${thClass} text-center!`}>상태</th>
-                  <th scope="col" className={`${thClass} text-center!`}>작업</th>
-                </tr>
-              </thead>
-              <tbody>
-                {result.rows.map((row) => {
-                  const type = typeById.get(row.examTypeId.toLowerCase());
-                  return (
-                    <tr key={row.referralId} className="border-t border-line">
-                      <td className={`${tdClass} whitespace-nowrap font-medium`}>
-                        {/* 예약번호 = 현재 예약 ID (의뢰 ID는 행 key로만 쓴다) */}
-                        {row.reservationId ? (
-                          <ReferralIdCopyButton referralId={row.reservationId} label="예약번호" />
-                        ) : (
-                          <DetailValue cell={{ state: "none" }} />
-                        )}
-                      </td>
-                      <td className={`${tdClass} whitespace-nowrap`}>
-                        <DetailValue cell={row.examInstitution} />
-                      </td>
-                      <td className={tdClass}>{type ? examTypeLabel(type) : examTypes.ok ? "알 수 없는 유형" : "확인 불가"}</td>
-                      <td className={`${tdClass} whitespace-nowrap`}>
-                        <DetailValue cell={row.examStartTime} format={formatDateTimeWithWeekday} />
-                      </td>
-                      <td className={`${tdClass} text-center`}>
-                        <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
-                      </td>
-                      <td className={`${tdClass} text-center`}>
-                        <button
-                          type="button"
-                          disabled
-                          aria-describedby="reschedule-action-unavailable"
-                          className="inline-flex h-10 cursor-not-allowed items-center whitespace-nowrap rounded-lg bg-gray-200 px-4 text-[15px] font-semibold text-gray-400"
-                        >
-                          새 슬롯 검색
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <p id="reschedule-action-unavailable" className="mt-3 text-xs text-gray-500">
-            대체 슬롯 선택은 슬롯 조회·재예약 기능이 연결되면 사용할 수 있습니다.
-          </p>
-        </>
+        <ul aria-label="예약 재조정 필요 목록" className="flex flex-col gap-3">
+          {result.rows.map((row) => {
+            const type = typeById.get(row.examTypeId.toLowerCase());
+            const typeText = type ? examTypeLabel(type) : examTypes.ok ? "알 수 없는 유형" : "확인 불가";
+            const summary = {
+              reservationNumber: row.reservationId,
+              copyable: true,
+              institution: cellText(row.examInstitution),
+              modality: type?.modality ?? null,
+              examTypeName: type?.name ?? null,
+              scheduledAt: row.examStartTime.state === "ok" ? row.examStartTime.value.slice(0, 16) : null,
+            };
+            return (
+              <li
+                key={row.referralId}
+                className="flex flex-col gap-4 rounded-xl border border-line px-5 py-4 md:flex-row md:items-center md:justify-between md:gap-6"
+              >
+                <dl className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-3 text-[15px] sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto]">
+                  <Field label="예약번호">
+                    {/* 예약번호 = 현재 예약 ID (축약·복사). 의뢰 ID는 행 key와 대화상자에만 쓴다 */}
+                    {row.reservationId ? <ReferralIdCopyButton referralId={row.reservationId} label="예약번호" /> : <DetailValue cell={{ state: "none" }} />}
+                  </Field>
+                  <Field label="검사기관">
+                    <DetailValue cell={row.examInstitution} />
+                  </Field>
+                  <Field label="검사유형">{typeText}</Field>
+                  <Field label="기존 예약일시">
+                    <DetailValue cell={row.examStartTime} format={formatDateTimeWithWeekday} />
+                  </Field>
+                  <Field label="상태">
+                    <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
+                  </Field>
+                </dl>
+                <RescheduleSearchButton
+                  entry={{ kind: "api", referralId: row.referralId, summary }}
+                  label={`예약번호 ${row.reservationId ? abbreviateReferralId(row.reservationId) : "없음"} 새 슬롯 검색`}
+                />
+              </li>
+            );
+          })}
+        </ul>
       )}
       <NotificationPagination
         page={result.page}
@@ -143,5 +143,6 @@ export default async function ApiRescheduleSection({ searchParams }: { searchPar
         label="재조정 필요 목록 페이지"
       />
     </section>
+    </RescheduleSearchProvider>
   );
 }

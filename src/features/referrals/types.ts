@@ -29,6 +29,8 @@ export interface ReferralSummary {
   organizationName: string;
   equipmentName: string;
   examType: ExamType;
+  /** 세부 검사 항목 (Mock 검사 유형 ID, 예: 뇌 MRI). 재조정 대체 슬롯을 같은 항목으로 고정하는 데 쓴다. 없으면 CT·MRI만 고정 */
+  examTypeId?: string;
   /** 검사 일시 (`YYYY-MM-DDTHH:mm`, 한국 시간) */
   scheduledAt: string;
   status: ReferralDisplayStatus;

@@ -30,7 +30,8 @@ export default function SlotStatusBadge({ isAvailable, blockedReason }: SlotStat
     ];
 
   return (
-    <span className={`inline-flex rounded-md px-4 py-1.5 text-[15px] font-medium ${className}`}>
+    // 한 줄 고정, 내용 너비만 (상태별 색상은 그대로)
+    <span className={`inline-flex shrink-0 items-center whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium ${className}`}>
       {label}
     </span>
   );

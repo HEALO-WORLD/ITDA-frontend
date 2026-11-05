@@ -34,6 +34,12 @@ export interface ExamSlot {
    * - OPERATOR_SUSPENDED: 검사기관이 운영 중단한 슬롯 (개발용 Mock에서 생성한 슬롯만 해당)
    */
   blockedReason?: "EQUIPMENT_FAILURE" | "OPERATOR_SUSPENDED";
+  /**
+   * 세부 검사 항목 (ExamType, 예: 뇌 MRI). API 슬롯은 서버 원본 examTypeId와 검사 유형 목록의 이름이고,
+   * Mock 슬롯은 장비의 지원 검사 유형 중 하나를 개발용으로 정해 둔다 (slots/api.ts). 없으면 표시는 '—'이고 항목 필터에 걸리지 않는다
+   */
+  examTypeId?: string;
+  examTypeName?: string;
 }
 
 /** 시간대. 슬롯 검사 시작 시각 기준 (오전: 12:00 이전, 오후: 12:00부터) */
@@ -48,4 +54,6 @@ export interface SlotSearchCriteria {
   timeOfDay: TimeOfDay | "";
   /** true면 지금 예약할 수 있는 슬롯(예약 가능 + 시작 전)만 반환한다 */
   availableOnly: boolean;
+  /** 세부 검사 항목 ID (ExamType). 비어 있으면(또는 없으면) 전체 검사 항목. 이름이 아니라 ID로 고른다 */
+  examTypeId?: string;
 }

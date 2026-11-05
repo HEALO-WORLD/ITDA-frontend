@@ -11,6 +11,7 @@ import { getSeoulNow } from "@/lib/date/seoulDate";
 import { getDateAvailability } from "../api";
 import { API_SEARCH_RANGE_DAYS, countApiSlotsByDate, toMonthKey } from "../apiSearchClient";
 import type { AvailabilityFilter, DateAvailability } from "../availability";
+import { getExamTypeChoices, reconcileExamTypeId, type SlotExamTypeOption } from "../examTypeFilter";
 import type { ExamType, PartnerOrganization, SlotSearchCriteria, TimeOfDay } from "../types";
 import { useApiSlotCalendar, type ApiCalendarMonthState } from "../useApiSlotCalendar";
 
@@ -31,6 +32,15 @@ interface SlotSearchFilterProps {
    * API 모드에서는 Mock 함수(getDateAvailability)를 부르지 않는다
    */
   dataSource?: "mock" | "api";
+  /** API 재조정 모드: 달력 조회를 이 검사 유형으로 고정한다 */
+  apiExamTypeId?: string;
+  /**
+   * 세부 검사 항목 선택지 원본 (ExamType: 협력 기관 장비가 실제 지원하는 검사 유형. Mock: 개발용 장비의 지원 검사 유형).
+   * null = 목록을 불러오지 못함 (선택 비활성). 검사 유형(CT/MRI)·협력 검사기관 조건에 맞는 항목만 보인다
+   */
+  examTypeOptions?: readonly SlotExamTypeOption[] | null;
+  /** 재조정: 세부 검사 항목을 이 항목으로 고정한다 (변경 불가. 기존 의뢰와 다른 항목의 슬롯은 검색하지 않는다) */
+  lockedExamTypeItem?: { id: string; name: string } | null;
 }
 
 const EXAM_TYPE_OPTIONS: SelectOption[] = [
@@ -53,6 +63,7 @@ export const INITIAL_SLOT_CRITERIA: SlotSearchCriteria = {
   organizationId: "",
   timeOfDay: "",
   availableOnly: false,
+  examTypeId: "",
 };
 
 const DISABLED_REASON = {
@@ -96,9 +107,12 @@ export default function SlotSearchFilter({
   isExamTypeLocked = false,
   excludedEquipmentIds,
   dataSource = "mock",
+  apiExamTypeId,
+  examTypeOptions = null,
+  lockedExamTypeItem = null,
 }: SlotSearchFilterProps) {
   const isApi = dataSource === "api";
-  const calendar = useApiSlotCalendar(isApi);
+  const calendar = useApiSlotCalendar(isApi, apiExamTypeId);
   /** API 모드: 달력에 표시 중인 월 (`YYYY-MM`) */
   const [viewMonthKey, setViewMonthKey] = useState<string | null>(null);
   // 최초 조건·제외 장비는 마운트 시점 값으로 고정한다
@@ -108,6 +122,7 @@ export default function SlotSearchFilter({
   /** null = 아직 불러오지 않음 */
   const [availability, setAvailability] = useState<DateAvailability | null>(null);
   const [dateNotice, setDateNotice] = useState<string | null>(null);
+  const [examTypeNotice, setExamTypeNotice] = useState<string | null>(null);
   const latestRequestRef = useRef(0);
 
   /**
@@ -171,9 +186,26 @@ export default function SlotSearchFilter({
     void refreshAvailability(current, current.date);
   }, [slotDataKey, refreshAvailability]);
 
-  /** 달력에 영향을 주는 조건(유형·기관·시간대) 변경 */
+  /** 세부 검사 항목 선택지 (검사 유형·기관 조건 반영) */
+  const choicesFor = (filter: Pick<SlotSearchCriteria, "examType" | "organizationId">) =>
+    examTypeOptions ? getExamTypeChoices(examTypeOptions, organizations, filter) : [];
+  const examTypeChoices = choicesFor(criteria);
+
+  /** 달력에 영향을 주는 조건(유형·기관·세부 검사 항목·시간대) 변경 */
   const updateFilter = (patch: Partial<AvailabilityFilter>) => {
     const next = { ...criteria, ...patch };
+    // 상위 조건(검사 유형·기관)이 바뀌어 고른 항목이 선택지에서 빠지면 전체 검사 항목으로 되돌린다 (재조정의 고정 항목은 그대로)
+    if (!lockedExamTypeItem && ("examType" in patch || "organizationId" in patch)) {
+      const examTypeId = reconcileExamTypeId(next.examTypeId, choicesFor(next));
+      if (examTypeId !== (next.examTypeId ?? "")) {
+        next.examTypeId = examTypeId;
+        setExamTypeNotice("선택한 세부 검사 항목이 바뀐 조건에 맞지 않아 전체 검사 항목으로 바꿨습니다.");
+      } else {
+        setExamTypeNotice(null);
+      }
+    } else if ("examTypeId" in patch) {
+      setExamTypeNotice(null);
+    }
     setCriteria(next);
     setDateNotice(null);
     if (isApi) checkApiSelectedDate(next, next.date);
@@ -183,6 +215,7 @@ export default function SlotSearchFilter({
   const handleReset = () => {
     setCriteria(startCriteria);
     setDateNotice(null);
+    setExamTypeNotice(null);
     void refreshAvailability(startCriteria, "");
     onReset?.();
   };
@@ -228,7 +261,7 @@ export default function SlotSearchFilter({
       aria-label="검사 슬롯 검색 조건"
       className="flex flex-col gap-5 rounded-xl border border-line bg-white px-6 py-6 sm:px-8"
     >
-      <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(220px,0.9fr)]">
+      <div className="grid grid-cols-1 items-end gap-x-5 gap-y-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)_minmax(0,1.2fr)_minmax(0,1fr)_minmax(200px,0.9fr)]">
         <SelectInput
           id="slot-exam-type"
           label="검사 유형"
@@ -244,6 +277,33 @@ export default function SlotSearchFilter({
           value={criteria.organizationId}
           onChange={(e) => updateFilter({ organizationId: e.target.value })}
         />
+        {lockedExamTypeItem ? (
+          // 재조정: 기존 의뢰의 세부 검사 항목으로 고정 (같은 CT·MRI라도 다른 항목은 고를 수 없다)
+          <SelectInput
+            id="slot-exam-item"
+            label="세부 검사 항목"
+            options={[{ value: lockedExamTypeItem.id, label: lockedExamTypeItem.name }]}
+            value={lockedExamTypeItem.id}
+            disabled
+            onChange={() => undefined}
+          />
+        ) : (
+          <SelectInput
+            id="slot-exam-item"
+            label="세부 검사 항목"
+            options={
+              examTypeOptions === null
+                ? [{ value: "", label: "검사 항목을 불러오지 못했습니다" }]
+                : examTypeChoices.length === 0
+                  ? [{ value: "", label: "선택 가능한 검사 항목이 없습니다" }]
+                  : [{ value: "", label: "전체 검사 항목" }, ...examTypeChoices]
+            }
+            value={examTypeOptions === null || examTypeChoices.length === 0 ? "" : (criteria.examTypeId ?? "")}
+            disabled={examTypeOptions === null || examTypeChoices.length === 0}
+            aria-describedby={examTypeNotice ? "slot-exam-item-notice" : undefined}
+            onChange={(e) => updateFilter({ examTypeId: e.target.value })}
+          />
+        )}
         <DatePicker
           id="slot-date"
           label="검사 날짜"
@@ -301,6 +361,11 @@ export default function SlotSearchFilter({
         </fieldset>
       </div>
 
+      {examTypeNotice && (
+        <p id="slot-exam-item-notice" role="status" className="-mt-2 text-sm text-amber-700">
+          {examTypeNotice}
+        </p>
+      )}
       {dateNotice && (
         <p role="status" className="-mt-2 text-sm text-amber-700">
           {dateNotice}

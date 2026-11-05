@@ -57,6 +57,8 @@ export async function handleSlotSearchGet(request: Request, load: SlotSearchLoad
     endDateExclusive: (params.get("endDateExclusive") ?? "") as DateKey,
     institutionId: optional(params.get("institutionId")),
     modality: optional(params.get("modality")) as ExamType | undefined,
+    // 세부 검사 항목을 골랐거나(일반 검색) 고정했을 때(재조정)만 보낸다 (없으면 loader 입력은 그대로)
+    ...(optional(params.get("examTypeId")) ? { examTypeId: optional(params.get("examTypeId")) } : {}),
   });
   if (!result.ok) {
     return respond(STATUS_BY_REASON[result.reason] ?? 500, { ok: false, reason: result.reason, message: result.message });
