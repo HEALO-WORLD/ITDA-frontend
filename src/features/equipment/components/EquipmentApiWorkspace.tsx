@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertTriangle, ArrowLeft, ArrowRight, CheckCircle2, Info, Loader2, X } from "lucide-react";
-import { useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
 import { controlClass, fieldLabelClass, SelectInput, TextInput } from "@/components/ui/FormControls";
@@ -13,7 +13,7 @@ import { addDays, getDaysInMonth, parseDateKey, toDateKey, type DateKey } from "
 import { useSeoulNow } from "@/lib/date/useSeoulNow";
 import { isApiFeature } from "@/lib/api/config";
 import { loadMonthSlotsAction } from "@/features/slots/managementActions";
-import { createMonthSlotStore } from "@/features/slots/managementMonth";
+import { countTodayAvailableSlots, createMonthSlotStore } from "@/features/slots/managementMonth";
 
 import ApiSlotSchedule from "./ApiSlotSchedule";
 
@@ -116,6 +116,19 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
     slotStore.getSnapshot,
   );
 
+  // 오늘 예약 가능 슬롯 수: 오늘이 속한 달의 월 캐시를 함께 쓴다 (달력이 같은 달을 보면 추가 요청 없음).
+  // 슬롯 생성 뒤 invalidate로 캐시가 비면 다시 요청하고, 현재 시각(분)이 바뀌면 다시 센다
+  const slotsApi = isApiFeature("slots");
+  const todayMonth = today ? monthOf(today) : null;
+  useEffect(() => {
+    if (slotsApi && todayMonth) slotStore.request(todayMonth);
+  }, [slotsApi, slotStore, todayMonth, monthStates]);
+  const institutionIds = useMemo(() => new Set(equipments.map((item) => item.institutionId.toLowerCase())), [equipments]);
+  const todayAvailable =
+    slotsApi && today && now && todayMonth
+      ? countTodayAvailableSlots(monthStates[todayMonth], { today, nowDateTime: now.dateTime, institutionIds })
+      : null;
+
   const visible = useMemo(() => {
     const keyword = normalize(query);
     return equipments.filter((item) => (typeFilter === "ALL" || item.modality === typeFilter) && (!keyword || normalize(item.name).includes(keyword)));
@@ -186,7 +199,26 @@ export default function EquipmentApiWorkspace({ equipments, totalElements, trunc
       <EquipmentSummaryBar
         mri={counts ? `${counts.MRI}대` : <Pending>확인 불가</Pending>}
         ct={counts ? `${counts.CT}대` : <Pending>확인 불가</Pending>}
-        todaySlots={<Pending title={SLOT_UNAVAILABLE}>조회 준비 중</Pending>}
+        todaySlots={
+          !slotsApi ? (
+            <Pending title={SLOT_UNAVAILABLE}>조회 준비 중</Pending>
+          ) : !todayAvailable || todayAvailable.status === "loading" ? (
+            <Pending>불러오는 중</Pending>
+          ) : todayAvailable.status === "error" ? (
+            <span className="inline-flex items-center gap-2">
+              <Pending title={todayAvailable.message}>확인 불가</Pending>
+              <button
+                type="button"
+                onClick={() => todayMonth && slotStore.retry(todayMonth)}
+                className="rounded-md border border-line bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 hover:bg-gray-50"
+              >
+                다시 시도
+              </button>
+            </span>
+          ) : (
+            <span title={now ? `${now.dateTime.replace("T", " ")} 기준` : undefined}>{todayAvailable.count}개</span>
+          )
+        }
       />
 
       {notice && (

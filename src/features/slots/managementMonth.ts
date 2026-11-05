@@ -4,6 +4,7 @@ import type { DayStatus } from "@/features/equipment/dayStatus";
 import { buildMonthDayStatuses } from "@/features/equipment/dayStatus";
 
 import { API_SEARCH_MAX_LOOKAHEAD_DAYS } from "./apiSearchClient";
+import { isBookableSlot } from "./availability";
 import type { ApiExamSlot } from "./apiSlots";
 import type { SlotStatusDto } from "./remote";
 
@@ -94,6 +95,33 @@ export function createMonthSlotStore(load: MonthLoader) {
 }
 
 export type MonthSlotStore = ReturnType<typeof createMonthSlotStore>;
+
+export type TodayAvailableCount =
+  | { status: "loading" }
+  | { status: "loaded"; count: number }
+  | { status: "error"; message: string };
+
+/**
+ * 오늘 예약 가능 슬롯 수 (요약 바). 오늘이 속한 달의 월 캐시 값만 쓴다 (추가 요청 없음).
+ * Mock의 isBookableSlot과 같은 기준: 서버 상태 AVAILABLE + 시작 시각이 지금(서울, 분 단위) 이후.
+ * 기관 범위: 우리 기관(institutionIds) 장비 슬롯만. 화면의 장비 검색·선택과 관계없이 센다.
+ * 조회 전·요청 중은 loading, 실패는 error (0건으로 바꾸지 않는다).
+ */
+export function countTodayAvailableSlots(
+  state: MonthSlotsState | undefined,
+  { today, nowDateTime, institutionIds }: { today: DateKey; nowDateTime: string; institutionIds: ReadonlySet<string> },
+): TodayAvailableCount {
+  if (!state || state.status === "loading") return { status: "loading" };
+  if (state.status === "error") return { status: "error", message: state.message };
+  const count = state.slots.filter(
+    (slot) =>
+      slot.startAt.slice(0, 10) === today &&
+      slot.status === "AVAILABLE" &&
+      isBookableSlot(slot, nowDateTime) &&
+      institutionIds.has(slot.organizationId.toLowerCase()),
+  ).length;
+  return { status: "loaded", count };
+}
 
 /**
  * 달력 날짜 상태 (조회 대상 장비 기준). 받은 달: 기존 buildMonthDayStatuses 그대로
