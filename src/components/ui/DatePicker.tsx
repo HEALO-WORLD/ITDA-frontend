@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
 
 import {
   addDays,
@@ -21,8 +21,6 @@ interface DatePickerProps {
   /** 선택한 날짜. 빈 문자열은 미선택 */
   value: DateKey | "";
   onChange: (value: DateKey | "") => void;
-  /** 표시 중인 달이 변경될 때 호출 */
-  onViewMonthChange?: (year: number, month: number) => void;
   /** 날짜별 선택 불가 사유. null을 반환하면 선택 가능 */
   getDisabledReason?: (dateKey: DateKey) => string | null;
   /** 오늘(한국 시간) 이전 날짜 선택 불가 */
@@ -31,6 +29,30 @@ interface DatePickerProps {
   placeholder?: string;
   /** 범례 아래 선택 불가 사유 안내 */
   disabledNote?: string;
+  /**
+   * 달력을 열었을 때와 표시 월이 바뀔 때(월 이동 버튼·키보드 이동) 표시 중인 월을 알린다.
+   * 날짜별 가용 정보를 월 단위로 불러오는 화면에서 쓴다 (달력 동작·포커스에는 영향 없음)
+   */
+  onViewMonthChange?: (year: number, month: number) => void;
+  /**
+   * 달력 팝업을 화면 기준(position: fixed)으로 띄운다. 스크롤되는 모달 본문 안에서 팝업이 잘리거나
+   * 본문에 스크롤을 만들지 않게 할 때 쓴다 (아래 공간이 부족하면 위로 연다). 기본값(false)은 기존과 같은 absolute 배치
+   */
+  floating?: boolean;
+}
+
+/** floating 팝업 크기 (w-[320px]와 대략의 높이). 위·아래 배치를 고르는 데만 쓴다 */
+const POPUP_WIDTH = 320;
+const POPUP_HEIGHT_ESTIMATE = 430;
+const POPUP_GAP = 8;
+
+/** 트리거 위치 → 팝업 위치 (화면 안쪽으로 맞춘다) */
+function getFloatingStyle(trigger: HTMLElement): CSSProperties {
+  const rect = trigger.getBoundingClientRect();
+  const left = Math.max(POPUP_GAP, Math.min(rect.left, window.innerWidth - POPUP_WIDTH - POPUP_GAP));
+  const below = window.innerHeight - rect.bottom;
+  if (below >= POPUP_HEIGHT_ESTIMATE + POPUP_GAP || below >= rect.top) return { left, top: rect.bottom + POPUP_GAP };
+  return { left, bottom: window.innerHeight - rect.top + POPUP_GAP };
 }
 
 interface MonthView {
@@ -69,7 +91,8 @@ export default function DatePicker({
   disablePast = false,
   placeholder = "날짜 선택",
   disabledNote,
-  onViewMonthChange
+  onViewMonthChange,
+  floating = false,
 }: DatePickerProps) {
   const labelId = useId();
   const dialogId = useId();
@@ -82,6 +105,8 @@ export default function DatePicker({
   const [todayKey, setTodayKey] = useState<DateKey>("");
   const [focusedKey, setFocusedKey] = useState<DateKey>("");
   const [view, setView] = useState<MonthView>({ year: 0, month: 0 });
+  /** floating일 때 팝업 위치 */
+  const [floatingStyle, setFloatingStyle] = useState<CSSProperties | null>(null);
 
   const getReason = (key: DateKey): string | null => {
     if (disablePast && key < todayKey) return "지난 날짜";
@@ -95,6 +120,7 @@ export default function DatePicker({
     setTodayKey(today);
     setFocusedKey(start);
     setView(toMonthView(start));
+    if (floating && triggerRef.current) setFloatingStyle(getFloatingStyle(triggerRef.current));
     setIsOpen(true);
     shouldFocusGridRef.current = true;
   };
@@ -123,24 +149,33 @@ export default function DatePicker({
     moveFocus(getNext(focusedKey));
   };
 
-  const onViewMonthChangeRef = useRef(onViewMonthChange);
-
-  useEffect(() => {
-    onViewMonthChangeRef.current = onViewMonthChange;
-  }, [onViewMonthChange]);
-
-  useEffect(() => {
-    if (!isOpen || view.year === 0 || view.month === 0) return;
-
-    onViewMonthChangeRef.current?.(view.year, view.month);
-  }, [isOpen, view.year, view.month]);
-
   // 열 때와 키보드 이동 시에만 날짜 버튼으로 포커스를 옮긴다 (월 이동 버튼 클릭 시에는 유지)
   useEffect(() => {
     if (!isOpen || !shouldFocusGridRef.current) return;
     shouldFocusGridRef.current = false;
     gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${focusedKey}"]`)?.focus();
   }, [isOpen, focusedKey, view]);
+
+  // floating: 열려 있는 동안 창 크기·스크롤이 바뀌면 트리거 기준으로 위치를 다시 잡는다
+  useEffect(() => {
+    if (!floating || !isOpen) return;
+    const update = () => triggerRef.current && setFloatingStyle(getFloatingStyle(triggerRef.current));
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [floating, isOpen]);
+
+  // 표시 월 알림 (열려 있을 때만). 콜백이 렌더링마다 바뀌어도 같은 월을 다시 알리지 않도록 최신 콜백은 ref로 읽는다
+  const onViewMonthChangeRef = useRef(onViewMonthChange);
+  useEffect(() => {
+    onViewMonthChangeRef.current = onViewMonthChange;
+  });
+  useEffect(() => {
+    if (isOpen) onViewMonthChangeRef.current?.(view.year, view.month);
+  }, [isOpen, view.year, view.month]);
 
   // 바깥 클릭 시 닫기
   useEffect(() => {
@@ -200,7 +235,8 @@ export default function DatePicker({
               close();
             }
           }}
-          className="absolute left-0 top-full z-30 mt-2 w-[320px] rounded-xl border border-line bg-white p-4 shadow-lg"
+          style={floating ? (floatingStyle ?? undefined) : undefined}
+          className={`${floating ? "fixed" : "absolute left-0 top-full mt-2"} z-30 w-[320px] rounded-xl border border-line bg-white p-4 shadow-lg`}
         >
           <div className="mb-3 flex items-center justify-between">
             <button
@@ -277,8 +313,9 @@ export default function DatePicker({
                           title={reason ?? undefined}
                           onClick={() => select(key)}
                           onFocus={() => setFocusedKey(key)}
-                          className={`flex h-10 w-full items-center justify-center rounded-md text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${stateClass} ${isToday && !isSelected ? "ring-1 ring-inset ring-primary" : ""
-                            }`}
+                          className={`flex h-10 w-full items-center justify-center rounded-md text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary ${stateClass} ${
+                            isToday && !isSelected ? "ring-1 ring-inset ring-primary" : ""
+                          }`}
                         >
                           {parseDateKey(key).day}
                         </button>
