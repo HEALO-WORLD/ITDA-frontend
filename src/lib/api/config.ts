@@ -48,6 +48,7 @@ export const API_FEATURES = [
   "examinations",
   "notifications",
   "examining-notifications",
+  "partnerships",
 ] as const;
 
 export type ApiFeature = (typeof API_FEATURES)[number];
