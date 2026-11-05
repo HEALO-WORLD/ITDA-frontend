@@ -1,3 +1,4 @@
+import SummaryBar, { type SummaryBarItem } from "@/components/ui/SummaryBar";
 import type { IncidentSummaryCounts } from "../types";
 
 /**
@@ -8,31 +9,17 @@ import type { IncidentSummaryCounts } from "../types";
  */
 export default function IncidentSummary({ counts }: { counts: IncidentSummaryCounts }) {
   return (
-    <section aria-label="장애 현황 요약" className="rounded-xl border border-line bg-white px-6 py-4">
-      <ul className="flex flex-wrap items-center gap-x-8 gap-y-3">
-        <SummaryItem
-          label="장애 진행 중 장비"
-          value={`${counts.activeEquipmentCount}대`}
-          valueClass={counts.activeEquipmentCount > 0 ? "text-red-600" : "text-gray-900"}
-        />
-        <li aria-hidden="true" className="hidden h-6 w-px bg-line sm:block" />
-        <SummaryItem label="복구 완료 이력" value={`${counts.resolvedIncidentCount}건`} valueClass="text-emerald-700" />
-        <li aria-hidden="true" className="hidden h-6 w-px bg-line sm:block" />
-        <SummaryItem
-          label="재조정 필요 예약"
-          value={`${counts.rescheduleRequiredCount}건`}
-          valueClass={counts.rescheduleRequiredCount > 0 ? "text-red-600" : "text-gray-900"}
-        />
-      </ul>
-    </section>
+    <IncidentSummaryBar
+      items={[
+        { label: "장애 진행 중 장비", value: `${counts.activeEquipmentCount}대`, valueClass: counts.activeEquipmentCount > 0 ? "text-red-600" : "text-gray-900" },
+        { label: "복구 완료 이력", value: `${counts.resolvedIncidentCount}건`, valueClass: "text-emerald-700" },
+        { label: "재조정 필요 예약", value: `${counts.rescheduleRequiredCount}건`, valueClass: counts.rescheduleRequiredCount > 0 ? "text-red-600" : "text-gray-900" },
+      ]}
+    />
   );
 }
 
-function SummaryItem({ label, value, valueClass }: { label: string; value: string; valueClass: string }) {
-  return (
-    <li className="flex items-baseline gap-2">
-      <span className="text-[15px] text-gray-600">{label}</span>
-      <span className={`text-xl font-bold tabular-nums ${valueClass}`}>{value}</span>
-    </li>
-  );
+/** 요약 바 모양 (Mock·API 공용, components/ui/SummaryBar) */
+export function IncidentSummaryBar({ items, note }: { items: SummaryBarItem[]; note?: string }) {
+  return <SummaryBar ariaLabel="장애 현황 요약" items={items} note={note} />;
 }

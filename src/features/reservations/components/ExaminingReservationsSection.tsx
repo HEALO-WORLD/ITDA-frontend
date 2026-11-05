@@ -2,8 +2,9 @@ import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 
 import FormDateRange from "@/components/ui/FormDateRange";
+import SummaryBar from "@/components/ui/SummaryBar";
 import { SelectInput, TextInput } from "@/components/ui/FormControls";
-import { searchCardClass, searchGridClass } from "@/components/ui/styles";
+import { searchGridClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import {
   EmptyRows,
@@ -33,6 +34,7 @@ import {
   type ReservationSortDto,
   type ReservationStatusDto,
 } from "@/features/referrals/remote";
+import { getSeoulNow } from "@/lib/date/seoulDate";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import { loadExaminingEquipments, loadExaminingReservationPage, type ExaminingReservationQuery } from "../server";
@@ -66,6 +68,8 @@ interface Query {
  * - 상세: '상세' 버튼 → 대화상자(?reservationId=). 열 때만 예약 단건을 조회한다
  * - 장비 이름: 우리 기관 장비 목록 1회 (실패하면 ID로 표시하고 장비 조건은 ID 입력으로 받는다)
  * - 예약 응답에 없는 환자명·의뢰기관·검사 유형은 보이지 않는다 (검사기관은 의뢰 단건 API 권한이 없다)
+ * - 배포 와이어프레임(Mock 화면)처럼 요약 바 → '예약 목록' 카드(검색 조건·건수·표·페이지)로 배치한다.
+ *   요약은 상태별 전체 건수 API가 없어 현재 페이지만 센다 ('현재 페이지 기준'으로 표시)
  */
 export default async function ExaminingReservationsSection({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = parseQuery(await searchParams);
@@ -93,6 +97,15 @@ export default async function ExaminingReservationsSection({ searchParams }: { s
 
   return (
     <div className="flex flex-col gap-5">
+      <ReservationSummary items={list.items} />
+      <section aria-labelledby="exam-resv-list-title" className="flex min-w-0 flex-col gap-4 rounded-xl border border-line bg-white px-4 pb-5 pt-5 sm:px-6">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="exam-resv-list-title" className="text-lg font-bold text-gray-900">
+          예약 목록
+          <span className="ml-2 text-base font-semibold tabular-nums text-primary">{list.totalElements}건</span>
+        </h2>
+        <p className="text-xs text-gray-500">정렬: {SORT_LABELS[sort]}</p>
+      </div>
       <ReservationApiFilter query={query} equipments={equipments.ok ? equipments.equipments : null} />
       <TotalCount total={list.totalElements} page={list.page} totalPages={list.totalPages} unit="예약" />
       {list.items.length === 0 ? (
@@ -132,6 +145,7 @@ export default async function ExaminingReservationsSection({ searchParams }: { s
         </div>
       )}
       <NotificationPagination page={list.page} totalPages={list.totalPages} query={listQuery} label="예약 목록 페이지" />
+      </section>
       {/* 상세 대화상자 (?reservationId=): 장비 이름은 이미 받은 장비 목록으로 찾는다 (추가 요청 없음) */}
       <ExaminingReservationDetailModal equipmentNames={equipmentNames} />
     </div>
@@ -141,7 +155,7 @@ export default async function ExaminingReservationsSection({ searchParams }: { s
 function ReservationApiFilter({ query, equipments }: { query: Query; equipments: { id: string; name: string; modality: string }[] | null }) {
   const { list } = query;
   return (
-    <form role="search" aria-label="예약 검색 조건" action={PATH} method="get" className={searchCardClass}>
+    <form role="search" aria-label="예약 검색 조건" action={PATH} method="get" className="flex flex-col gap-5 rounded-lg border border-line bg-gray-50/60 px-4 py-4 sm:px-5">
       <div className={searchGridClass}>
         {equipments ? (
           <SelectInput
@@ -243,4 +257,27 @@ function isDate(value: string): boolean {
   if (!DATE.test(value)) return false;
   const date = new Date(`${value}T00:00:00Z`);
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+/**
+ * 예약 현황 요약 (와이어프레임: 오늘 예약 · 확정 · 처리 중 · 재조정 필요 · 취소).
+ * 상태별 전체 건수 API가 없어 현재 페이지에 받은 예약만 센다. 처리 중 = 요청·선점, 재조정 필요 = 실패·차단
+ */
+function ReservationSummary({ items }: { items: { reservationStatus: string; startTime: string | null }[] }) {
+  const today = getSeoulNow().dateKey;
+  const count = (...statuses: string[]) => items.filter((item) => statuses.includes(item.reservationStatus)).length;
+  const reschedule = count("FAILED", "BLOCKED");
+  return (
+    <SummaryBar
+      ariaLabel="예약 현황 요약"
+      scope={`현재 페이지 기준 (${items.length}건) · 전체 상태별 건수는 제공되지 않습니다`}
+      items={[
+        { label: "오늘 예약", value: `${items.filter((item) => item.startTime?.startsWith(today) && item.reservationStatus !== "CANCELED").length}건` },
+        { label: "확정", value: `${count("CONFIRMED")}건`, valueClass: "text-emerald-700" },
+        { label: "처리 중", value: `${count("REQUESTED", "HELD")}건`, valueClass: "text-primary" },
+        { label: "재조정 필요", value: `${reschedule}건`, valueClass: reschedule > 0 ? "text-red-600" : "text-gray-900" },
+        { label: "취소", value: `${count("CANCELED")}건`, valueClass: "text-gray-500" },
+      ]}
+    />
+  );
 }
