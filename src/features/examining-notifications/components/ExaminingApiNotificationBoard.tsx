@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, ChevronDown, RotateCcw } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { Suspense, useRef, useTransition } from "react";
 
@@ -24,8 +25,8 @@ interface ExaminingApiNotificationBoardProps {
 /**
  * 검사기관 알림 목록 (API 모드). 모양은 Mock 알림 목록(ExaminingNotificationBoard)과 같다.
  * - 읽음 상태 필터는 백엔드 조건(isRead=false)으로 다시 조회하고, 페이지는 백엔드 페이지 단위로 이동한다
- * - 백엔드에 없는 기능은 두지 않는다: 알림 유형 필터(유형 값 미확정), 모두 읽음(전체 읽음 API 없음),
- *   관련 화면 이동(응답에 예약·장애 정보 없음)
+ * - 배포 와이어프레임처럼 알림 유형 선택·초기화·모두 읽음 자리를 둔다. 백엔드에 없는 기능은 비활성으로 두고 이유를 보인다:
+ *   알림 유형 필터(유형 값 미확정·조건 없음), 모두 읽음(전체 읽음 API 없음). 관련 화면 이동은 응답에 예약·장애 정보가 없어 두지 않는다
  */
 export default function ExaminingApiNotificationBoard({
   notifications,
@@ -66,8 +67,25 @@ export default function ExaminingApiNotificationBoard({
         className="flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-line bg-white px-5 py-4 sm:px-6"
       >
         <div role="group" aria-label="읽음 상태" className="flex gap-1.5">
-          <FilterToggle label="전체" pressed={!unreadOnly} onClick={() => changeFilter(false)} />
-          <FilterToggle label="읽지 않음" pressed={unreadOnly} onClick={() => changeFilter(true)} />
+          <FilterToggle label="전체" count={unreadOnly ? undefined : totalElements} pressed={!unreadOnly} onClick={() => changeFilter(false)} />
+          <FilterToggle label="읽지 않음" count={unreadOnly ? totalElements : undefined} pressed={unreadOnly} onClick={() => changeFilter(true)} />
+        </div>
+        <span aria-hidden="true" className="hidden h-6 w-px bg-line sm:block" />
+        <div className="flex items-center gap-2">
+          <label htmlFor="examining-notification-type" className="text-sm font-semibold text-gray-700">
+            알림 유형
+          </label>
+          <div className="relative">
+            <select
+              id="examining-notification-type"
+              disabled
+              aria-describedby="examining-notification-unavailable"
+              className="h-10 cursor-not-allowed appearance-none rounded-lg border border-line bg-gray-50 pl-3 pr-9 text-sm text-gray-400"
+            >
+              <option>전체 유형</option>
+            </select>
+            <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-gray-300" aria-hidden="true" />
+          </div>
         </div>
         {unreadCount && (
           <p className="text-sm text-gray-500">
@@ -76,6 +94,15 @@ export default function ExaminingApiNotificationBoard({
             </Suspense>
           </p>
         )}
+        <button
+          type="button"
+          onClick={() => changeFilter(false)}
+          disabled={!unreadOnly}
+          className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm font-medium text-gray-600 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300 disabled:hover:bg-white"
+        >
+          <RotateCcw className="size-4" aria-hidden="true" />
+          초기화
+        </button>
       </section>
 
       <section
@@ -93,7 +120,19 @@ export default function ExaminingApiNotificationBoard({
             알림 목록
             <span className="ml-2 text-base font-semibold tabular-nums text-primary">{totalElements}건</span>
           </h2>
+          <button
+            type="button"
+            disabled
+            aria-describedby="examining-notification-unavailable"
+            className="inline-flex h-9 cursor-not-allowed items-center gap-1.5 rounded-lg border border-line bg-white px-3 text-sm font-semibold text-gray-300"
+          >
+            <Check className="size-4" aria-hidden="true" />
+            모두 읽음
+          </button>
         </div>
+        <p id="examining-notification-unavailable" className="mb-2 text-xs text-gray-500">
+          알림 유형 검색과 모두 읽음은 서버 기능이 준비되면 사용할 수 있습니다. 알림은 하나씩 [읽음 처리]할 수 있습니다.
+        </p>
 
         {errorMessage && (
           <p role="alert" className="mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
