@@ -611,7 +611,6 @@ describe("시각 입력 (TimeInput)", () => {
         pending: false,
         failure: null,
         onSubmit: () => {},
-        onCancel: () => {},
       }),
     );
     assert.doesNotMatch(html, /type="time"/);
@@ -632,11 +631,85 @@ describe("시각 입력 (TimeInput)", () => {
         pending: false,
         failure: { ok: false, reason: "INVALID_REQUEST", message: "종료 예정 일시는 현재 시각 이후여야 합니다.", fieldErrors: { endedAt: "종료 예정 일시는 현재 시각 이후여야 합니다." } },
         onSubmit: () => {},
-        onCancel: () => {},
       }),
     );
     assert.match(html, /id="downtime-end-error"[^>]*>종료 예정 일시는 현재 시각 이후여야 합니다/);
     assert.match(html, /id="downtime-end-time"[^>]*aria-invalid="true"|aria-invalid="true"[^>]*id="downtime-end-time"/);
+  });
+});
+
+// ── 6-1. 등록 대화상자 레이아웃 (장비 등록 모달과 같은 form2·2단·하단 고정 버튼) ──
+
+describe("장애 등록 대화상자 레이아웃", () => {
+  type ButtonProps = { disabled?: boolean; form?: string; type?: string; onClick?: () => void; children?: unknown };
+  const buttonsOf = (node: unknown, found: { props: ButtonProps }[] = []): { props: ButtonProps }[] => {
+    if (Array.isArray(node)) node.forEach((child) => buttonsOf(child, found));
+    else if (node && typeof node === "object" && "props" in node) {
+      const element = node as { type: unknown; props: ButtonProps };
+      if (element.type === "button") found.push(element);
+      buttonsOf(element.props.children, found);
+    }
+    return found;
+  };
+  const formHtml = () =>
+    renderToStaticMarkup(
+      createElement(registerModule.DowntimeRegisterForm, {
+        equipments: [{ id: EQUIPMENT, name: "MRI-1", modality: "MRI" }],
+        pending: false,
+        failure: null,
+        onSubmit: () => {},
+      }),
+    );
+
+  it("모달은 form2(980px)이고 버튼 줄은 Modal footer에 둔다 (다른 모달 크기는 그대로)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync("src/features/incidents/components/IncidentDowntimeRegister.tsx", "utf8");
+    assert.match(source, /<Modal\b[^>]*\btitle="장비 장애 등록"[^>]*\bsize="form2"/);
+    assert.match(source, /footer=\{[^}]*<DowntimeRegisterActions /);
+    // Mock 장애 화면(IncidentBoard)의 등록·상세 모달은 바꾸지 않는다
+    const board = readFileSync("src/features/incidents/components/IncidentBoard.tsx", "utf8");
+    assert.match(board, /<Modal\s+open=\{isRegisterOpen\}\s+title="장비 장애 등록"/);
+    assert.doesNotMatch(board, /size="form2"/);
+  });
+
+  it("860px 이상 2단(왼쪽 장애 장비·사유 5 : 오른쪽 시작·종료 예정 일시 7), 좁으면 1단", () => {
+    const html = formHtml();
+    assert.match(html, /<form id="downtime-register-form"/);
+    assert.match(html, /class="grid grid-cols-1 gap-x-8 gap-y-5 min-\[860px\]:grid-cols-\[minmax\(0,5fr\)_minmax\(0,7fr\)\]"/);
+    const grid = html.indexOf("min-[860px]:grid-cols-");
+    const columns = [...html.slice(grid).matchAll(/<div class="flex min-w-0 flex-col gap-5">/g)].map((match) => grid + (match.index ?? 0));
+    assert.equal(columns.length, 2);
+    const at = (id: string) => html.indexOf(`id="${id}"`);
+    // 왼쪽 열: 장비 → 사유 / 오른쪽 열: 시작 → 종료 예정
+    assert.ok(columns[0] < at("downtime-equipment") && at("downtime-equipment") < at("downtime-reason") && at("downtime-reason") < columns[1]);
+    assert.ok(columns[1] < at("downtime-start-time") && at("downtime-start-time") < at("downtime-end-time"));
+    // 안내 문구는 2단 아래 전체 폭, 폼 안에는 제출 버튼이 없다 (footer 버튼이 form 속성으로 제출)
+    assert.ok(html.indexOf("중단 기간만 저장합니다") > at("downtime-end-time"));
+    assert.doesNotMatch(html, /type="submit"/);
+    assert.doesNotMatch(html, />취소</);
+  });
+
+  it("footer 버튼: 평소 [취소][장애 등록], 요청 중 [등록 중] 비활성 + 안내(취소는 그대로 눌러 닫을 수 있다), 결과 불확실 [닫기][목록에서 확인 필요] 비활성", () => {
+    const { DowntimeRegisterActions, DOWNTIME_FORM_ID } = registerModule;
+    let cancelled = 0;
+    const onCancel = () => cancelled++;
+    const idle = buttonsOf(DowntimeRegisterActions({ pending: false, failure: null, onCancel }));
+    assert.deepEqual(idle.map((button) => [button.props.children, Boolean(button.props.disabled)]), [["취소", false], ["장애 등록", false]]);
+    assert.equal(idle[1].props.type, "submit");
+    assert.equal(idle[1].props.form, DOWNTIME_FORM_ID);
+    idle[0].props.onClick?.();
+    assert.equal(cancelled, 1);
+
+    const pendingHtml = renderToStaticMarkup(createElement(DowntimeRegisterActions, { pending: true, failure: null, onCancel }));
+    assert.match(pendingHtml, /<button type="submit" form="downtime-register-form" disabled=""[^>]*>등록 중<\/button>/);
+    assert.match(pendingHtml, /<button type="button"[^>]*>취소<\/button>/);
+    assert.doesNotMatch(pendingHtml, /<button type="button" disabled/);
+    assert.match(pendingHtml, /창을 닫아도 등록 요청은 계속 처리되며/);
+
+    const uncertain = buttonsOf(
+      DowntimeRegisterActions({ pending: false, failure: { ok: false, reason: "NETWORK", message: "x", uncertain: true }, onCancel }),
+    );
+    assert.deepEqual(uncertain.map((button) => [button.props.children, Boolean(button.props.disabled)]), [["닫기", false], ["목록에서 확인 필요", true]]);
   });
 });
 

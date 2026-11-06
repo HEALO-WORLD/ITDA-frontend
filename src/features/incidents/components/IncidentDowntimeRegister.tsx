@@ -7,6 +7,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import DatePicker from "@/components/ui/DatePicker";
 import { controlClass, fieldLabelClass, iconClass, SelectInput } from "@/components/ui/FormControls";
 import Modal from "@/components/ui/Modal";
+import { primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { getSeoulNow, type DateKey } from "@/lib/date/seoulDate";
 
 import { checkRegisteredIncidentAction, registerEquipmentDowntimeAction } from "../downtimeActions";
@@ -145,13 +146,13 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
         open={open}
         title="장비 장애 등록"
         description="장애 기간과 겹치는 예약 가능 슬롯은 사용 불가로 바뀌고, 영향받은 예약·의뢰는 순차적으로 후속 처리됩니다."
-        size="lg"
+        size="form2"
         closeOnBackdrop={false}
         onClose={close}
+        // 하단 버튼은 본문 스크롤 밖에 고정한다 (form 속성으로 아래 폼에 연결: Enter 제출·검증·중복 제출 방지 흐름은 그대로)
+        footer={equipments && equipments.length > 0 ? <DowntimeRegisterActions pending={pending} failure={failure} onCancel={close} /> : undefined}
       >
-        {equipments && equipments.length > 0 && (
-          <DowntimeRegisterForm equipments={equipments} pending={pending} failure={failure} onSubmit={submit} onCancel={close} />
-        )}
+        {equipments && equipments.length > 0 && <DowntimeRegisterForm equipments={equipments} pending={pending} failure={failure} onSubmit={submit} />}
       </Modal>
     </>
   );
@@ -219,18 +220,38 @@ function TrackingMessage({ tracking }: { tracking: Tracking }) {
 
 const FIELDS: readonly DowntimeField[] = ["equipmentId", "startedAt", "endedAt", "reason"];
 
+/** 등록 폼 id (Modal footer의 제출 버튼이 form 속성으로 이 폼을 제출한다) */
+export const DOWNTIME_FORM_ID = "downtime-register-form";
+
+/**
+ * 등록 대화상자 하단 버튼 줄 (Modal footer). 폼 밖에 있어 form 속성으로 제출한다.
+ * 잠금 조건(요청 중·결과 불확실)은 폼과 같다
+ */
+export function DowntimeRegisterActions({ pending, failure, onCancel }: { pending: boolean; failure: Failure | null; onCancel: () => void }) {
+  const locked = pending || Boolean(failure?.uncertain);
+  return (
+    <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
+      {pending && <p className="text-center text-sm text-gray-500 sm:mr-auto sm:text-left">창을 닫아도 등록 요청은 계속 처리되며, 결과는 목록 위에 표시됩니다.</p>}
+      <button type="button" onClick={onCancel} className={secondaryButtonClass}>
+        {failure?.uncertain ? "닫기" : "취소"}
+      </button>
+      <button type="submit" form={DOWNTIME_FORM_ID} disabled={locked} className={primaryButtonClass}>
+        {pending ? "등록 중" : failure?.uncertain ? "목록에서 확인 필요" : "장애 등록"}
+      </button>
+    </div>
+  );
+}
+
 export function DowntimeRegisterForm({
   equipments,
   pending,
   failure,
   onSubmit,
-  onCancel,
 }: {
   equipments: readonly DowntimeEquipmentOption[];
   pending: boolean;
   failure: Failure | null;
   onSubmit: (input: DowntimeFormInput) => void;
-  onCancel: () => void;
 }) {
   // 시작 기본값은 대화상자를 연 시점의 한국 시각. 종료 예정은 직접 입력한다 (필수)
   const [initialNow] = useState(() => getSeoulNow());
@@ -284,7 +305,7 @@ export function DowntimeRegisterForm({
   const showBanner = failure && !(failure.reason === "INVALID_INPUT" && failure.fieldErrors);
 
   return (
-    <form onSubmit={handleSubmit} noValidate aria-busy={pending}>
+    <form id={DOWNTIME_FORM_ID} onSubmit={handleSubmit} noValidate aria-busy={pending}>
       {showBanner && (
         <div role="alert" className={`mb-4 flex items-start gap-2 rounded-lg px-4 py-3 text-[15px] ${failure.uncertain ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-700"}`}>
           <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
@@ -292,89 +313,97 @@ export function DowntimeRegisterForm({
         </div>
       )}
 
-      <fieldset disabled={locked} className="flex flex-col gap-5">
-        <div>
-          <SelectInput
-            id="downtime-equipment"
-            label="장애 장비"
-            data-autofocus
-            options={options}
-            value={equipmentId}
-            aria-invalid={equipmentError ? true : undefined}
-            aria-describedby={equipmentError ? "downtime-equipment-error" : undefined}
-            onChange={(e) => {
-              setEquipmentId(e.target.value);
-              touch("equipmentId");
-            }}
-            onBlur={() => touch("equipmentId")}
-          />
-          {equipmentError && (
-            <p id="downtime-equipment-error" className="mt-1.5 text-sm text-red-600">
-              {equipmentError}
-            </p>
-          )}
-        </div>
+      <fieldset disabled={locked} className="min-w-0">
+        <legend className="sr-only">장애 정보</legend>
+        {/* 860px 이상: 왼쪽 장애 장비·사유(5) · 오른쪽 장애 시작·종료 예정 일시(7) / 좁은 화면: 1단 (장비 등록 모달과 같은 비율·간격) */}
+        <div className="grid grid-cols-1 gap-x-8 gap-y-5 min-[860px]:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+          <div className="flex min-w-0 flex-col gap-5">
+            <div>
+              <SelectInput
+                id="downtime-equipment"
+                label="장애 장비"
+                data-autofocus
+                options={options}
+                value={equipmentId}
+                aria-invalid={equipmentError ? true : undefined}
+                aria-describedby={equipmentError ? "downtime-equipment-error" : undefined}
+                onChange={(e) => {
+                  setEquipmentId(e.target.value);
+                  touch("equipmentId");
+                }}
+                onBlur={() => touch("equipmentId")}
+              />
+              {equipmentError && (
+                <p id="downtime-equipment-error" className="mt-1.5 text-sm text-red-600">
+                  {equipmentError}
+                </p>
+              )}
+            </div>
 
-        <DateTimeField
-          idPrefix="downtime-start"
-          dateLabel="장애 시작 날짜"
-          timeLabel="시작 시각"
-          date={startDate}
-          time={startTime}
-          error={startError}
-          hint="한국 시간 기준이며, 이미 발생한 장애는 지난 시각으로 입력할 수 있습니다."
-          onDate={(value) => {
-            setStartDate(value);
-            // 날짜를 고른 것만으로는 시각 미입력 오류를 띄우지 않는다
-            if (startTime.trim()) touch("startedAt");
-          }}
-          onTime={setStartTime}
-          onTimeCommit={() => touch("startedAt")}
-        />
+            <div>
+              <label htmlFor="downtime-reason" className={fieldLabelClass}>
+                장애 사유 <span className="text-red-600">*</span>
+              </label>
+              <textarea
+                id="downtime-reason"
+                rows={4}
+                value={reason}
+                placeholder="예: MRI 장비 냉각 시스템 오류"
+                aria-invalid={reasonError ? true : undefined}
+                aria-describedby={`downtime-reason-count${reasonError ? " downtime-reason-error" : ""}`}
+                onChange={(e) => {
+                  setReason(e.target.value);
+                  touch("reason");
+                }}
+                onBlur={() => touch("reason")}
+                className={`w-full resize-y rounded-lg border bg-white px-4 py-3 text-[15px] text-gray-900 outline-none placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/20 ${
+                  reasonError ? "border-red-500" : "border-line"
+                }`}
+              />
+              <div className="mt-1.5 flex justify-between gap-3 text-sm">
+                <p id="downtime-reason-error" className="text-red-600">
+                  {reasonError}
+                </p>
+                <p id="downtime-reason-count" className={`shrink-0 tabular-nums ${reasonLength > DOWNTIME_REASON_MAX_LENGTH ? "text-red-600" : "text-gray-500"}`}>
+                  {reasonLength} / {DOWNTIME_REASON_MAX_LENGTH}자
+                </p>
+              </div>
+            </div>
+          </div>
 
-        <DateTimeField
-          idPrefix="downtime-end"
-          dateLabel="장애 종료 예정 날짜"
-          timeLabel="종료 예정 시각"
-          date={endDate}
-          time={endTime}
-          error={endError}
-          hint="장애 시작 이후이면서 현재 시각 이후여야 합니다."
-          onDate={(value) => {
-            setEndDate(value);
-            if (endTime.trim()) touch("endedAt");
-          }}
-          onTime={setEndTime}
-          onTimeCommit={() => touch("endedAt")}
-        />
+          <div className="flex min-w-0 flex-col gap-5">
+            <DateTimeField
+              idPrefix="downtime-start"
+              dateLabel="장애 시작 날짜"
+              timeLabel="시작 시각"
+              date={startDate}
+              time={startTime}
+              error={startError}
+              hint="한국 시간 기준이며, 이미 발생한 장애는 지난 시각으로 입력할 수 있습니다."
+              onDate={(value) => {
+                setStartDate(value);
+                // 날짜를 고른 것만으로는 시각 미입력 오류를 띄우지 않는다
+                if (startTime.trim()) touch("startedAt");
+              }}
+              onTime={setStartTime}
+              onTimeCommit={() => touch("startedAt")}
+            />
 
-        <div>
-          <label htmlFor="downtime-reason" className={fieldLabelClass}>
-            장애 사유 <span className="text-red-600">*</span>
-          </label>
-          <textarea
-            id="downtime-reason"
-            rows={4}
-            value={reason}
-            placeholder="예: MRI 장비 냉각 시스템 오류"
-            aria-invalid={reasonError ? true : undefined}
-            aria-describedby={`downtime-reason-count${reasonError ? " downtime-reason-error" : ""}`}
-            onChange={(e) => {
-              setReason(e.target.value);
-              touch("reason");
-            }}
-            onBlur={() => touch("reason")}
-            className={`w-full resize-y rounded-lg border bg-white px-4 py-3 text-[15px] text-gray-900 outline-none placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/20 ${
-              reasonError ? "border-red-500" : "border-line"
-            }`}
-          />
-          <div className="mt-1.5 flex justify-between gap-3 text-sm">
-            <p id="downtime-reason-error" className="text-red-600">
-              {reasonError}
-            </p>
-            <p id="downtime-reason-count" className={`shrink-0 tabular-nums ${reasonLength > DOWNTIME_REASON_MAX_LENGTH ? "text-red-600" : "text-gray-500"}`}>
-              {reasonLength} / {DOWNTIME_REASON_MAX_LENGTH}자
-            </p>
+            <DateTimeField
+              idPrefix="downtime-end"
+              dateLabel="장애 종료 예정 날짜"
+              timeLabel="종료 예정 시각"
+              date={endDate}
+              time={endTime}
+              error={endError}
+              hint="장애 시작 이후이면서 현재 시각 이후여야 합니다."
+              onDate={(value) => {
+                setEndDate(value);
+                if (endTime.trim()) touch("endedAt");
+              }}
+              onTime={setEndTime}
+              onTimeCommit={() => touch("endedAt")}
+            />
           </div>
         </div>
       </fieldset>
@@ -383,24 +412,6 @@ export function DowntimeRegisterForm({
         <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
         등록하면 장비 상태를 직접 바꾸지 않고 중단 기간만 저장합니다. 예약 차단·의뢰 재조정·의뢰기관 알림은 서버가 순차적으로 처리하므로 바로 완료되지 않습니다.
       </p>
-
-      <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          className="h-12 rounded-lg border border-line bg-white px-6 text-[15px] font-semibold text-gray-700 hover:bg-gray-50"
-        >
-          {failure?.uncertain ? "닫기" : "취소"}
-        </button>
-        <button
-          type="submit"
-          disabled={locked}
-          className="h-12 rounded-lg bg-primary px-6 text-[15px] font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-        >
-          {pending ? "등록 중" : failure?.uncertain ? "목록에서 확인 필요" : "장애 등록"}
-        </button>
-      </div>
-      {pending && <p className="mt-3 text-center text-sm text-gray-500 sm:text-right">창을 닫아도 등록 요청은 계속 처리되며, 결과는 목록 위에 표시됩니다.</p>}
     </form>
   );
 }

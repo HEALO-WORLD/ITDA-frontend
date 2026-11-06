@@ -471,10 +471,43 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
     }
   };
 
+  const formId = "api-equipment-create-form";
+
   return (
-    <Modal open size="lg" title="장비 등록" description="기본 정보와 운영 시간을 입력하면 장비를 등록합니다." onClose={close} closeOnBackdrop={false}>
-      <form onSubmit={submit} noValidate aria-busy={pending}>
-        <ol aria-label="등록 단계" className="mb-5 flex items-center gap-2 text-sm">
+    <Modal
+      open
+      size="form2"
+      title="장비 등록"
+      description="기본 정보와 운영 시간을 입력하면 장비를 등록합니다."
+      onClose={close}
+      closeOnBackdrop={false}
+      // 하단 버튼은 본문 스크롤 밖에 고정한다 (form 속성으로 아래 폼에 연결: Enter 제출·검증 흐름은 그대로)
+      footer={
+        <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+          {step === 2 && !created && (
+            <button type="button" onClick={() => setStep(1)} disabled={pending} className={`${secondaryButtonClass} sm:mr-auto`}>
+              <ArrowLeft className="size-4" aria-hidden="true" />
+              이전
+            </button>
+          )}
+          <button type="button" onClick={close} disabled={pending} className={secondaryButtonClass}>
+            {created ? "닫기" : "취소"}
+          </button>
+          {step === 1 ? (
+            <button type="submit" form={formId} disabled={pending} className={primaryButtonClass}>
+              다음
+              <ArrowRight className="size-4" aria-hidden="true" />
+            </button>
+          ) : (
+            <button type="submit" form={formId} disabled={pending} className={primaryButtonClass}>
+              {pending ? (created ? "저장 중" : "등록 중") : created ? "운영 시간 다시 저장" : "장비 등록"}
+            </button>
+          )}
+        </div>
+      }
+    >
+      <form id={formId} onSubmit={submit} noValidate aria-busy={pending}>
+        <ol aria-label="등록 단계" className="mb-4 flex flex-wrap items-center gap-2 text-sm">
           {(
             [
               [1, "기본 정보"],
@@ -484,14 +517,20 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
             <li key={value} aria-current={step === value ? "step" : undefined} className="flex items-center gap-2">
               {index > 0 && <span className="h-px w-6 bg-line" aria-hidden="true" />}
               <span
-                className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${step === value ? "bg-primary text-white" : step > value ? "bg-primary-soft text-primary" : "bg-gray-100 text-gray-500"
-                  }`}
+                className={`flex size-6 items-center justify-center rounded-full text-xs font-bold ${
+                  step === value ? "bg-primary text-white" : step > value ? "bg-primary-soft text-primary" : "bg-gray-100 text-gray-500"
+                }`}
               >
                 {value}
               </span>
               <span className={step === value ? "font-bold text-gray-900" : "text-gray-500"}>{label}</span>
             </li>
           ))}
+          {step === 2 && (
+            <li className="ml-1 min-w-0 truncate text-sm text-gray-500" aria-label="등록할 장비">
+              {name.trim()} · {modality}
+            </li>
+          )}
         </ol>
 
         {submitError && (
@@ -506,84 +545,83 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
         )}
 
         {step === 1 ? (
-          <fieldset disabled={pending} className="flex flex-col gap-5">
-            <h3 className="text-base font-bold text-gray-900">1단계 · 장비 기본 정보</h3>
-            <TextInput
-              id="api-equipment-name"
-              label="장비명"
-              data-autofocus
-              required
-              autoComplete="off"
-              maxLength={EQUIPMENT_NAME_MAX_LENGTH}
-              placeholder="예: CT 1호기"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              onBlur={() => setTouched(true)}
-              error={nameError ?? undefined}
-            />
-            <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-              <div>
-                <SelectInput
-                  id="api-equipment-type"
-                  label="검사 유형"
-                  options={EXAM_TYPE_SELECT_OPTIONS}
-                  value={modality}
-                  aria-invalid={modalityError ? true : undefined}
-                  aria-describedby={modalityError ? "api-equipment-type-error" : undefined}
-                  onChange={(e) => {
-                    setModality(e.target.value as EquipmentModalityDto | "");
-                    setSelected([]);
-                  }}
+          <fieldset disabled={pending} className="min-w-0">
+            <legend className="sr-only">1단계 · 장비 기본 정보</legend>
+            {/* 데스크톱: 왼쪽 기본 정보 · 오른쪽 지원 검사 유형 / 좁은 화면: 1단 */}
+            <div className="grid grid-cols-1 gap-x-8 gap-y-5 min-[860px]:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
+              <div className="flex min-w-0 flex-col gap-4">
+                <TextInput
+                  id="api-equipment-name"
+                  label="장비명"
+                  data-autofocus
+                  required
+                  autoComplete="off"
+                  maxLength={EQUIPMENT_NAME_MAX_LENGTH}
+                  placeholder="예: CT 1호기"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onBlur={() => setTouched(true)}
+                  error={nameError ?? undefined}
                 />
-                {modalityError && (
-                  <p id="api-equipment-type-error" className="mt-1.5 text-sm text-red-600">
-                    {modalityError}
+                <div>
+                  <SelectInput
+                    id="api-equipment-type"
+                    label="검사 유형"
+                    options={EXAM_TYPE_SELECT_OPTIONS}
+                    value={modality}
+                    aria-invalid={modalityError ? true : undefined}
+                    aria-describedby={modalityError ? "api-equipment-type-error" : undefined}
+                    onChange={(e) => {
+                      setModality(e.target.value as EquipmentModalityDto | "");
+                      setSelected([]);
+                    }}
+                  />
+                  {modalityError && (
+                    <p id="api-equipment-type-error" className="mt-1.5 text-sm text-red-600">
+                      {modalityError}
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="api-equipment-minutes" className={fieldLabelClass}>
+                    기본 소요 시간(분) <span className="font-normal text-gray-500">(선택)</span>
+                  </label>
+                  <input
+                    id="api-equipment-minutes"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    step={1}
+                    value={defaultMinutes}
+                    onChange={(e) => setDefaultMinutes(e.target.value)}
+                    aria-invalid={defaultMinutesError ? true : undefined}
+                    aria-describedby={`api-equipment-minutes-hint${defaultMinutesError ? " api-equipment-minutes-error" : ""}`}
+                    className={`${controlClass} pr-4 ${defaultMinutesError ? "border-red-500" : ""}`}
+                  />
+                  <p id="api-equipment-minutes-hint" className="mt-1 text-xs text-gray-500">
+                    새로 고르는 지원 검사 유형에 먼저 채워 넣습니다.
                   </p>
-                )}
+                  {defaultMinutesError && (
+                    <p id="api-equipment-minutes-error" className="mt-1 text-sm text-red-600">
+                      {defaultMinutesError}
+                    </p>
+                  )}
+                </div>
+                <p className="text-xs text-gray-500">등록 직후 고른 검사 유형을 입력한 소요 시간으로 연결합니다. 장비 상태는 정상으로 시작합니다.</p>
               </div>
-              <div>
-                <label htmlFor="api-equipment-minutes" className={fieldLabelClass}>
-                  기본 소요 시간(분) <span className="font-normal text-gray-500">(선택)</span>
-                </label>
-                <input
-                  id="api-equipment-minutes"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  step={1}
-                  value={defaultMinutes}
-                  onChange={(e) => setDefaultMinutes(e.target.value)}
-                  aria-invalid={defaultMinutesError ? true : undefined}
-                  aria-describedby={`api-equipment-minutes-hint${defaultMinutesError ? " api-equipment-minutes-error" : ""}`}
-                  className={`${controlClass} pr-4 ${defaultMinutesError ? "border-red-500" : ""}`}
-                />
-                <p id="api-equipment-minutes-hint" className="mt-1.5 text-sm text-gray-500">
-                  새로 고르는 지원 검사 유형에 먼저 채워 넣습니다. 검사 유형마다 따로 바꿀 수 있습니다.
-                </p>
-                {defaultMinutesError && (
-                  <p id="api-equipment-minutes-error" className="mt-1 text-sm text-red-600">
-                    {defaultMinutesError}
-                  </p>
-                )}
-              </div>
+              <SupportedExamTypesPicker
+                modality={modality}
+                options={options}
+                selected={selected}
+                errors={minuteErrors}
+                defaultMinutes={readDuration(defaultMinutes).error ? "" : defaultMinutes.trim()}
+                onChange={setSelected}
+              />
             </div>
-            <SupportedExamTypesPicker
-              modality={modality}
-              options={options}
-              selected={selected}
-              errors={minuteErrors}
-              defaultMinutes={readDuration(defaultMinutes).error ? "" : defaultMinutes.trim()}
-              onChange={setSelected}
-            />
           </fieldset>
         ) : (
           <div className="flex flex-col gap-3">
-            <h3 className="text-base font-bold text-gray-900">
-              2단계 · 운영 시간 설정
-              <span className="ml-2 text-sm font-normal text-gray-500">
-                {name.trim()} · {modality}
-              </span>
-            </h3>
+            <h3 className="sr-only">2단계 · 운영 시간 설정</h3>
             {noOpenDay && (
               <p role="alert" className="text-sm text-red-600">
                 운영하는 요일을 하루 이상 설정해야 등록할 수 있습니다.
@@ -598,36 +636,6 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
             <ApiNotice>{BREAK_NOT_SUPPORTED}</ApiNotice>
           </div>
         )}
-
-        {step === 1 && (
-          <div className="mt-5">
-            <ApiNotice>
-              장비명과 검사 유형이 서버에 등록되고, 고른 지원 검사 유형은 입력한 소요 시간으로 등록 직후 연결합니다. 장비 상태는 정상으로 시작합니다.
-            </ApiNotice>
-          </div>
-        )}
-
-        <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-          {step === 2 && !created && (
-            <button type="button" onClick={() => setStep(1)} disabled={pending} className={`${secondaryButtonClass} sm:mr-auto`}>
-              <ArrowLeft className="size-4" aria-hidden="true" />
-              이전
-            </button>
-          )}
-          <button type="button" onClick={close} disabled={pending} className={secondaryButtonClass}>
-            {created ? "닫기" : "취소"}
-          </button>
-          {step === 1 ? (
-            <button type="submit" disabled={pending} className={primaryButtonClass}>
-              다음
-              <ArrowRight className="size-4" aria-hidden="true" />
-            </button>
-          ) : (
-            <button type="submit" disabled={pending} className={primaryButtonClass}>
-              {pending ? (created ? "저장 중" : "등록 중") : created ? "운영 시간 다시 저장" : "장비 등록"}
-            </button>
-          )}
-        </div>
       </form>
     </Modal>
   );
