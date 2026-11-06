@@ -21,6 +21,7 @@ Thumbs.db
 
 # 테스트·문서·로그·임시 파일 (빌드에 필요 없다)
 tests
+playwright.config.ts
 docs
 *.log
 npm-debug.log*
