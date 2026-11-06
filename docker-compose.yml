@@ -8,7 +8,7 @@
 # 값은 이 폴더의 .env에서 읽는다 (Compose 변수 치환). 없으면 아래 기본값.
 #   NEXT_PUBLIC_*        : 빌드 시점 고정 (바꾸면 `docker compose up -d --build`)
 #   DOCKER_API_BASE_URL  : 실행 시점, 서버 전용 Gateway 주소 (기본 http://gateway-service:8080)
-#   FRONTEND_PORT        : 호스트 포트 (기본 3000. next dev가 3000을 쓰고 있으면 다른 값으로)
+#   FRONTEND_PORT        : 호스트 포트 (기본 3001 next dev가 3001을 쓰고 있으면 다른 값으로)
 #   ITDA_BACKEND_NETWORK : 백엔드 네트워크 이름 (기본 itda_default. 백엔드를 먼저 띄워야 있다)
 name: itda-frontend
 
@@ -26,7 +26,7 @@ services:
     container_name: itda-frontend
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-3001}:3001"
     environment:
       TZ: Asia/Seoul
       # .env의 API_BASE_URL(localhost:8080, 로컬 next dev용)은 컨테이너 안에서 쓸 수 없어 따로 받는다
