@@ -15,6 +15,7 @@ import {
 
 import ReferralDetailDialog from "./ReferralDetailDialog";
 import ReferralFilter from "./ReferralFilter";
+import ReferralResultButton from "./ReferralResultButton";
 import ReferralStatusBadge from "./ReferralStatusBadge";
 
 interface ReferralHistoryTableProps {
@@ -245,14 +246,18 @@ export default function ReferralHistoryTable({
                   <td
                     className={`${tdClass} text-center`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => setSelected(referral)}
-                      aria-label={`${referral.referralNumber} 상세`}
-                      className={detailButtonClass}
-                    >
-                      상세
-                    </button>
+                    <div className="flex items-center justify-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelected(referral)}
+                        aria-label={`${referral.referralNumber} 상세`}
+                        className={detailButtonClass}
+                      >
+                        상세
+                      </button>
+                      {/* Mock 검사결과 (백엔드 요청 없음) */}
+                      <ReferralResultButton referralId={referral.id} source="mock" label={referral.referralNumber} />
+                    </div>
                   </td>
                 </tr>
               ))}

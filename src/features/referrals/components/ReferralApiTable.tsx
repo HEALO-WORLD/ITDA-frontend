@@ -11,6 +11,7 @@ import type { DetailCell } from "../server";
 import ReferralApiDetailButton from "./ReferralApiDetailButton";
 import ReferralIdCopyButton from "./ReferralIdCopyButton";
 import ReferralStatusBadge from "./ReferralStatusBadge";
+import ReferralResultButton from "./ReferralResultButton";
 
 /** 표 1행 (화면용). 예약 ID·기관 ID·작성자 ID는 담지 않는다 */
 export interface ReferralApiRow {
@@ -155,11 +156,14 @@ export default function ReferralApiTable({ rows, page, totalPages, totalElements
                     <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
                   </td>
                   <td className={`${tdClass} text-center`}>
-                    <ReferralApiDetailButton
-                      referralId={row.referralId}
-                      examTypeLabel={row.examTypeLabel}
-                      badgeStatus={toBadgeStatus(row.referralStatus)}
-                    />
+                    <div className="flex items-center justify-center gap-2">
+                      <ReferralApiDetailButton
+                        referralId={row.referralId}
+                        examTypeLabel={row.examTypeLabel}
+                        badgeStatus={toBadgeStatus(row.referralStatus)}
+                      />
+                      <ReferralResultButton referralId={row.referralId} />
+                    </div>
                   </td>
                 </tr>
               ))}
