@@ -82,3 +82,59 @@ export async function createConfirmedReferralViaUi(page: Page, data: Reservation
   expect(reservation.slotId?.toLowerCase()).toBe(data.slotId.toLowerCase());
   return { referralId: referral.id, reservationId: referral.currentReservationId as string };
 }
+
+/** DatePicker(버튼 + 달력 대화상자)에서 날짜를 고른다. 대상 날짜가 다음 달이면 [다음 달]로 넘긴다 */
+export async function pickDate(page: Page, triggerId: string, label: string, date: string) {
+  await page.locator(`#${triggerId}`).click();
+  const calendar = page.getByRole("dialog", { name: `${label} 선택` });
+  const day = calendar.locator(`button[data-date="${date}"]`);
+  for (let i = 0; i < 2 && (await day.count()) === 0; i++) await calendar.getByRole("button", { name: "다음 달" }).click();
+  await day.click();
+  await expect(page.locator(`#${triggerId}`)).toContainText(date);
+}
+
+/**
+ * (imaging_b 로그인 상태) 장비 장애 등록 화면에서 장애를 등록하고 성공 안내·장애 목록 반영까지 확인한다
+ * (장애 E2E incident-reschedule.db-write.spec.ts와 같은 셀렉터·성공 조건). 예약 슬롯 1개가 후속 처리 대상이어야 한다
+ */
+export async function registerDowntimeViaUi(
+  page: Page,
+  input: { equipmentName: string; date: string; startTime: string; endTime: string; reason: string },
+) {
+  await page.goto("/examining/incidents");
+  await page.getByRole("button", { name: "장비 장애 등록", exact: true }).click();
+  const dialog = page.getByRole("dialog", { name: "장비 장애 등록" });
+  await expect(dialog).toBeVisible();
+  await dialog.locator("#downtime-equipment").selectOption({ label: `${input.equipmentName} (CT)` });
+  await pickDate(page, "downtime-start-date", "장애 시작 날짜", input.date);
+  await dialog.locator("#downtime-start-time").fill(input.startTime);
+  await pickDate(page, "downtime-end-date", "장애 종료 예정 날짜", input.date);
+  await dialog.locator("#downtime-end-time").fill(input.endTime);
+  await dialog.locator("#downtime-reason").fill(input.reason);
+  await expect(dialog.locator('[aria-invalid="true"]')).toHaveCount(0);
+  await dialog.getByRole("button", { name: "장애 등록", exact: true }).click();
+  await expect(dialog).toBeHidden({ timeout: 20_000 });
+
+  const notice = page.getByRole("status").filter({ hasText: "장비 장애가 등록되었습니다." });
+  await expect(notice).toBeVisible();
+  await expect(notice).toContainText("예약이 잡혀 있는 슬롯 1개는 그대로 두고, 관련 예약·의뢰는 후속 처리 대상으로 넘겼습니다.");
+  await expect(notice).toContainText("장애 목록에 반영되었습니다.", { timeout: 40_000 });
+  const incidentRow = page.locator('section[aria-labelledby="incident-api-list-title"] tbody tr').filter({ hasText: input.equipmentName });
+  await expect(incidentRow).toHaveCount(1, { timeout: 20_000 });
+}
+
+/**
+ * 재조정·알림 화면의 '예약 재조정 필요 목록'에서 검사 항목 이름(실행마다 고유)으로 카드를 찾는다.
+ * 데이터가 쌓여도 첫 페이지라고 가정하지 않고 `?reschedulePage=`를 넘기며 찾는다. 없으면 null (모든 페이지 확인)
+ */
+export async function findRescheduleCard(page: Page, examTypeName: string, maxPages = 50) {
+  for (let pageNo = 1; pageNo <= maxPages; pageNo++) {
+    await page.goto(`/referring/notifications?reschedulePage=${pageNo}`);
+    await expect(page.getByRole("heading", { name: "예약 재조정 필요" })).toBeVisible({ timeout: 20_000 });
+    const card = page.getByRole("list", { name: "예약 재조정 필요 목록" }).getByRole("listitem").filter({ hasText: examTypeName });
+    if ((await card.count()) > 0) return card;
+    const next = page.getByRole("navigation", { name: "재조정 필요 목록 페이지" }).getByRole("link", { name: "다음 페이지" });
+    if ((await next.count()) === 0) return null;
+  }
+  throw new Error(`재조정 필요 목록 ${maxPages}페이지 안에서 끝을 확인하지 못했습니다.`);
+}
