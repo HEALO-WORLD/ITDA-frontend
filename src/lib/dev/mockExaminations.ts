@@ -5,6 +5,7 @@ import type { ExaminationRecord } from "@/features/examinations/types";
  *
  * 검사 진행·결과 화면 확인용 예시 데이터다. 의뢰 Mock(mockReferrals.ts)의 id로 예약과 연결하며,
  * 예약 데이터(날짜·장비·기관·예약 상태)는 바꾸지 않는다. 기준일 2026-10-30 기준으로 아래와 같이 맞췄다.
+ * - R-001 (10/27 지남, 확정, 강남) → 검사 완료 · 결과 등록 완료 (의뢰기관 검사결과 조회 시연용: 요약·추가 소견)
  * - R-004 (11/03 예정, 확정)      → 검사 대기
  * - R-009 (10/13 지남, 확정)      → 검사 완료 · 결과 미등록 (결과 등록 확인용)
  * - R-010 (10/16 지남, 확정)      → 검사 완료 · 결과 등록 완료 (상세 조회 확인용)
@@ -17,6 +18,17 @@ import type { ExaminationRecord } from "@/features/examinations/types";
 const SAMPLE_RESULT_TEXT = "개발용 예시 결과 텍스트입니다. 실제 판독 내용이 아닙니다.";
 
 export const MOCK_EXAMINATIONS: readonly ExaminationRecord[] = Object.freeze([
+  {
+    referralId: "mock-referral-001",
+    organizationId: "org-gangnam",
+    progressStatus: "COMPLETED",
+    result: {
+      status: "FINAL",
+      text: "MRI 검사 결과 특이 소견 없음 (개발용 예시)",
+      notes: "급성 이상 소견은 관찰되지 않으며, 필요 시 정기적인 추적 검사를 권고합니다. (개발용 예시 문구, 실제 판독 아님)",
+      registeredAt: "2026-11-05T14:30",
+    },
+  },
   { referralId: "mock-referral-004", organizationId: "org-gaon", progressStatus: "WAITING", result: null },
   { referralId: "mock-referral-009", organizationId: "org-gaon", progressStatus: "COMPLETED", result: null },
   {

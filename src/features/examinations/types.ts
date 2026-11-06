@@ -23,6 +23,8 @@ export type ExamResultStatus = "PRELIMINARY" | "FINAL" | "NEEDS_REVIEW";
 export interface ExamResult {
   status: ExamResultStatus;
   text: string;
+  /** 추가 소견 (선택. 없으면 표시하지 않는다) */
+  notes?: string;
   /** 결과 등록 일시 (`YYYY-MM-DDTHH:mm`, 한국 시간) */
   registeredAt: string;
 }
