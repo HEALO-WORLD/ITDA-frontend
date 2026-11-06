@@ -1,12 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Response } from "@playwright/test";
+
+import { getSeoulNow } from "../../src/lib/date/seoulDate";
+
+import { loginGateway, resolveE2eGateway } from "./support/gateway";
 
 /**
  * 읽기 전용 E2E: 의뢰기관 로그인 → 슬롯 검색 화면 → 검색 조건 → 검색 결과 (DB를 바꾸는 요청 없음).
  *
- * 대상: 격리된 E2E 환경 (playwright.config.ts가 E2E_BASE_URL 컨테이너를 docker로 확인한다)
- * 전제 데이터 (백엔드 시드 그대로, 이 테스트는 만들지 않는다)
+ * 대상: 격리된 E2E 환경 (playwright.config.ts가 E2E_BASE_URL 컨테이너를, support/gateway가 E2E_GATEWAY_URL 컨테이너를 docker로 확인한다)
+ * 전제 데이터 (백엔드 시드, 이 테스트는 만들지 않는다)
  * - clinic_a(A의원) ↔ B영상의학과 협약 ACTIVE, clinic_d(D의원)는 협약 없음
- * - 검사 유형·장비·슬롯 0건 → 검색 결과는 빈 상태
+ * - 검사 항목·슬롯은 다른 E2E(db-write)가 만들 수 있다 (삭제 API 없음). 그래서 개수를 고정하지 않고
+ *   세부 검사 항목은 E2E Gateway 조회(GET) 결과와, 검색 결과는 화면이 받은 실제 검색 응답과 같은지 확인한다.
+ *   0건이면 빈 상태 안내를 그대로 검증한다
  * 보내는 요청: 로그인(POST /auth/login → 백엔드 로그인, DB 쓰기 없음)과 조회(GET)뿐이다.
  * 비밀번호는 E2E_TEST_PASSWORD로만 받는다 (코드에 저장하지 않음).
  */
@@ -49,13 +55,61 @@ async function openSlotSearch(page: Page) {
 const resultSection = (page: Page) => page.locator('section[aria-labelledby="slot-result-title"]');
 const optionTexts = (page: Page, selectId: string) => page.locator(`#${selectId} option`).allTextContents();
 
-/** [슬롯 검색]을 누르고 실제 Route Handler 응답(200)을 기다린다 */
-async function searchAndWait(page: Page) {
+type SearchedSlot = { startAt: string; organizationName: string; examType: string };
+
+/** [슬롯 검색]을 누르고 실제 Route Handler 응답(200)을 기다린다. 화면에 보일 슬롯(이미 시작한 슬롯 제외)을 돌려준다 */
+async function searchAndWait(page: Page): Promise<SearchedSlot[]> {
   const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/referring/slots/search" && res.request().method() === "GET");
   await page.getByRole("button", { name: "슬롯 검색", exact: true }).click();
-  const res = await response;
+  const res: Response = await response;
   expect(new URL(res.url()).origin, "검색 요청은 E2E 대상 프론트로만 간다").toBe(new URL(page.url()).origin);
   expect(res.status()).toBe(200);
+  const body = (await res.json()) as { ok: boolean; slots: SearchedSlot[] };
+  expect(body.ok).toBe(true);
+  const now = getSeoulNow().dateTime;
+  return body.slots.filter((slot) => slot.startAt > now);
+}
+
+/** 검색 결과 표시가 실제 검색 응답과 같은지: 0건이면 빈 상태 안내, 아니면 같은 건수의 행 */
+async function expectResultsMatch(page: Page, slots: SearchedSlot[]) {
+  const section = resultSection(page);
+  await expect(section.getByText(`총 ${slots.length}건의 검색 결과가 있습니다.`)).toBeVisible();
+  await expect(section.getByRole("alert")).toHaveCount(0);
+  if (slots.length === 0) {
+    await expect(section.getByText(EMPTY_RESULT)).toBeVisible();
+    await expect(section.getByRole("row")).toHaveCount(0);
+  } else {
+    await expect(section.getByText(EMPTY_RESULT)).toHaveCount(0);
+    await expect(section.locator("tbody tr")).toHaveCount(slots.length);
+  }
+}
+
+/**
+ * clinic_a 화면의 세부 검사 항목 기대값 (E2E Gateway 조회만): ACTIVE 협약 검사기관 → 운영 중(OPERATIONAL) 장비 →
+ * 장비 지원 검사 유형(장비 종류와 같은 것) → 검사 유형 ID로 중복 제거. 화면 서버(slots/server.ts loadPartnerExamTypes)와 같은 기준
+ */
+async function expectedExamItemIds(): Promise<string[]> {
+  const gateway = resolveE2eGateway();
+  const session = await loginGateway(gateway, REQUESTER_WITH_PARTNER.loginId, password);
+  type Page_<T> = { contents: T[]; totalPages: number };
+  const all = async <T>(path: string) => {
+    const items: T[] = [];
+    for (let page = 0; ; page++) {
+      const data = await session.get<Page_<T>>(path, { page, size: 100 });
+      items.push(...data.contents);
+      if (page + 1 >= data.totalPages) return items;
+    }
+  };
+  const partners = await session.get<{ partnerInstitutionId: string; partnerInstitutionType: string; status: string }[]>("/api/v1/partnerships/me", { status: "ACTIVE" });
+  const ids = new Set<string>();
+  for (const partner of partners.filter((item) => item.status === "ACTIVE" && item.partnerInstitutionType === "EXAM")) {
+    const equipments = await all<{ id: string; modality: string; status: string }>(`/api/v1/institutions/${partner.partnerInstitutionId}/equipments`);
+    for (const equipment of equipments.filter((item) => item.status === "OPERATIONAL")) {
+      const links = await all<{ examTypeId: string; modality: string }>(`/api/v1/equipments/${equipment.id}/exam-types`);
+      for (const link of links.filter((item) => item.modality === equipment.modality)) ids.add(link.examTypeId.toLowerCase());
+    }
+  }
+  return [...ids].sort();
 }
 
 test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
@@ -70,10 +124,21 @@ test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
       expect(await optionTexts(page, "slot-exam-type")).toEqual(["전체", "CT", "MRI"]);
     });
 
-    await test.step("검사 유형이 없으면 세부 검사 항목은 선택할 수 없다는 안내 (비활성)", async () => {
+    await test.step("세부 검사 항목 = E2E Gateway가 돌려준 협약 기관 지원 검사 유형 (없으면 선택할 수 없다는 안내·비활성)", async () => {
       const examItem = page.locator("#slot-exam-item");
-      await expect(examItem).toBeDisabled();
-      expect(await optionTexts(page, "slot-exam-item")).toEqual([NO_EXAM_ITEMS]);
+      const expected = await expectedExamItemIds();
+      if (expected.length === 0) {
+        await expect(examItem).toBeDisabled();
+        expect(await optionTexts(page, "slot-exam-item")).toEqual([NO_EXAM_ITEMS]);
+      } else {
+        await expect(examItem).toBeEnabled();
+        const options = examItem.locator("option");
+        await expect(options.first()).toHaveText("전체 검사 항목");
+        await expect(options.first()).toHaveAttribute("value", "");
+        const values = (await options.evaluateAll((nodes) => nodes.map((node) => (node as HTMLOptionElement).value))).slice(1);
+        expect(values.map((value) => value.toLowerCase()).sort()).toEqual(expected);
+        expect(await optionTexts(page, "slot-exam-item")).not.toContain(NO_EXAM_ITEMS);
+      }
     });
 
     await test.step("검색 전 안내", async () => {
@@ -81,20 +146,21 @@ test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
       await expect(resultSection(page)).toContainText("날짜를 선택하지 않으면 오늘부터 31일 동안의 슬롯을 검색합니다.");
     });
 
-    await test.step("조건 없이 검색 → 0건 + 빈 결과 안내", async () => {
-      await searchAndWait(page);
-      await expect(resultSection(page).getByText("총 0건의 검색 결과가 있습니다.")).toBeVisible();
-      await expect(resultSection(page).getByText(EMPTY_RESULT)).toBeVisible();
-      await expect(resultSection(page).getByRole("row")).toHaveCount(0);
+    await test.step("조건 없이 검색 → 실제 검색 응답과 같은 건수 (0건이면 빈 결과 안내)", async () => {
+      const slots = await searchAndWait(page);
+      await expectResultsMatch(page, slots);
     });
 
-    await test.step("검사기관·검사 유형을 바꿔 다시 검색 → 같은 빈 결과 안내 (오류 아님)", async () => {
+    await test.step("검사기관·검사 유형을 바꿔 다시 검색 → 응답과 같은 결과, 모두 B영상의학과·CT (0건이면 빈 결과 안내, 오류 아님)", async () => {
       await page.locator("#slot-organization").selectOption({ label: PARTNER_EXAMINER });
       await page.locator("#slot-exam-type").selectOption("CT");
-      await searchAndWait(page);
-      await expect(resultSection(page).getByText("총 0건의 검색 결과가 있습니다.")).toBeVisible();
-      await expect(resultSection(page).getByText(EMPTY_RESULT)).toBeVisible();
-      await expect(resultSection(page).getByRole("alert")).toHaveCount(0);
+      const slots = await searchAndWait(page);
+      expect(slots.every((slot) => slot.organizationName === PARTNER_EXAMINER && slot.examType === "CT")).toBe(true);
+      await expectResultsMatch(page, slots);
+      for (const row of await resultSection(page).locator("tbody tr").all()) {
+        await expect(row).toContainText(PARTNER_EXAMINER);
+        await expect(row).toContainText("CT");
+      }
     });
   });
 
