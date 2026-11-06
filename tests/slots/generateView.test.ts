@@ -85,6 +85,35 @@ describe("ApiSlotGenerationDialog 첫 화면", () => {
     assert.match(modal, /overflow-y-auto/);
   });
 
+  // 장비 등록 모달 레이아웃 (백업 커밋 4b4d054의 2단 디자인): CreateEquipmentDialog는 내보내지 않고 단계 상태로 열려 JSX를 확인한다
+  it("장비 등록 모달: 860px 이상 2단(기본 정보 5 : 지원 검사 유형 7), 좁으면 1단, 버튼 줄은 footer에 고정하고 form 속성으로 제출", () => {
+    const workspace = readFileSync(new URL("../../src/features/equipment/components/EquipmentApiWorkspace.tsx", import.meta.url), "utf8");
+    const start = workspace.indexOf("function CreateEquipmentDialog(");
+    assert.ok(start > 0);
+    const dialog = workspace.slice(start, workspace.indexOf("\nfunction ", start + 1));
+    // 2단 그리드: 기본은 1단(grid-cols-1), 860px 이상에서 5:7
+    assert.match(dialog, /className="grid grid-cols-1 [^"]*min-\[860px\]:grid-cols-\[minmax\(0,5fr\)_minmax\(0,7fr\)\]"/);
+    // 왼쪽 열: 장비명·검사 유형·기본 소요 시간 → 오른쪽 열: 지원 검사 유형 선택
+    const order = ['id="api-equipment-name"', 'id="api-equipment-type"', 'id="api-equipment-minutes"', "<SupportedExamTypesPicker"].map((key) => dialog.indexOf(key));
+    assert.ok(order.every((position, index) => position > 0 && (index === 0 || position > order[index - 1])), JSON.stringify(order));
+    // 하단 버튼(이전·취소/닫기·다음/장비 등록)은 Modal footer에 있고, 폼 밖이라 form 속성으로 같은 폼을 제출한다 (Enter 제출·검증 흐름 유지)
+    const footer = dialog.slice(dialog.indexOf("footer={"), dialog.indexOf("<form "));
+    for (const label of ["이전", "취소", "다음", "장비 등록"]) assert.ok(footer.includes(label), label);
+    assert.equal((footer.match(/type="submit" form=\{formId\}/g) ?? []).length, 2);
+    assert.match(dialog, /<form id=\{formId\} onSubmit=\{submit\} noValidate/);
+    assert.equal(dialog.slice(dialog.indexOf("<form ")).includes('type="submit"'), false, "폼 본문 안에 제출 버튼을 두지 않는다");
+  });
+
+  it("Modal footer는 스크롤 본문 밖에 그린다 (본문만 세로 스크롤)", () => {
+    const props: Parameters<typeof Modal>[0] = { open: true, size: "form2", title: "장비 등록", onClose: () => {}, footer: "하단 버튼", children: "본문" };
+    const modal = renderToStaticMarkup(createElement(Modal, props));
+    const body = modal.indexOf("overflow-y-auto");
+    const footer = modal.indexOf("하단 버튼");
+    assert.ok(body > 0 && footer > modal.indexOf("본문", body), "footer는 본문 다음");
+    // 본문 div가 닫힌 뒤 footer가 나온다 (본문 스크롤 영역 안에 있지 않다)
+    assert.match(modal.slice(body), /본문<\/div><div class="[^"]*shrink-0[^"]*">하단 버튼/);
+  });
+
   it("서버에 없는 기능(사용자 지정 시간·휴게 시간·생성 예정 슬롯 수)을 입력·표시하지 않는다", () => {
     for (const absent of ["장비 운영 시간 전체에 생성", "휴게 시작", "생성 예정", "겹쳐서 제외"]) {
       assert.equal(html.includes(absent), false, absent);
