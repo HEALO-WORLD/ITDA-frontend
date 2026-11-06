@@ -14,7 +14,7 @@ npm ci
 npm run dev
 ```
 
-브라우저에서 `http://localhost:3000`으로 접속합니다.
+브라우저에서 `http://localhost:3001`으로 접속합니다.
 
 | 명령 | 설명 |
 | --- | --- |
@@ -62,13 +62,13 @@ npm run dev
 docker compose up --build -d
 ```
 
-`http://localhost:3000`으로 접속합니다. 상태는 아래 명령으로 확인합니다.
+`http://localhost:3001`으로 접속합니다. 상태는 아래 명령으로 확인합니다.
 
 ```bash
 docker compose ps
 ```
 
-3000 포트를 `npm run dev`가 쓰고 있다면 다른 포트로 실행합니다 (PowerShell 기준).
+3001 포트를 `npm run dev`가 쓰고 있다면 다른 포트로 실행합니다 (PowerShell 기준).
 
 ```powershell
 $env:FRONTEND_PORT = "3300"; docker compose up --build -d
@@ -106,14 +106,14 @@ docker compose down
 | 파일 | 설명 |
 | --- | --- |
 | `Dockerfile` | 의존성 설치 → 빌드 → 실행 3단계. Next.js standalone 출력, non-root 사용자로 실행 |
-| `docker-compose.yml` | 프론트 전용 Compose 프로젝트(`itda-frontend`). 포트 `127.0.0.1:3000`, 백엔드 네트워크 연결 |
+| `docker-compose.yml` | 프론트 전용 Compose 프로젝트(`itda-frontend`). 포트 `127.0.0.1:3001`, 백엔드 네트워크 연결 |
 | `.dockerignore` | `node_modules`·`.next`·`.env`·`tests` 등을 빌드에서 제외 |
 
 Docker 실행에만 쓰는 추가 변수입니다.
 
 | 변수 | 기본값 | 설명 |
 | --- | --- | --- |
-| `FRONTEND_PORT` | `3000` | 브라우저에서 접속할 호스트 포트 |
+| `FRONTEND_PORT` | `3001` | 브라우저에서 접속할 호스트 포트 |
 | `DOCKER_API_BASE_URL` | `http://gateway-service:8080` | 컨테이너 안에서 쓸 Gateway 주소 |
 | `ITDA_BACKEND_NETWORK` | `itda_default` | 연결할 백엔드 Docker 네트워크 |
 
