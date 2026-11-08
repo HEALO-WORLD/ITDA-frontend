@@ -1,4 +1,4 @@
-import { AlertTriangle, Info } from "lucide-react";
+import { AlertTriangle, ArrowRight, Info } from "lucide-react";
 import { useState } from "react";
 
 import { getSlotById } from "@/features/slots/api";
@@ -11,6 +11,7 @@ import { validateSelectedSlot } from "../validation";
 
 import DetailList from "./DetailList";
 import ReferralStatusBadge from "./ReferralStatusBadge";
+import ReservationCard from "./ReservationCompareCard";
 
 interface RescheduleSlotConfirmProps {
   /** 재조정 대상 기존 예약 */
@@ -20,6 +21,8 @@ interface RescheduleSlotConfirmProps {
   /** 대체 후보에서 제외한 장애 장비 ID */
   excludedEquipmentIds: readonly string[];
   onCancel: () => void;
+  /** PC 재조정 모달 3단계: 기존 예약 → 변경할 예약 비교 카드로 보인다 (검증·Mock 안내·버튼은 같다) */
+  inline?: boolean;
 }
 
 const MOCK_NOTICE =
@@ -37,6 +40,7 @@ export default function RescheduleSlotConfirm({
   slot,
   excludedEquipmentIds,
   onCancel,
+  inline = false,
 }: RescheduleSlotConfirmProps) {
   const [error, setError] = useState<string | null>(null);
   const [isChecking, setIsChecking] = useState(false);
@@ -60,6 +64,39 @@ export default function RescheduleSlotConfirm({
 
   return (
     <div>
+      {inline ? (
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3">
+          <ReservationCard
+            label="기존 예약"
+            tone="neutral"
+            dateTime={formatDateTimeWithWeekday(referral.scheduledAt)}
+            institution={referral.organizationName}
+            examItem={referral.examType}
+            equipment={referral.equipmentName}
+          />
+          <span aria-hidden="true" className="flex items-center">
+            <span className="flex size-9 items-center justify-center rounded-full bg-brand-navy text-white">
+              <ArrowRight className="size-4" />
+            </span>
+          </span>
+          <ReservationCard
+            label="변경할 예약"
+            tone="highlight"
+            dateTime={formatDateTimeWithWeekday(slot.startAt)}
+            institution={slot.organizationName}
+            examItem={slot.examType}
+            equipment={slot.equipmentName}
+            sameInstitution={referral.organizationName === slot.organizationName}
+            sameExamItem={referral.examType === slot.examType}
+            changes={{
+              dateTime: referral.scheduledAt.slice(0, 16) !== slot.startAt,
+              institution: referral.organizationName !== slot.organizationName,
+              equipment: referral.equipmentName !== slot.equipmentName,
+            }}
+          />
+        </div>
+      ) : (
+        <>
       <h3 className="mb-2 text-[15px] font-bold text-gray-800">기존 예약</h3>
       <section aria-label="기존 예약" className="rounded-lg border border-line px-4 py-4">
         <DetailList
@@ -85,6 +122,8 @@ export default function RescheduleSlotConfirm({
           ]}
         />
       </section>
+        </>
+      )}
       <p className="mt-2 text-sm text-gray-500">
         예약 변경이 완료되기 전까지 기존 예약은 삭제되거나 변경되지 않습니다.
       </p>
