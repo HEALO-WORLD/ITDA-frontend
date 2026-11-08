@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { applySlotSearch, chooseCriteriaChip, openSlotSearchAndWaitAutoSearch, slotCards } from "./support/slotResults";
+
 // A의원(clinic_a)의 시연용 협약은 건드리지 않는다.
 const REQUESTER = "clinic_d"; // D의원
 const EXAMINER = "imaging_b"; // B영상의학과
@@ -77,19 +79,21 @@ test("D의원 ↔ B영상의학과: 협약 승인 시 슬롯 표시, 종료 시 
     });
 
     await test.step("ACTIVE 협약일 때 B영상의학과 슬롯 표시 확인", async () => {
-      await requesterPage.goto("/referring/slots");
-      const institutionSelect = requesterPage.locator("#slot-organization");
-      await expect(institutionSelect.getByRole("option", { name: EXAMINER_NAME })).toHaveCount(1);
-      await institutionSelect.selectOption({ label: EXAMINER_NAME });
-      await requesterPage.getByRole("button", { name: "슬롯 검색", exact: true }).click();
+      // PC: 접속하면 기본 조건으로 자동 검색 → 협력 검사기관 칩으로 B영상의학과를 고르고 [검색 적용]
+      await openSlotSearchAndWaitAutoSearch(requesterPage);
+      await expect(requesterPage.locator("#slot-organization option", { hasText: EXAMINER_NAME })).toHaveCount(1);
+      await chooseCriteriaChip(requesterPage, "slot-chip-organization", "협력 검사기관 선택", EXAMINER_NAME);
+      await applySlotSearch(requesterPage);
 
       const resultSection = requesterPage.locator('section[aria-labelledby="slot-result-title"]');
       await expect(resultSection.getByText(/총 \d+건의 검색 결과가 있습니다\./)).toBeVisible({ timeout: 30_000 });
-      const slotRows = resultSection.getByRole("row").filter({ hasText: EXAMINER_NAME });
-      if ((await slotRows.count()) === 0) {
+      // PC(1280px) 결과: 새 검색은 예약 가능한 첫 날짜를 고르므로, 슬롯이 있으면 그날의 B영상의학과 카드가 보인다
+      const slotCardsOfExaminer = slotCards(resultSection).filter({ hasText: EXAMINER_NAME });
+      if ((await slotCardsOfExaminer.count()) === 0) {
         throw new Error("사전 조건 실패: B영상의학과에 향후 31일 내 AVAILABLE 슬롯이 없습니다. 슬롯을 먼저 준비해 주세요.");
       }
-      await expect(slotRows.first()).toBeVisible();
+      await expect(slotCardsOfExaminer.first()).toBeVisible();
+      await expect(slotCardsOfExaminer.first().locator("button[data-slot-id]").first()).toBeEnabled();
     });
 
     await test.step("D의원에서 협약 종료 → TERMINATED", async () => {
@@ -98,15 +102,15 @@ test("D의원 ↔ B영상의학과: 협약 승인 시 슬롯 표시, 종료 시 
     });
 
     await test.step("🚨 종료 후 B영상의학과 슬롯 미표시 확인", async () => {
-      await requesterPage.goto("/referring/slots");
-      const institutionSelect = requesterPage.locator("#slot-organization");
-      await expect(institutionSelect.getByRole("option", { name: EXAMINER_NAME })).toHaveCount(0);
-
-      await requesterPage.getByRole("button", { name: "슬롯 검색", exact: true }).click();
+      // 접속 시 기본 조건(전체) 자동 검색이 끝날 때까지 기다린다
+      await openSlotSearchAndWaitAutoSearch(requesterPage);
+      await expect(requesterPage.locator("#slot-organization option", { hasText: EXAMINER_NAME })).toHaveCount(0);
       const resultSection = requesterPage.locator('section[aria-labelledby="slot-result-title"]');
       // 검색 완료를 기다린 뒤 확인해야 빈 초기 화면을 성공으로 오인하지 않는다.
       await expect(resultSection.getByText(/총 \d+건의 검색 결과가 있습니다\./)).toBeVisible({ timeout: 30_000 });
-      await expect(resultSection.getByRole("row").filter({ hasText: EXAMINER_NAME })).toHaveCount(0);
+      // 달력의 어느 날짜에도 B영상의학과 슬롯이 없어야 한다: 검색 결과(전체 기간)에 B영상의학과가 없는지 확인
+      await expect(slotCards(resultSection).filter({ hasText: EXAMINER_NAME })).toHaveCount(0);
+      await expect(resultSection.getByText(EXAMINER_NAME)).toHaveCount(0);
     });
   } finally {
     // 슬롯이 없어 테스트가 실패하더라도 ACTIVE 협약을 남기지 않는다.
