@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Response } from "@playwright/test";
 
 import { loginGateway, resolveE2eGateway, type GatewaySession } from "./support/gateway";
 import {
@@ -12,6 +12,7 @@ import {
   type ConfirmedReferral,
 } from "./support/referralFlow";
 import { prepareAlternativeSlot, prepareReservationData, type AlternativeSlotData, type ReservationTestData } from "./support/reservationData";
+import { applySlotSearch, chooseCriteriaChip, selectResultDate, visibleSlotIds } from "./support/slotResults";
 
 /**
  * DB 변경 E2E: 예약 확정 → 장비 A 장애 → 재조정 필요 → 장비 B 대체 슬롯 선택 → 재예약 확정.
@@ -108,49 +109,68 @@ test.describe("예약 확정 → 장비 장애 → 대체 슬롯 재예약 확�
         console.log(`[e2e] 장비 B "${alternative.equipmentName}", 대체 슬롯 ${data.slotDate} 11:00 (${alternative.slotId})`);
       });
 
-      const searchDialog = requesterPage.getByRole("dialog", { name: "대체 검사 슬롯 검색" });
-      await test.step("② clinic_a 재조정·알림: 이번 의뢰(고유 검사 항목) 카드 → [새 슬롯 검색] → 검사 유형·세부 항목 고정", async () => {
+      // PC(1280px): 한 모달 안에서 3단계 (① 기존 예약 확인 · ② 대체 슬롯 선택 · ③ 변경 내용 확인·요청)
+      const dialog = requesterPage.getByRole("dialog", { name: "예약 재조정" });
+      const isSearch = (res: Response) => new URL(res.url()).pathname === "/referring/slots/search" && res.request().method() === "GET";
+      await test.step("② clinic_a 재조정·알림: 이번 의뢰(고유 검사 항목) 카드 → [새 슬롯 검색] → 기존 예약 확인 + 기존 조건으로 자동 검색 (검사 유형·세부 항목 고정)", async () => {
         const card = await findRescheduleCard(requesterPage, data.examTypeName);
         expect(card, "재조정 필요 목록에서 이번 의뢰를 찾지 못했습니다").not.toBeNull();
         await expect(card!).toHaveCount(1);
         await expect(card!).toContainText(PARTNER_EXAMINER);
         await expect(card!).toContainText("재조정 필요");
+        // 대상 의뢰 조회·검증이 끝나면 기존 예약 조건으로 한 번 자동 검색한다
+        const autoSearch = requesterPage.waitForResponse(isSearch, { timeout: 30_000 });
         await card!.getByRole("button", { name: /새 슬롯 검색$/ }).click();
 
-        await expect(searchDialog).toBeVisible();
-        const existing = searchDialog.getByRole("region", { name: "기존 예약" });
-        await expect(existing).toContainText(PARTNER_EXAMINER);
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByRole("list", { name: "예약 재조정 단계" }).locator('[aria-current="step"]')).toContainText("대체 슬롯 선택");
+        const existing = dialog.getByRole("region", { name: "기존 예약" });
+        await expect(existing).toContainText(PARTNER_EXAMINER, { timeout: 30_000 });
         await expect(existing).toContainText(data.examTypeName);
-        await expect(searchDialog.locator("#slot-exam-type")).toBeDisabled({ timeout: 30_000 });
-        await expect(searchDialog.locator("#slot-exam-type")).toHaveValue("CT");
-        const examItem = searchDialog.locator("#slot-exam-item");
-        await expect(examItem).toBeDisabled();
-        await expect(examItem).toHaveValue(data.examTypeId);
-        await expect(examItem.locator("option:checked")).toHaveText(data.examTypeName);
+        await expect(existing).toContainText(data.equipmentName);
+        const auto = await autoSearch;
+        expect(auto.status()).toBe(200);
+        expect(new URL(auto.url()).searchParams.get("examTypeId")?.toLowerCase(), "자동 검색도 기존 의뢰의 검사 유형으로 고정").toBe(data.examTypeId.toLowerCase());
+        // 고정 조건 칩 (바꿀 수 없음) — 같은 입력 상태의 숨은 폼 값도 확인
+        await expect(dialog.locator("#slot-chip-exam-type")).toHaveAttribute("aria-disabled", "true");
+        await expect(dialog.locator("#slot-chip-exam-type")).toContainText("CT");
+        await expect(dialog.locator("#slot-chip-exam-item")).toHaveAttribute("aria-disabled", "true");
+        await expect(dialog.locator("#slot-chip-exam-item")).toContainText(data.examTypeName);
+        await expect(dialog.locator("#slot-exam-type")).toHaveValue("CT");
+        await expect(dialog.locator("#slot-exam-item")).toHaveValue(data.examTypeId);
+        // 슬롯을 고르기 전에는 다음 단계로 갈 수 없다
+        await expect(dialog.getByRole("button", { name: "다음: 변경 내용 확인" })).toBeDisabled();
       });
 
-      const results = searchDialog.locator('section[aria-labelledby="slot-result-title"]');
-      await test.step("② 대체 슬롯 검색: B영상의학과 → 장비 B 슬롯 1건 (장비 A 슬롯은 예약됨이라 나오지 않음)", async () => {
-        await searchDialog.locator("#slot-organization").selectOption({ label: PARTNER_EXAMINER });
-        const response = requesterPage.waitForResponse((res) => new URL(res.url()).pathname === "/referring/slots/search");
-        await searchDialog.getByRole("button", { name: "슬롯 검색", exact: true }).click();
-        const res = await response;
-        expect(res.status()).toBe(200);
+      const results = dialog.locator('section[aria-labelledby="slot-result-title"]');
+      await test.step("② 대체 슬롯 검색: 협력 검사기관 칩 → B영상의학과 → [검색 적용] → 장비 B 슬롯 1건 (장비 A 슬롯은 예약됨이라 나오지 않음)", async () => {
+        await chooseCriteriaChip(requesterPage, "slot-chip-organization", "협력 검사기관 선택", PARTNER_EXAMINER);
+        const res = await applySlotSearch(requesterPage);
         expect(new URL(res.url()).searchParams.get("examTypeId")?.toLowerCase(), "검색은 기존 의뢰의 검사 유형으로 고정").toBe(data.examTypeId.toLowerCase());
         const body = (await res.json()) as { slots: { id: string; equipmentId: string }[] };
         expect(body.slots.map((slot) => slot.id.toLowerCase())).toEqual([alternative.slotId.toLowerCase()]);
         await expect(results.getByText("총 1건의 검색 결과가 있습니다.")).toBeVisible();
       });
 
-      const confirmDialog = requesterPage.getByRole("dialog", { name: /^예약 (변경 확인|재조정 현황|재조정 완료)$/ });
-      await test.step("② [대체 슬롯 선택] → 예약 변경 확인: 기존 예약(장비 A)과 변경할 예약(장비 B) 표시, 사전 확인 통과", async () => {
-        const row = results.locator("tbody tr").filter({ hasText: data.examTypeName });
-        await expect(row).toHaveCount(1);
-        await row.getByRole("button", { name: "대체 슬롯 선택" }).click();
-        await expect(confirmDialog).toBeVisible();
-        await expect(confirmDialog).toHaveAccessibleName("예약 변경 확인");
-        const before = confirmDialog.getByRole("region", { name: "기존 예약" });
-        const next = confirmDialog.getByRole("region", { name: "변경할 예약" });
+      await test.step("② 달력에서 슬롯 날짜 → 장비 B 11:00 시간 선택 (원본 slotId) → 왼쪽 '선택한 대체 슬롯' 표시 → [다음]", async () => {
+        await selectResultDate(results, data.slotDate);
+        expect((await visibleSlotIds(results)).map((id) => id.toLowerCase())).toEqual([alternative.slotId.toLowerCase()]);
+        const time = results.locator(`button[data-slot-id="${alternative.slotId}"]`);
+        await expect(time).toHaveText("11:00");
+        await time.click();
+        await expect(time).toHaveAttribute("aria-pressed", "true");
+        const selected = dialog.getByRole("region", { name: "선택한 대체 슬롯" });
+        await expect(selected).toContainText(alternative.equipmentName);
+        await expect(selected).toContainText("11:00");
+        await dialog.getByRole("button", { name: "다음: 변경 내용 확인" }).click();
+      });
+
+      const confirmTitle = dialog.locator("#reschedule-confirm-title");
+      await test.step("③ 변경 내용 확인 (같은 모달): 기존 예약(장비 A) → 변경할 예약(장비 B), 사전 확인 통과, 요청 전에는 슬롯 다시 선택 가능", async () => {
+        await expect(confirmTitle).toHaveText("예약 변경 확인");
+        await expect(dialog.getByRole("list", { name: "예약 재조정 단계" }).locator('[aria-current="step"]')).toContainText("변경 내용 확인");
+        const before = dialog.getByRole("region", { name: "기존 예약" });
+        const next = dialog.getByRole("region", { name: "변경할 예약" });
         await expect(before).toContainText(PARTNER_EXAMINER);
         await expect(before).toContainText(data.examTypeName);
         await expect(before).toContainText(data.equipmentName);
@@ -159,41 +179,45 @@ test.describe("예약 확정 → 장비 장애 → 대체 슬롯 재예약 확�
         await expect(next).toContainText(data.examTypeName);
         await expect(next).toContainText(alternative.equipmentName);
         await expect(next).toContainText("11:00");
-        await expect(confirmDialog.getByRole("status").filter({ hasText: "재조정 요청 전 확인을 통과했습니다." })).toBeVisible({ timeout: 20_000 });
+        await expect(dialog.getByRole("status").filter({ hasText: "재조정 요청 전 확인을 통과했습니다." })).toBeVisible({ timeout: 20_000 });
+        await expect(dialog.getByRole("button", { name: "슬롯 다시 선택" })).toBeVisible();
       });
 
-      await test.step("③ [이 슬롯으로 재조정 요청] (실제 Server Function·POST 1회) → 접수 (아직 확정 아님)", async () => {
-        const request = confirmDialog.getByRole("button", { name: "이 슬롯으로 재조정 요청" });
+      await test.step("③ [이 슬롯으로 재조정 요청] (실제 Server Function·POST 1회) → 접수 (아직 확정 아님, 슬롯 다시 선택 불가)", async () => {
+        const request = dialog.getByRole("button", { name: "이 슬롯으로 재조정 요청" });
         await expect(request).toBeEnabled();
         await request.click();
-        await expect(confirmDialog).toHaveAccessibleName(/^예약 재조정 (현황|완료)$/, { timeout: 20_000 });
+        await expect(confirmTitle).toHaveText(/^예약 재조정 (현황|완료)$/, { timeout: 20_000 });
         // 접수 직후: 의뢰는 새 예약을 가리키고(덮어쓰기 아님) 기존 예약은 BLOCKED 그대로
         const referral = await getReferral(original.referralId);
         expect(referral.currentReservationId).toBeTruthy();
         expect(referral.currentReservationId!.toLowerCase()).not.toBe(original.reservationId.toLowerCase());
         expect(["PENDING", "CONFIRMED"]).toContain(referral.referralStatus);
         expect((await getReservation(original.reservationId)).reservationStatus).toBe("BLOCKED");
-        // 접수 뒤에는 요청 버튼이 사라진다 (같은 요청을 다시 보낼 수 없다). 중복 POST 여부는 확정 뒤 이 의뢰의 예약 수(기존 1 + 새 1)로 확인한다
-        await expect(confirmDialog.getByRole("button", { name: "이 슬롯으로 재조정 요청" })).toHaveCount(0);
+        // 접수 뒤에는 요청 버튼·슬롯 다시 선택이 사라진다 (같은 요청을 다시 보낼 수 없다). 중복 POST 여부는 확정 뒤 이 의뢰의 예약 수(기존 1 + 새 1)로 확인한다
+        await expect(dialog.getByRole("button", { name: "이 슬롯으로 재조정 요청" })).toHaveCount(0);
+        await expect(dialog.getByRole("button", { name: "슬롯 다시 선택" })).toHaveCount(0);
+        await expect(dialog.getByRole("list", { name: "재조정 요청 상태" })).toContainText("접수됨");
       });
 
       await test.step("④ 재예약 확정까지 대기 (조건 기반: 화면 [상태 새로고침] = 조회만) → 예약 재조정 완료", async () => {
         await expect
           .poll(
             async () => {
-              const title = (await confirmDialog.locator("h2").first().innerText()).trim();
+              const title = (await confirmTitle.innerText()).trim();
               if (title === "예약 재조정 완료") return "완료";
               // 아직이면 [상태 새로고침](조회만)으로 다시 확인한다. 실패·경고 안내는 그대로 반환값에 담아 원인을 보이게 한다
-              const refresh = confirmDialog.getByRole("button", { name: "상태 새로고침" });
+              const refresh = dialog.getByRole("button", { name: "상태 새로고침" });
               if ((await refresh.count()) > 0 && (await refresh.isEnabled())) await refresh.click();
-              const alert = confirmDialog.getByRole("alert");
+              const alert = dialog.getByRole("alert");
               return (await alert.count()) > 0 ? `${title} / ${(await alert.first().innerText()).trim()}` : title;
             },
             { timeout: ASYNC_TIMEOUT_MS, intervals: POLL_INTERVALS, message: "예약 재조정 완료 표시를 기다린다" },
           )
           .toBe("완료");
-        await expect(confirmDialog.getByRole("status").filter({ hasText: "재예약이 확정되었습니다." })).toBeVisible();
-        await expect(confirmDialog.getByRole("region", { name: "확정된 예약" })).toContainText(alternative.equipmentName);
+        await expect(dialog.getByRole("status").filter({ hasText: "재예약이 확정되었습니다." })).toBeVisible();
+        await expect(dialog.getByRole("region", { name: "확정된 예약" })).toContainText(alternative.equipmentName);
+        await expect(dialog.getByRole("list", { name: "재조정 요청 상태" })).toContainText("확정됨");
       });
 
       await test.step("④ 조회 API: 의뢰 CONFIRMED · currentReservationId = 새 예약 · 새 예약 CONFIRMED·장비 B 슬롯 · 슬롯 BOOKED · 기존 예약 BLOCKED", async () => {
