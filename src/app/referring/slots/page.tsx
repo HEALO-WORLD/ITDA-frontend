@@ -23,8 +23,9 @@ import { getScreenDataSource, isApiFeature } from "@/lib/api/config";
  * 쿼리는 요청 시점 값이므로 검색 영역을 Suspense 안에서 렌더링한다.
  */
 export default function SlotSearchPage({ searchParams }: PageProps<"/referring/slots">) {
+  // itda-brand: ITDA 브랜드 디자인 시범 범위 (globals.css). 이 화면 안에서만 네이비·민트 색을 쓴다
   return (
-    <>
+    <div className="itda-brand">
       <PageHeader
         title="검사 슬롯 검색"
         description="협력 검사기관의 CT·MRI 검사 가능한 시간을 조회합니다."
@@ -33,7 +34,7 @@ export default function SlotSearchPage({ searchParams }: PageProps<"/referring/s
         fallback={
           <p
             role="status"
-            className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500"
+            className="rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-gray-500 shadow-card"
           >
             검사 슬롯 검색 화면을 불러오고 있습니다.
           </p>
@@ -41,7 +42,7 @@ export default function SlotSearchPage({ searchParams }: PageProps<"/referring/s
       >
         <SlotSearchSection searchParams={searchParams} />
       </Suspense>
-    </>
+    </div>
   );
 }
 
@@ -102,7 +103,7 @@ function ApiLoadFailure({ reason, message }: { reason: string; message: string }
   return (
     <div
       role="alert"
-      className="flex flex-col items-center gap-3 rounded-xl border border-line bg-white px-6 py-16 text-center text-[15px] text-red-600"
+      className="flex flex-col items-center gap-3 rounded-xl border border-red-200 bg-white px-6 py-16 text-center text-[15px] text-red-600 shadow-card"
     >
       <p>{isSignedOut ? "로그인 정보가 만료되었습니다. 다시 로그인해 주세요." : `협력 검사기관 정보를 불러오지 못했습니다. ${message}`}</p>
       {isSignedOut && (
