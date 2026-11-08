@@ -78,3 +78,35 @@ export async function prepareReservationData(
     patientName: `E2E-${runId}`,
   };
 }
+
+export interface AlternativeSlotData {
+  equipmentId: string;
+  equipmentName: string;
+  slotId: string;
+  slotStartsAt: string;
+}
+
+/**
+ * 재예약용 대체 슬롯 준비: 같은 검사기관(B)의 다른 정상 장비 B + 기존 의뢰와 같은 검사 유형 + 운영시간 11:00~11:30 + 같은 날 슬롯 1개.
+ * 장애는 장비 A에만 등록되므로 장비 B 슬롯은 영향을 받지 않는다 (시간도 08:00~10:00 장애 구간 밖).
+ * 기존 예약 확정·장애 처리 뒤에 부른다 (그 전에 만들면 예약 E2E 흐름의 '검색 결과 1건'이 깨진다).
+ */
+export async function prepareAlternativeSlot({ examiner }: { examiner: GatewaySession }, data: ReservationTestData): Promise<AlternativeSlotData> {
+  if (examiner.role !== "EXAMINER") throw new Error(`장비·슬롯은 검사기관 계정으로 만듭니다 (현재 ${examiner.loginId}: ${examiner.role})`);
+  const equipmentName = `E2E-${data.runId} CT-B`;
+  const equipment = await examiner.send<{ id: string; status: string }>("POST", `/api/v1/institutions/${examiner.institutionId}/equipments`, { name: equipmentName, modality: "CT" });
+  if (equipment.status !== "OPERATIONAL") throw new Error(`대체 장비 상태가 OPERATIONAL이 아닙니다: ${equipment.status}`);
+  await examiner.send("POST", `/api/v1/equipments/${equipment.id}/exam-types`, { examTypeId: data.examTypeId, durationMinutes: 30 });
+  await examiner.send("PUT", `/api/v1/equipments/${equipment.id}/operating-hours`, {
+    operatingHours: [1, 2, 3, 4, 5, 6, 7].map((week) => ({ week, startTime: "11:00", endTime: "11:30" })),
+  });
+  const slots = await examiner.send<{ id: string; status: string; startsAt: string }[]>("POST", "/api/v1/slots/generate", {
+    equipmentId: equipment.id,
+    examTypeId: data.examTypeId,
+    date: data.slotDate,
+  });
+  if (slots.length !== 1 || slots[0].status !== "AVAILABLE") {
+    throw new Error(`대체 슬롯이 1개 AVAILABLE로 만들어지지 않았습니다: ${slots.map((slot) => slot.status).join(",") || "(없음)"}`);
+  }
+  return { equipmentId: equipment.id, equipmentName, slotId: slots[0].id, slotStartsAt: slots[0].startsAt };
+}
