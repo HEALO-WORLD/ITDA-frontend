@@ -39,6 +39,14 @@
 
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.04);
 
+  /* ITDA 브랜드 (로고 기준). 지금은 .itda-brand 범위(시범: 의뢰기관 슬롯 검색)에서만 쓴다 */
+  --color-brand-navy: #0b2545;
+  --color-brand-navy-hover: #163a63;
+  --color-brand-mint: #5eead4;
+  --color-brand-mint-soft: #ecfdf9;
+  --color-brand-mint-strong: #0f766e;
+  --color-brand-canvas: #f6f8fb;
+
   --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
 }
 
@@ -48,6 +56,26 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/*
+ * ITDA 브랜드 범위 (시범 적용: /referring/slots).
+ * - 범위 안에서만 primary를 딥 네이비, primary-soft를 민트 계열로 바꾼다 → 기존 bg-primary·text-primary·ring-primary 클래스가 그대로 브랜드 색이 된다
+ * - `itda:` 변형은 범위 안에서만 적용되는 추가 스타일 (같은 컴포넌트를 쓰는 재조정·알림 대화상자는 기존 모양 유지)
+ * - 범위 밖 화면에는 영향이 없다
+ */
+@custom-variant itda (&:where(.itda-brand, .itda-brand *));
+
+.itda-brand {
+  --color-primary: var(--color-brand-navy);
+  --color-primary-hover: var(--color-brand-navy-hover);
+  --color-primary-soft: var(--color-brand-mint-soft);
+  --color-gray-900: var(--color-brand-navy);
+}
+
+/* 페이지 배경은 페이지 범위에서만 바꾼다 (모달 안 범위 .itda-brand--embedded는 뒤 페이지 배경을 바꾸지 않는다) */
+body:has(.itda-brand:not(.itda-brand--embedded)) {
+  background: var(--color-brand-canvas);
 }
 
 /* 키보드 포커스 표시 (마우스 클릭에는 보이지 않는다). 개별 요소가 따로 정한 표시는 그대로 둔다 */

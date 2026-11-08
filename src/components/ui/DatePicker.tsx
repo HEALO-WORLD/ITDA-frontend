@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   addDays,
@@ -39,6 +39,11 @@ interface DatePickerProps {
    * 본문에 스크롤을 만들지 않게 할 때 쓴다 (아래 공간이 부족하면 위로 연다). 기본값(false)은 기존과 같은 absolute 배치
    */
   floating?: boolean;
+  /**
+   * 칩 모양 트리거 (슬롯 검색 PC 조건 칩). 주면 위쪽 라벨·입력칸 대신 이 모양·내용의 버튼을 쓴다 (버튼 내용이 이름이 된다).
+   * 달력 팝업·선택 동작은 같다. 기본값(없음)은 기존 입력칸 모양
+   */
+  chip?: { className: string; content: ReactNode };
 }
 
 /** floating 팝업 크기 (w-[320px]와 대략의 높이). 위·아래 배치를 고르는 데만 쓴다 */
@@ -93,6 +98,7 @@ export default function DatePicker({
   disabledNote,
   onViewMonthChange,
   floating = false,
+  chip,
 }: DatePickerProps) {
   const labelId = useId();
   const dialogId = useId();
@@ -204,10 +210,7 @@ export default function DatePicker({
 
   return (
     <div ref={containerRef} className="relative">
-      <label id={labelId} htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <div className="relative">
+      {chip ? (
         <button
           ref={triggerRef}
           id={id}
@@ -215,14 +218,34 @@ export default function DatePicker({
           aria-haspopup="dialog"
           aria-expanded={isOpen}
           aria-controls={isOpen ? dialogId : undefined}
-          aria-labelledby={`${labelId} ${id}`}
           onClick={() => (isOpen ? close() : open())}
-          className={`${controlClass} text-left`}
+          className={chip.className}
         >
-          {value || <span className="text-gray-500">{placeholder}</span>}
+          {chip.content}
         </button>
-        <CalendarDays className={iconClass} aria-hidden="true" />
-      </div>
+      ) : (
+        <>
+          <label id={labelId} htmlFor={id} className={fieldLabelClass}>
+            {label}
+          </label>
+          <div className="relative">
+            <button
+              ref={triggerRef}
+              id={id}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={isOpen}
+              aria-controls={isOpen ? dialogId : undefined}
+              aria-labelledby={`${labelId} ${id}`}
+              onClick={() => (isOpen ? close() : open())}
+              className={`${controlClass} text-left`}
+            >
+              {value || <span className="text-gray-500">{placeholder}</span>}
+            </button>
+            <CalendarDays className={iconClass} aria-hidden="true" />
+          </div>
+        </>
+      )}
 
       {isOpen && (
         <div
