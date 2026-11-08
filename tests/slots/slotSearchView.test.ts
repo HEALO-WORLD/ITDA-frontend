@@ -89,6 +89,49 @@ describe("SlotSearch 첫 화면", () => {
   });
 });
 
+describe("SlotSearch PC 최초 화면 (기본 조건 자동 검색)", () => {
+  it("검색 화면 일반 검색: 처음부터 조건 칩 줄(PC)과 '검색 중' 안내(PC)로 시작, 좁은 화면은 기존 안내·전체 폼", () => {
+    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS }));
+    // PC 조건 칩 줄 (xl에서만 보임) + 기본 조건 값
+    assert.match(html, /data-criteria-chips/);
+    assert.match(html, /id="slot-chip-organization"[\s\S]*?협력 검사기관<\/span><strong[^>]*>전체<\/strong>/);
+    assert.match(html, /id="slot-chip-exam-type"[\s\S]*?검사 유형<\/span><strong[^>]*>전체<\/strong>/);
+    assert.match(html, /id="slot-chip-time-of-day"[\s\S]*?시간대<\/span><strong[^>]*>전체<\/strong>/);
+    assert.match(html, />검색 적용</);
+    // 첫 검색이 시작되기 전에도 PC는 '검색 중' (안내 문구가 깜빡이지 않게), 좁은 화면은 기존 안내 그대로
+    assert.match(html, /<p role="status" class="[^"]* hidden itda:xl:block">기본 조건으로 검사 슬롯을 검색하고 있습니다\.<\/p>/);
+    assert.match(html, /<p role="status" class="[^"]* itda:xl:hidden">검색 조건을 선택한 후 검색 버튼을 눌러 주세요\.<\/p>/);
+    // 전체 폼은 PC에서만 숨긴다 (모바일은 그대로)
+    assert.match(html, /class="grid grid-cols-1 [^"]*itda:xl:hidden"/);
+    // 아직 검색 전: 적용 안 된 변경 안내 없음
+    assert.doesNotMatch(html, /변경한 조건이 아직 검색 결과에 적용되지 않았습니다/);
+  });
+
+  it("재조정·알림 대화상자(embedded): 칩 줄·자동 검색 안내 없이 기존 전체 폼과 안내", () => {
+    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS, embedded: true }));
+    assert.doesNotMatch(html, /data-criteria-chips/);
+    assert.doesNotMatch(html, /기본 조건으로 검사 슬롯을 검색하고 있습니다/);
+    assert.match(html, /<p role="status" class="[^"]*">검색 조건을 선택한 후 검색 버튼을 눌러 주세요\.<\/p>/);
+    assert.doesNotMatch(html, /itda:xl:hidden">검색 조건을 선택한/);
+  });
+
+  it("재조정 모드(검색 화면): 자동 검색하지 않고 기존 전체 폼 + [슬롯 검색]", () => {
+    const html = renderToStaticMarkup(
+      createElement(SlotSearch, {
+        organizations: ORGS,
+        dataSource: "api",
+        apiReschedule: {
+          ok: true,
+          target: { referralId: "r-1", examTypeId: SLOT.examTypeId, examTypeName: "흉부 CT", modality: "CT", currentReservation: null },
+        } as never,
+      }),
+    );
+    assert.doesNotMatch(html, /data-criteria-chips/);
+    assert.doesNotMatch(html, /기본 조건으로 검사 슬롯을 검색하고 있습니다/);
+    assert.match(html, /검색 조건을 선택한 후 검색 버튼을 눌러 주세요/);
+  });
+});
+
 describe("SlotSearchTable 선택 버튼", () => {
   const noop = () => {};
 

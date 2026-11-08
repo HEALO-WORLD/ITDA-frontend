@@ -3,6 +3,7 @@ import { expect, test, type Page, type Response } from "@playwright/test";
 import { getSeoulNow } from "../../src/lib/date/seoulDate";
 
 import { loginGateway, resolveE2eGateway } from "./support/gateway";
+import { readCalendarCounts, resultCalendar, selectResultDate, slotCards, visibleSlotIds } from "./support/slotResults";
 
 /**
  * 읽기 전용 E2E: 의뢰기관 로그인 → 슬롯 검색 화면 → 검색 조건 → 검색 결과 (DB를 바꾸는 요청 없음).
@@ -46,22 +47,33 @@ async function loginAsRequester(page: Page, account: { loginId: string; institut
   await expect(header.getByText(`의뢰기관 담당자 · ${account.loginId}`, { exact: true })).toBeVisible();
 }
 
-async function openSlotSearch(page: Page) {
+const isSearchResponse = (res: Response) => new URL(res.url()).pathname === "/referring/slots/search" && res.request().method() === "GET";
+
+/**
+ * 슬롯 검색 화면 열기. PC(1280px)는 접속하자마자 기본 조건으로 한 번 자동 검색한다: 그 응답을 기다려 돌려준다.
+ * 검색 요청 수도 센다 (Strict Mode·재렌더링으로 중복 요청이 나가지 않는지)
+ */
+async function openSlotSearch(page: Page): Promise<{ response: Response; requestCount: () => number }> {
+  let count = 0;
+  page.on("request", (req) => {
+    if (new URL(req.url()).pathname === "/referring/slots/search") count++;
+  });
+  const response = page.waitForResponse(isSearchResponse, { timeout: 30_000 });
   await page.goto("/referring/slots");
   await expect(page.getByRole("heading", { name: "검사 슬롯 검색" })).toBeVisible();
-  await expect(page.locator("#slot-organization")).toBeVisible({ timeout: 30_000 });
+  // PC: 처음부터 조건 칩 줄 (전체 폼은 숨김)
+  await expect(page.locator("#slot-chip-organization")).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("#slot-organization")).toBeHidden();
+  return { response: await response, requestCount: () => count };
 }
 
 const resultSection = (page: Page) => page.locator('section[aria-labelledby="slot-result-title"]');
 const optionTexts = (page: Page, selectId: string) => page.locator(`#${selectId} option`).allTextContents();
 
-type SearchedSlot = { startAt: string; organizationName: string; examType: string };
+type SearchedSlot = { id: string; startAt: string; organizationName: string; examType: string; isAvailable: boolean };
 
-/** [슬롯 검색]을 누르고 실제 Route Handler 응답(200)을 기다린다. 화면에 보일 슬롯(이미 시작한 슬롯 제외)을 돌려준다 */
-async function searchAndWait(page: Page): Promise<SearchedSlot[]> {
-  const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/referring/slots/search" && res.request().method() === "GET");
-  await page.getByRole("button", { name: "슬롯 검색", exact: true }).click();
-  const res: Response = await response;
+/** 검색 응답(200)을 확인하고 화면에 보일 슬롯(이미 시작한 슬롯 제외)을 돌려준다 */
+async function readSearchResponse(page: Page, res: Response): Promise<SearchedSlot[]> {
   expect(new URL(res.url()).origin, "검색 요청은 E2E 대상 프론트로만 간다").toBe(new URL(page.url()).origin);
   expect(res.status()).toBe(200);
   const body = (await res.json()) as { ok: boolean; slots: SearchedSlot[] };
@@ -70,17 +82,49 @@ async function searchAndWait(page: Page): Promise<SearchedSlot[]> {
   return body.slots.filter((slot) => slot.startAt > now);
 }
 
-/** 검색 결과 표시가 실제 검색 응답과 같은지: 0건이면 빈 상태 안내, 아니면 같은 건수의 행 */
-async function expectResultsMatch(page: Page, slots: SearchedSlot[]) {
+/** [검색 적용](PC 조건 칩 줄)을 누르고 실제 Route Handler 응답을 기다린다 */
+async function searchAndWait(page: Page): Promise<SearchedSlot[]> {
+  const response = page.waitForResponse(isSearchResponse);
+  await page.getByRole("button", { name: "검색 적용" }).click();
+  return readSearchResponse(page, await response);
+}
+
+/** 응답 슬롯을 날짜(`YYYY-MM-DD`, 서울 기준 startAt)별로 나눈다 */
+function groupByDate(slots: SearchedSlot[]): Map<string, SearchedSlot[]> {
+  const groups = new Map<string, SearchedSlot[]>();
+  for (const slot of slots) groups.set(slot.startAt.slice(0, 10), [...(groups.get(slot.startAt.slice(0, 10)) ?? []), slot]);
+  return groups;
+}
+
+/**
+ * 검색 결과 표시가 실제 검색 응답과 같은지 (PC 1280px: 결과 달력 + 시간 카드).
+ * 0건이면 빈 상태 안내. 아니면 ① 달력의 날짜별 예약 가능 건수 = 응답의 날짜별 예약 가능 슬롯 수,
+ * ② 날짜마다 보이는 시간 버튼의 slotId 집합 = 응답의 그날 슬롯 ID (빠지거나 지어낸 슬롯 없음). onEachDate로 카드 내용을 더 확인한다
+ */
+async function expectResultsMatch(page: Page, slots: SearchedSlot[], onEachDate?: (date: string) => Promise<void>) {
   const section = resultSection(page);
   await expect(section.getByText(`총 ${slots.length}건의 검색 결과가 있습니다.`)).toBeVisible();
   await expect(section.getByRole("alert")).toHaveCount(0);
   if (slots.length === 0) {
     await expect(section.getByText(EMPTY_RESULT)).toBeVisible();
     await expect(section.getByRole("row")).toHaveCount(0);
-  } else {
-    await expect(section.getByText(EMPTY_RESULT)).toHaveCount(0);
-    await expect(section.locator("tbody tr")).toHaveCount(slots.length);
+    await expect(section.locator("button[data-slot-id]:visible")).toHaveCount(0);
+    return;
+  }
+  await expect(section.getByText(EMPTY_RESULT)).toHaveCount(0);
+  await expect(resultCalendar(section)).toBeVisible();
+  const byDate = groupByDate(slots);
+  const expectedCounts = Object.fromEntries(
+    [...byDate].map(([date, items]) => [date, items.filter((slot) => slot.isAvailable).length] as const).filter(([, count]) => count > 0),
+  );
+  // 새 검색: 처음 선택 날짜 = 예약 가능한 슬롯이 있는 첫 날짜
+  const firstDate = Object.keys(expectedCounts).sort()[0];
+  await expect(resultCalendar(section).locator('[aria-current="date"]')).toHaveAttribute("data-date", firstDate);
+  expect(await readCalendarCounts(section)).toEqual(expectedCounts);
+  for (const [date, items] of byDate) {
+    await selectResultDate(section, date);
+    expect((await visibleSlotIds(section)).sort()).toEqual(items.map((slot) => slot.id).sort());
+    await onEachDate?.(date);
   }
 }
 
@@ -118,8 +162,9 @@ test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
       await loginAsRequester(page, REQUESTER_WITH_PARTNER);
     });
 
+    let opened: Awaited<ReturnType<typeof openSlotSearch>>;
     await test.step("슬롯 검색 화면: 협력 검사기관은 협약 중인 B영상의학과만", async () => {
-      await openSlotSearch(page);
+      opened = await openSlotSearch(page);
       expect(await optionTexts(page, "slot-organization")).toEqual(["전체", PARTNER_EXAMINER]);
       expect(await optionTexts(page, "slot-exam-type")).toEqual(["전체", "CT", "MRI"]);
     });
@@ -141,36 +186,77 @@ test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
       }
     });
 
-    await test.step("검색 전 안내", async () => {
-      await expect(resultSection(page)).toContainText("검색 조건을 선택한 후 검색 버튼을 눌러 주세요.");
-      await expect(resultSection(page)).toContainText("날짜를 선택하지 않으면 오늘부터 31일 동안의 슬롯을 검색합니다.");
+    let firstSlots: SearchedSlot[] = [];
+    await test.step("최초 접속 → 기본 조건 자동 검색(요청 1번) → 실제 검색 응답과 같은 결과 (0건이면 빈 결과 안내)", async () => {
+      // 기본 조건: 협력 검사기관·검사 유형·세부 검사 항목·시간대 전체, 날짜 없음(오늘부터 31일)
+      const url = new URL(opened.response.url());
+      expect(url.searchParams.get("institutionId")).toBeNull();
+      expect(url.searchParams.get("modality")).toBeNull();
+      expect(url.searchParams.get("examTypeId")).toBeNull();
+      firstSlots = await readSearchResponse(page, opened.response);
+      await expectResultsMatch(page, firstSlots);
+      expect(opened.requestCount(), "최초 자동 검색 요청은 한 번").toBe(1);
     });
 
-    await test.step("조건 없이 검색 → 실제 검색 응답과 같은 건수 (0건이면 빈 결과 안내)", async () => {
-      const slots = await searchAndWait(page);
-      await expectResultsMatch(page, slots);
+    await test.step("PC: 조건 칩 줄 (협력 검사기관부터, 결과 요약 = 실행한 조건)", async () => {
+      await expect(page.locator("#slot-organization")).toBeHidden();
+      await expect(page.locator("#slot-chip-organization")).toContainText("협력 검사기관전체");
+      await expect(page.getByRole("button", { name: "검색 적용" })).toBeVisible();
+      await expect(resultSection(page).getByRole("definition").filter({ hasText: "오늘부터 31일" })).toBeVisible();
     });
 
     await test.step("검사기관·검사 유형을 바꿔 다시 검색 → 응답과 같은 결과, 모두 B영상의학과·CT (0건이면 빈 결과 안내, 오류 아님)", async () => {
-      await page.locator("#slot-organization").selectOption({ label: PARTNER_EXAMINER });
-      await page.locator("#slot-exam-type").selectOption("CT");
+      // 조건 칩을 눌러 바로 고친다 (입력 상태만 바뀜)
+      await page.locator("#slot-chip-organization").click();
+      await page.getByRole("listbox", { name: "협력 검사기관 선택" }).getByRole("option", { name: PARTNER_EXAMINER }).click();
+      await page.locator("#slot-chip-exam-type").click();
+      await page.getByRole("listbox", { name: "검사 유형 선택" }).getByRole("option", { name: "CT", exact: true }).click();
+      await expect(page.locator("#slot-chip-organization")).toContainText(PARTNER_EXAMINER);
+      // 조건을 바꿔도 자동으로 다시 검색하지 않는다
+      expect(opened.requestCount()).toBe(1);
+      // [검색 적용] 전: 아직 적용되지 않았다는 안내, 결과·결과 요약은 이전 검색 그대로
+      await expect(page.getByRole("status").filter({ hasText: "변경한 조건이 아직 검색 결과에 적용되지 않았습니다." })).toBeVisible();
+      await expect(resultSection(page).getByText(`총 ${firstSlots.length}건의 검색 결과가 있습니다.`)).toBeVisible();
       const slots = await searchAndWait(page);
+      await expect(page.getByText("변경한 조건이 아직 검색 결과에 적용되지 않았습니다.")).toHaveCount(0);
       expect(slots.every((slot) => slot.organizationName === PARTNER_EXAMINER && slot.examType === "CT")).toBe(true);
+      await expectResultsMatch(page, slots, async () => {
+        for (const card of await slotCards(resultSection(page)).all()) {
+          await expect(card).toContainText(PARTNER_EXAMINER);
+          await expect(card).toContainText("CT");
+        }
+      });
+      expect(opened.requestCount()).toBe(2);
+    });
+
+    await test.step("[초기화] → 기본 조건으로 되돌리고 바로 다시 검색 (칩 줄 유지)", async () => {
+      const response = page.waitForResponse(isSearchResponse);
+      await page.locator("[data-criteria-chips]").getByRole("button", { name: "초기화" }).click();
+      const slots = await readSearchResponse(page, await response);
+      expect(new URL((await response).url()).searchParams.get("institutionId")).toBeNull();
+      await expect(page.locator("#slot-chip-organization")).toContainText("전체");
+      await expect(page.locator("#slot-organization")).toBeHidden();
       await expectResultsMatch(page, slots);
-      for (const row of await resultSection(page).locator("tbody tr").all()) {
-        await expect(row).toContainText(PARTNER_EXAMINER);
-        await expect(row).toContainText("CT");
-      }
+      expect(opened.requestCount()).toBe(3);
+    });
+
+    await test.step("새로고침: 다시 기본 조건 자동 검색 1번", async () => {
+      const reopened = await openSlotSearch(page);
+      await expectResultsMatch(page, await readSearchResponse(page, reopened.response));
+      expect(reopened.requestCount()).toBe(1);
     });
   });
 
   test("clinic_d: 협약 검사기관이 없으면 검사기관 선택지가 '전체'뿐이고 검색 결과도 비어 있다 (다른 기관 협약 미노출)", async ({ page }) => {
     await loginAsRequester(page, REQUESTER_WITHOUT_PARTNER);
-    await openSlotSearch(page);
+    const { response } = await openSlotSearch(page);
     expect(await optionTexts(page, "slot-organization")).toEqual(["전체"]);
-    await searchAndWait(page);
+    expect(await readSearchResponse(page, response)).toEqual([]);
     await expect(resultSection(page).getByText("총 0건의 검색 결과가 있습니다.")).toBeVisible();
     await expect(resultSection(page).getByText(EMPTY_RESULT)).toBeVisible();
+    // 0건이어도 검색 조건 전체 폼이 펼쳐지지 않는다
+    await expect(page.locator("#slot-chip-organization")).toBeVisible();
+    await expect(page.locator("#slot-organization")).toBeHidden();
     await expect(page.getByText(PARTNER_EXAMINER)).toHaveCount(0);
   });
 
@@ -201,7 +287,6 @@ test.describe("의뢰기관 슬롯 검색 (읽기 전용)", () => {
 test.describe("슬롯 검색 오류 안내 (검색 응답만 오류로 대체)", () => {
   test.beforeEach(async ({ page }) => {
     await loginAsRequester(page, REQUESTER_WITH_PARTNER);
-    await openSlotSearch(page);
   });
 
   const cases = [
@@ -212,15 +297,19 @@ test.describe("슬롯 검색 오류 안내 (검색 응답만 오류로 대체)",
   ] as const;
 
   for (const testCase of cases) {
-    test(`${testCase.name} → 결과 대신 오류 안내`, async ({ page }) => {
+    test(`${testCase.name} → 결과 대신 오류 안내 (최초 자동 검색 실패에도 검색 조건 칩 줄 유지)`, async ({ page }) => {
       await page.route("**/referring/slots/search**", (route) =>
         testCase.route ? route.fulfill({ status: testCase.route.status, contentType: "text/plain", body: testCase.route.body }) : route.abort("connectionfailed"),
       );
-      await page.getByRole("button", { name: "슬롯 검색", exact: true }).click();
+      await page.goto("/referring/slots");
       const alert = resultSection(page).getByRole("alert");
-      await expect(alert).toContainText(testCase.message);
+      await expect(alert).toContainText(testCase.message, { timeout: 30_000 });
       await expect(resultSection(page).getByText(/총 \d+건의 검색 결과가 있습니다\./)).toHaveCount(0);
       if ("loginLink" in testCase) await expect(alert.getByRole("link", { name: "로그인 화면으로 이동" })).toBeVisible();
+      await expect(page.locator("#slot-chip-organization")).toBeVisible();
+      await expect(page.locator("#slot-organization")).toBeHidden();
+      // [검색 적용]으로 다시 시도할 수 있다
+      await expect(page.getByRole("button", { name: "검색 적용" })).toBeEnabled();
     });
   }
 });
