@@ -125,8 +125,17 @@ describe("일반 검색: 새 검사 의뢰", () => {
   });
 
   it("SlotSearch: 일반 API 모달은 ApiReferralCreateForm, 재조정 모달은 ApiRescheduleConfirm (미연동 안내 제거)", () => {
-    const source = readFileSync("src/features/slots/components/SlotSearch.tsx", "utf8");
-    assert.doesNotMatch(source, /실제 의뢰·예약 요청 기능은 아직 연동되지 않았습니다/);
+    const fullSource = readFileSync("src/features/slots/components/SlotSearch.tsx", "utf8");
+    assert.doesNotMatch(fullSource, /실제 의뢰·예약 요청 기능은 아직 연동되지 않았습니다/);
+    // PC 재조정 단계 모달(한 모달 3단계)은 같은 ApiRescheduleConfirm을 inline으로 쓴다 (의뢰 생성 폼은 쓰지 않는다)
+    const wizardStart = fullSource.indexOf("if (isWizard && rescheduleWizard) {");
+    const mainStart = fullSource.indexOf("<div className={embedded ? \"flex flex-col gap-5\" : \"flex flex-col gap-8\"}>");
+    assert.ok(wizardStart > 0 && mainStart > wizardStart);
+    const wizardSource = fullSource.slice(wizardStart, mainStart);
+    assert.match(wizardSource, /<ApiRescheduleConfirm[\s\S]*?inline/);
+    assert.doesNotMatch(wizardSource, /<ApiReferralCreateForm/);
+    // 기존 모달 분기 (모바일·일반 검색): API 재조정 → API 의뢰 생성 → Mock 순서
+    const source = fullSource.slice(mainStart);
     const rescheduleModal = source.indexOf("<ApiRescheduleConfirm");
     const createModal = source.indexOf("<ApiReferralCreateForm");
     const mockModal = source.indexOf("<RescheduleSlotConfirm");

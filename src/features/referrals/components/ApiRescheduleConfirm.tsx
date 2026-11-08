@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, CheckCircle2, Info, Loader2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, Info, Loader2, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -14,6 +14,8 @@ import { checkRescheduleCandidateAction, requestRescheduleAction } from "../resc
 import { loadRescheduleProgressAction } from "../rescheduleProgressActions";
 import type { ApiRescheduleTarget } from "../rescheduleTarget";
 
+import ReservationCard from "./ReservationCompareCard";
+
 type CheckResult = Awaited<ReturnType<typeof checkRescheduleCandidateAction>>;
 type RequestResult = Awaited<ReturnType<typeof requestRescheduleAction>>;
 type ProgressResult = Awaited<ReturnType<typeof loadRescheduleProgressAction>>;
@@ -24,7 +26,7 @@ type RequestFailure = Extract<RequestResult, { ok: false }>;
  * CHECKING: 후보 확인 중 → READY(확인 통과) | REJECTED(통과 못 함, 다시 확인 가능)
  * SUBMITTING: 재예약 요청 중 → ACCEPTED(접수, 확정 아님) | FAILED(확실한 실패) | UNCERTAIN(결과 불명: 다시 요청하지 않고 상태 확인만)
  */
-type Phase =
+export type Phase =
   | { kind: "CHECKING" }
   | { kind: "READY" }
   | { kind: "REJECTED"; message: string }
@@ -112,6 +114,101 @@ export function getRescheduleView(phase: Phase, progress: ProgressResult | null)
   }
 }
 
+/**
+ * PC 재조정 모달 3단계에서 [슬롯 다시 선택]을 보일지 (순수 함수).
+ * 요청을 보내기 전(확인 중·확인 통과·확인 실패)에만 true. 요청 중·접수·결과 불명·실패 뒤에는 슬롯을 다시 고를 수 없다
+ */
+export function canReturnToSlotSelection(phase: Phase): boolean {
+  return phase.kind === "CHECKING" || phase.kind === "READY" || phase.kind === "REJECTED";
+}
+
+/** 요청 상태 단계 표시 (재조정 요청 → 요청 접수 → 예약 확정) */
+export type StatusStepState = "pending" | "current" | "done" | "error" | "warning";
+export interface StatusStep {
+  label: "재조정 요청" | "요청 접수" | "예약 확정";
+  state: StatusStepState;
+  /** 단계 아래 짧은 설명 (예: 확정 대기, 확인 필요) */
+  note?: string;
+}
+
+/**
+ * 단계 + 상태 재조회 결과 → 요청 상태 단계 (순수 함수, getRescheduleView와 같은 기준).
+ * - '예약 확정'은 상태 재조회가 CONFIRMED일 때만 완료로 표시한다 (접수 ≠ 확정)
+ * - 결과 불명(UNCERTAIN)·상태 확인 실패는 '확인 필요'로, 확실한 실패는 실패로 표시한다
+ */
+export function getRescheduleStatusSteps(phase: Phase, progress: ProgressResult | null): StatusStep[] {
+  const step = (label: StatusStep["label"], state: StatusStepState, note?: string): StatusStep => (note ? { label, state, note } : { label, state });
+  switch (phase.kind) {
+    case "CHECKING":
+    case "READY":
+    case "REJECTED":
+      return [step("재조정 요청", "pending", "요청 전"), step("요청 접수", "pending"), step("예약 확정", "pending")];
+    case "SUBMITTING":
+      return [step("재조정 요청", "current", "요청 중"), step("요청 접수", "pending"), step("예약 확정", "pending")];
+    case "FAILED":
+      return [step("재조정 요청", "error", "요청 실패"), step("요청 접수", "pending"), step("예약 확정", "pending")];
+    case "ACCEPTED":
+    case "UNCERTAIN": {
+      const accepted = phase.kind === "ACCEPTED";
+      const receipt = accepted ? step("요청 접수", "done", "접수됨") : step("요청 접수", "warning", "결과 확인 필요");
+      if (progress?.ok) {
+        if (progress.stage === "CONFIRMED") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "done", "확정됨")];
+        if (progress.stage === "PROCESSING") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "current", "확정 대기")];
+        if (progress.stage === "FAILED" || progress.stage === "NEEDS_RESCHEDULE") {
+          return [step("재조정 요청", "done"), receipt, step("예약 확정", "error", "확정 실패")];
+        }
+        return [step("재조정 요청", "done"), receipt, step("예약 확정", "warning", "확인 필요")];
+      }
+      if (progress && !progress.ok) return [step("재조정 요청", "done"), receipt, step("예약 확정", "warning", "상태 확인 실패")];
+      return accepted
+        ? [step("재조정 요청", "done"), receipt, step("예약 확정", "current", "확정 대기")]
+        : [step("재조정 요청", "done"), receipt, step("예약 확정", "pending")];
+    }
+  }
+}
+
+const STATUS_STATE_TEXT: Record<StatusStepState, string> = { pending: "대기", current: "진행 중", done: "완료", error: "실패", warning: "확인 필요" };
+
+/** 요청 상태 단계 줄 (PC 재조정 모달 3단계) */
+export function RescheduleStatusSteps({ steps }: { steps: StatusStep[] }) {
+  return (
+    <ol aria-label="재조정 요청 상태" className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-brand-canvas px-4 py-3">
+      {steps.map(({ label, state, note }, index) => {
+        const Icon = state === "done" ? Check : state === "error" ? X : state === "warning" ? AlertTriangle : state === "current" ? Loader2 : null;
+        return (
+          <li key={label} aria-current={state === "current" ? "step" : undefined} className="flex min-w-0 items-center gap-2.5">
+            <span
+              aria-hidden="true"
+              className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+                state === "done"
+                  ? "bg-brand-mint text-brand-navy"
+                  : state === "current"
+                    ? "bg-brand-navy text-white"
+                    : state === "error"
+                      ? "bg-red-600 text-white"
+                      : state === "warning"
+                        ? "bg-amber-400 text-amber-950"
+                        : "bg-white text-gray-400 ring-1 ring-inset ring-line-strong"
+              }`}
+            >
+              {Icon ? <Icon className={`size-4 ${state === "current" ? "animate-spin" : ""}`} /> : index + 1}
+            </span>
+            <span className="min-w-0">
+              <span className={`block text-sm font-semibold ${state === "pending" ? "text-gray-400" : "text-gray-900"}`}>{label}</span>
+              <span
+                className={`block text-xs ${state === "error" ? "text-red-700" : state === "warning" ? "text-amber-800" : state === "pending" ? "text-gray-400" : "text-gray-600"}`}
+              >
+                {note ?? STATUS_STATE_TEXT[state]}
+              </span>
+              <span className="sr-only">, {STATUS_STATE_TEXT[state]}</span>
+            </span>
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 const BANNER_CLASS: Record<Tone, string> = {
   info: "border-primary/20 bg-primary-soft text-gray-800",
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
@@ -131,6 +228,13 @@ interface ApiRescheduleConfirmProps {
   onBusyChange: (busy: boolean) => void;
   /** 재예약이 접수됨 (상위가 닫을 때 검색 결과를 다시 불러오는 데 쓴다) */
   onAccepted: () => void;
+  /**
+   * PC 재조정 모달 3단계: 별도 대화상자 대신 같은 모달 본문 안에 그린다 (요청 상태 단계 줄 + 하단 버튼 줄 포함).
+   * 상태 판단·요청·상태 재조회는 같다
+   */
+  inline?: boolean;
+  /** inline: [← 슬롯 다시 선택] (요청 전 단계에서만 보인다. 요청 중·접수 뒤·실패 뒤에는 숨긴다) */
+  onBack?: () => void;
 }
 
 /**
@@ -141,12 +245,17 @@ interface ApiRescheduleConfirmProps {
  * 결과를 알 수 없으면 요청 버튼을 숨기고 상태 확인만 안내한다. 화면에서 의뢰·예약 상태를 바꾸지 않는다.
  * 제목·하단 버튼은 공통 Modal의 고정 영역에 두고 본문만 스크롤한다 (Esc·포커스 이동·복귀는 Modal 그대로).
  */
-export default function ApiRescheduleConfirm({ open, target, slot, organizations, onCancel, onBusyChange, onAccepted }: ApiRescheduleConfirmProps) {
+export default function ApiRescheduleConfirm({ open, target, slot, organizations, onCancel, onBusyChange, onAccepted, inline = false, onBack }: ApiRescheduleConfirmProps) {
   const [phase, setPhase] = useState<Phase>({ kind: "CHECKING" });
   const [checkRound, setCheckRound] = useState(0);
   const [progress, setProgress] = useState<ProgressResult | null>(null);
   const [progressLoading, setProgressLoading] = useState(false);
   const submittingRef = useRef(false);
+  const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
+  // inline: 3단계로 넘어오면 단계 제목으로 포커스 (모달 안에서 화면이 바뀐 것을 알린다)
+  useEffect(() => {
+    if (inline) inlineHeadingRef.current?.focus();
+  }, [inline]);
   const progressRef = useRef(false);
   const slotId = slot?.id ?? null;
 
@@ -252,6 +361,30 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
     </>
   );
 
+  if (inline) {
+    if (!slot) return null;
+    // 요청 전(확인 중·확인 통과·확인 실패)에만 슬롯을 다시 고를 수 있다. 요청 중·접수 뒤·결과 불명·실패 뒤에는 되돌아가지 않는다
+    const canGoBack = Boolean(onBack) && canReturnToSlotSelection(phase);
+    return (
+      <section aria-labelledby="reschedule-confirm-title" className="flex flex-col gap-4">
+        <h3 id="reschedule-confirm-title" ref={inlineHeadingRef} tabIndex={-1} className="text-lg font-bold text-gray-900 outline-none">
+          {view.title}
+        </h3>
+        <RescheduleStatusSteps steps={getRescheduleStatusSteps(phase, progress)} />
+        <RescheduleCompare target={target} slot={slot} organizations={organizations} newCardLabel={view.newCardLabel} banner={view.banner} inline />
+        <div className="sticky bottom-0 z-20 -mx-5 -mb-5 mt-1 flex items-center gap-2 border-t border-line bg-white px-5 py-3 sm:-mx-7 sm:-mb-6 sm:px-7">
+          {canGoBack && (
+            <button type="button" onClick={onBack} className={`${secondaryButtonClass} inline-flex items-center gap-1.5`}>
+              <ArrowLeft className="size-4" aria-hidden="true" />
+              슬롯 다시 선택
+            </button>
+          )}
+          <div className="ml-auto flex gap-2">{footer}</div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <Modal open={open} title={view.title} size="compare" closeOnBackdrop={false} onClose={onCancel} footer={slot ? footer : undefined}>
       {slot && (
@@ -279,12 +412,15 @@ export function RescheduleCompare({
   organizations,
   newCardLabel,
   banner,
+  inline = false,
 }: {
   target: ApiRescheduleTarget;
   slot: ApiExamSlot;
   organizations: readonly PartnerOrganization[];
   newCardLabel: RescheduleView["newCardLabel"];
   banner: RescheduleView["banner"];
+  /** PC 재조정 모달: 기존 → 변경 화살표와 바뀌는 항목 표시 */
+  inline?: boolean;
 }) {
   const current = target.currentReservation;
   const currentInstitution = current?.examInstitutionId
@@ -292,10 +428,19 @@ export function RescheduleCompare({
     : null;
   const same = (a: string | null | undefined, b: string | null | undefined) => Boolean(a && b && a === b);
   const BannerIcon = banner.busy ? Loader2 : banner.tone === "success" ? CheckCircle2 : banner.tone === "info" ? Info : AlertTriangle;
+  const currentDateTime = current?.startTime?.slice(0, 16) ?? null;
+  // 바뀌는 항목 (값을 모르면 같다고 하지 않는다)
+  const changes = inline
+    ? {
+        dateTime: currentDateTime !== slot.startAt,
+        institution: Boolean(currentInstitution) && currentInstitution !== slot.organizationName,
+        equipment: Boolean(current?.equipmentName) && current?.equipmentName !== slot.equipmentName,
+      }
+    : undefined;
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className={inline ? "grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-stretch gap-3" : "grid grid-cols-1 gap-3 sm:grid-cols-2"}>
         <ReservationCard
           label="기존 예약"
           tone="neutral"
@@ -304,6 +449,13 @@ export function RescheduleCompare({
           examItem={target.examTypeName}
           equipment={current?.equipmentName ?? null}
         />
+        {inline && (
+          <span aria-hidden="true" className="flex items-center">
+            <span className="flex size-9 items-center justify-center rounded-full bg-brand-navy text-white">
+              <ArrowRight className="size-4" />
+            </span>
+          </span>
+        )}
         <ReservationCard
           label={newCardLabel}
           tone="highlight"
@@ -313,6 +465,7 @@ export function RescheduleCompare({
           equipment={slot.equipmentName}
           sameInstitution={same(currentInstitution, slot.organizationName)}
           sameExamItem={same(target.examTypeName, slot.examTypeName)}
+          changes={changes}
         />
       </div>
 
@@ -332,57 +485,5 @@ export function RescheduleCompare({
         </div>
       </div>
     </div>
-  );
-}
-
-/** 예약 카드: 검사 일시를 가장 크게, 검사기관·세부 검사 항목, 검사 장비는 보조 정보. 기존과 같은 값은 '기존과 같음'으로 표시 */
-function ReservationCard({
-  label,
-  tone,
-  dateTime,
-  institution,
-  examItem,
-  equipment,
-  sameInstitution = false,
-  sameExamItem = false,
-}: {
-  label: string;
-  tone: "neutral" | "highlight";
-  dateTime: string;
-  institution: string | null;
-  examItem: string | null;
-  equipment: string | null;
-  sameInstitution?: boolean;
-  sameExamItem?: boolean;
-}) {
-  const sameTag = <span className="ml-1.5 rounded bg-white/80 px-1.5 py-0.5 text-xs font-medium text-gray-500 ring-1 ring-inset ring-line">기존과 같음</span>;
-  return (
-    <section
-      aria-label={label}
-      className={`flex flex-col gap-3 rounded-xl border px-4 py-4 sm:px-5 ${tone === "highlight" ? "border-primary/30 bg-primary-soft" : "border-line bg-gray-50"}`}
-    >
-      <h3 className={`text-sm font-bold ${tone === "highlight" ? "text-primary" : "text-gray-600"}`}>{label}</h3>
-      <p className="text-lg font-bold tabular-nums text-gray-900">{dateTime}</p>
-      <dl className="flex flex-col gap-1.5 text-[15px]">
-        <div className="flex gap-3">
-          <dt className="w-[88px] shrink-0 text-gray-500">검사기관</dt>
-          <dd className="min-w-0 text-gray-900">
-            {institution ?? "확인 불가"}
-            {sameInstitution && sameTag}
-          </dd>
-        </div>
-        <div className="flex gap-3">
-          <dt className="w-[88px] shrink-0 text-gray-500">세부 검사 항목</dt>
-          <dd className="min-w-0 text-gray-900">
-            {examItem ?? "확인 불가"}
-            {sameExamItem && sameTag}
-          </dd>
-        </div>
-        <div className="flex gap-3 text-sm">
-          <dt className="w-[88px] shrink-0 text-gray-400">검사 장비</dt>
-          <dd className="min-w-0 text-gray-500">{equipment ?? "—"}</dd>
-        </div>
-      </dl>
-    </section>
   );
 }

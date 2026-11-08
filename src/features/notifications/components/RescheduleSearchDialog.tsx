@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, Loader2, Search } from "lucide-react";
+import { AlertTriangle, Loader2, RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 
@@ -16,6 +16,7 @@ import type { PartnerOrganization } from "@/features/slots/types";
 import type { RescheduleCause } from "@/features/notifications/types";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 import { MOCK_PARTNER_ORGANIZATIONS } from "@/lib/dev/mockSlots";
+import { isPcViewport } from "@/features/slots/initialSearch";
 
 import { loadRescheduleSearchAction } from "../rescheduleSearchActions";
 
@@ -50,23 +51,63 @@ export type RescheduleSearchEntry =
 
 const Context = createContext<((entry: RescheduleSearchEntry) => void) | null>(null);
 
+/** 재조정 단계 모달에 넘기는 PC 전용 연결 (모달 닫기·요청 중 닫기 막기) */
+interface WizardBridge {
+  onClose: () => void;
+  onBusyChange: (busy: boolean) => void;
+}
+
 export function RescheduleSearchProvider({ children }: { children: ReactNode }) {
-  const [entry, setEntry] = useState<RescheduleSearchEntry | null>(null);
+  /** 열린 대상 + 열 때의 화면 폭 (PC면 한 모달 3단계, 아니면 기존 구조). 진행 중에는 바꾸지 않는다 */
+  const [opened, setOpened] = useState<{ entry: RescheduleSearchEntry; pc: boolean } | null>(null);
+  /** 재조정 요청 중: 모달을 닫지 않는다 (Esc·닫기·취소) */
+  const [busy, setBusy] = useState(false);
+  const entry = opened?.entry ?? null;
+  const pc = opened?.pc ?? false;
+  const close = () => {
+    if (busy) return;
+    setOpened(null);
+  };
+  const bridge: WizardBridge = { onClose: close, onBusyChange: setBusy };
   return (
-    <Context.Provider value={setEntry}>
+    <Context.Provider value={(next) => setOpened({ entry: next, pc: isPcViewport() })}>
       {children}
       <Modal
         open={entry !== null}
-        title="대체 검사 슬롯 검색"
-        description="기존 예약과 같은 검사 유형의 대체 슬롯을 골라 예약 변경을 요청합니다."
+        title={pc ? "예약 재조정" : "대체 검사 슬롯 검색"}
+        description={
+          pc
+            ? "기존 예약을 확인하고, 같은 검사 항목의 대체 슬롯을 골라 예약 변경을 요청합니다."
+            : "기존 예약과 같은 검사 유형의 대체 슬롯을 골라 예약 변경을 요청합니다."
+        }
         size="3xl"
         closeOnBackdrop={false}
-        onClose={() => setEntry(null)}
+        preventClose={busy}
+        onClose={close}
       >
         {entry && (
-          <div className="flex flex-col gap-5" data-autofocus tabIndex={-1}>
+          // PC: 모달 안에만 ITDA 브랜드 색 (뒤 페이지의 공통 스타일·배경은 그대로)
+          <div className={pc ? "itda-brand itda-brand--embedded flex flex-col gap-5" : "flex flex-col gap-5"} data-autofocus tabIndex={-1}>
             {entry.kind === "api" ? (
-              <ApiRescheduleSearch key={entry.referralId} referralId={entry.referralId} summary={entry.summary} />
+              <ApiRescheduleSearch key={entry.referralId} referralId={entry.referralId} summary={entry.summary} wizard={pc ? bridge : null} />
+            ) : pc ? (
+              <SlotSearch
+                key={entry.referral.id}
+                organizations={MOCK_PARTNER_ORGANIZATIONS}
+                rescheduleTarget={entry.referral}
+                failedEquipments={entry.failedEquipments}
+                embedded
+                rescheduleWizard={{
+                  ...bridge,
+                  existing: (
+                    <ExistingReservationCard
+                      summary={entry.summary}
+                      equipmentName={entry.referral.equipmentName}
+                      failedEquipmentNames={entry.failedEquipments.map(({ equipmentName }) => equipmentName)}
+                    />
+                  ),
+                }}
+              />
             ) : (
               <>
               <ExistingReservation summary={entry.summary} />
@@ -132,6 +173,72 @@ export function ExistingReservation({ summary }: { summary: RescheduleSummary })
   );
 }
 
+/**
+ * PC 재조정 모달 왼쪽의 기존 예약 카드 (슬롯을 고르는 동안 계속 보인다). 목록·대상 조회로 이미 받은 값만 쓴다.
+ * 장애 장비 표시는 Mock 재조정 알림의 장애 장비와 같을 때만 (API는 장애 장비를 응답으로 확인할 수 없어 표시하지 않는다)
+ */
+export function ExistingReservationCard({
+  summary,
+  equipmentName,
+  failedEquipmentNames = [],
+}: {
+  summary: RescheduleSummary;
+  equipmentName?: string | null;
+  failedEquipmentNames?: readonly string[];
+}) {
+  const isFailedEquipment = Boolean(equipmentName && failedEquipmentNames.includes(equipmentName));
+  return (
+    <section aria-label="기존 예약" className="rounded-xl border border-line bg-white px-4 py-4 shadow-card">
+      <div className="flex items-center justify-between gap-2">
+        <h3 className="text-sm font-bold text-gray-600">기존 예약</h3>
+        <ReferralStatusBadge status="RESCHEDULE_REQUIRED" />
+      </div>
+      <p className="mt-2 text-base font-bold tabular-nums text-gray-900">
+        {summary.scheduledAt ? formatDateTimeWithWeekday(summary.scheduledAt) : "검사일시 확인 불가"}
+      </p>
+      <dl className="mt-2 flex flex-col gap-1.5 text-sm">
+        <CardItem label="검사기관">{summary.institution}</CardItem>
+        <CardItem label="검사 항목">
+          {summary.modality ?? "확인 불가"}
+          {summary.examTypeName ? ` · ${summary.examTypeName}` : ""}
+        </CardItem>
+        {equipmentName !== undefined && (
+          <CardItem label="검사 장비">
+            {equipmentName ?? "—"}
+            {isFailedEquipment && (
+              <span className="ml-1.5 inline-flex items-center gap-1 rounded bg-red-50 px-1.5 py-0.5 text-xs font-semibold text-red-700">
+                <AlertTriangle className="size-3" aria-hidden="true" />
+                장비 장애
+              </span>
+            )}
+          </CardItem>
+        )}
+        <CardItem label="예약번호">
+          {summary.reservationNumber ? (
+            summary.copyable ? (
+              <ReferralIdCopyButton referralId={summary.reservationNumber} label="예약번호" />
+            ) : (
+              summary.reservationNumber
+            )
+          ) : (
+            "—"
+          )}
+        </CardItem>
+      </dl>
+      <p className="mt-3 border-t border-line pt-2.5 text-xs text-gray-500">변경이 확정되기 전까지 기존 예약은 그대로 유지됩니다.</p>
+    </section>
+  );
+}
+
+function CardItem({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-16 shrink-0 text-gray-500">{label}</dt>
+      <dd className="min-w-0 break-words text-gray-900">{children}</dd>
+    </div>
+  );
+}
+
 function SummaryItem({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
@@ -144,8 +251,19 @@ function SummaryItem({ label, children }: { label: string; children: ReactNode }
 type LoadState = { kind: "loading" } | Awaited<ReturnType<typeof loadRescheduleSearchAction>>;
 
 /** API 모드: 대상 의뢰·검색 선택지를 받아 슬롯 검색 화면과 같은 SlotSearch(재조정 모드)를 보인다 */
-function ApiRescheduleSearch({ referralId, summary }: { referralId: string; summary: RescheduleSummary }) {
+function ApiRescheduleSearch({
+  referralId,
+  summary,
+  wizard,
+}: {
+  referralId: string;
+  summary: RescheduleSummary;
+  /** PC: 한 모달 3단계 연결. null이면 기존 구조 */
+  wizard: WizardBridge | null;
+}) {
   const [state, setState] = useState<LoadState>({ kind: "loading" });
+  /** 불러오기 실패 뒤 [다시 시도] 회차 */
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let current = true;
     loadRescheduleSearchAction(referralId).then(
@@ -155,7 +273,7 @@ function ApiRescheduleSearch({ referralId, summary }: { referralId: string; summ
     return () => {
       current = false;
     };
-  }, [referralId]);
+  }, [referralId, attempt]);
 
   const existing = <ExistingReservation summary={summary} />;
 
@@ -180,10 +298,22 @@ function ApiRescheduleSearch({ referralId, summary }: { referralId: string; summ
           <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
           {state.message}
         </p>
-        {signedOut && (
+        {signedOut ? (
           <Link href={ROUTES.login} className="font-semibold underline underline-offset-4">
             로그인 화면으로 이동
           </Link>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              setState({ kind: "loading" });
+              setAttempt((value) => value + 1);
+            }}
+            className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-700 hover:bg-red-50"
+          >
+            <RotateCcw className="size-4" aria-hidden="true" />
+            다시 시도
+          </button>
         )}
       </div>
       </>
@@ -201,6 +331,20 @@ function ApiRescheduleSearch({ referralId, summary }: { referralId: string; summ
       </>
     );
   }
+  if (wizard) {
+    // PC: 대상 조회·검증이 끝났으므로 한 모달 3단계로 (열면 기존 예약 조건으로 자동 검색)
+    return (
+      <ApiRescheduleSlotSearch
+        organizations={state.organizations}
+        examTypeOptions={state.examTypes}
+        reschedule={state.reschedule}
+        wizard={{
+          ...wizard,
+          existing: <ExistingReservationCard summary={summary} equipmentName={state.reschedule.target.currentReservation?.equipmentName ?? null} />,
+        }}
+      />
+    );
+  }
   return (
     <>
       {existing}
@@ -215,10 +359,22 @@ export function ApiRescheduleSlotSearch({
   organizations,
   examTypeOptions,
   reschedule,
+  wizard,
 }: {
   organizations: PartnerOrganization[];
   examTypeOptions: SlotExamTypeOption[] | null;
   reschedule: ApiRescheduleTargetResult;
+  /** PC 한 모달 3단계 (없으면 기존 구조) */
+  wizard?: WizardBridge & { existing: ReactNode };
 }) {
-  return <SlotSearch dataSource="api" organizations={organizations} examTypeOptions={examTypeOptions} apiReschedule={reschedule} embedded />;
+  return (
+    <SlotSearch
+      dataSource="api"
+      organizations={organizations}
+      examTypeOptions={examTypeOptions}
+      apiReschedule={reschedule}
+      embedded
+      rescheduleWizard={wizard}
+    />
+  );
 }

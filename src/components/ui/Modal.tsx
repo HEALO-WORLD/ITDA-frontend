@@ -18,6 +18,8 @@ interface ModalProps {
   closeOnBackdrop?: boolean;
   /** 스크롤 영역 밖 하단에 고정할 요소 (예: 닫기 버튼 줄). 있으면 제목·하단이 고정되고 본문만 스크롤한다 */
   footer?: ReactNode;
+  /** 닫을 수 없는 동안(예: 요청 처리 중) true: Esc·닫기 버튼·바깥 클릭으로 닫히지 않는다. 기본값 false는 기존과 같다 */
+  preventClose?: boolean;
   children: ReactNode;
 }
 
@@ -55,6 +57,7 @@ export default function Modal({
   onClose,
   closeOnBackdrop = true,
   footer,
+  preventClose = false,
   children,
 }: ModalProps) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -87,12 +90,16 @@ export default function Modal({
       ref={dialogRef}
       aria-labelledby={titleId}
       aria-describedby={description ? descriptionId : undefined}
+      onCancel={(event) => {
+        // 요청 처리 중처럼 닫으면 안 될 때: Esc로 닫히지 않게 한다 (기본값 false는 기존과 같다)
+        if (preventClose) event.preventDefault();
+      }}
       onClose={() => {
         // 이 시점의 open은 최신 값이다. Esc로 닫혔으면 아직 true, 부모가 닫았으면 이미 false
         if (open) onClose();
       }}
       onClick={(event) => {
-        if (closeOnBackdrop && event.target === event.currentTarget) onClose();
+        if (closeOnBackdrop && !preventClose && event.target === event.currentTarget) onClose();
       }}
       className={`m-auto max-h-[calc(100dvh-32px)] overflow-hidden rounded-2xl border border-line bg-white p-2 text-left shadow-2xl backdrop:bg-gray-900/45 sm:max-h-[85vh] ${WIDTH_CLASS[size]}`}
     >
@@ -116,6 +123,7 @@ export default function Modal({
             <button
               type="button"
               onClick={onClose}
+              disabled={preventClose}
               aria-label="닫기"
               className="-mr-1.5 shrink-0 rounded-lg p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 focus-visible:outline-2 focus-visible:outline-primary"
             >
