@@ -193,10 +193,11 @@ export function ExistingReservationCard({
         <h3 className="text-sm font-bold text-gray-600">기존 예약</h3>
         <ReferralStatusBadge status="RESCHEDULE_REQUIRED" />
       </div>
-      <p className="mt-2 text-base font-bold tabular-nums text-gray-900">
+      <p className="mt-2.5 text-[11px] font-semibold uppercase tracking-wide text-gray-500">기존 예약일시</p>
+      <p className="text-lg font-bold leading-snug tabular-nums text-gray-900">
         {summary.scheduledAt ? formatDateTimeWithWeekday(summary.scheduledAt) : "검사일시 확인 불가"}
       </p>
-      <dl className="mt-2 flex flex-col gap-1.5 text-sm">
+      <dl className="mt-3 flex flex-col gap-2 border-t border-line pt-3 text-sm">
         <CardItem label="검사기관">{summary.institution}</CardItem>
         <CardItem label="검사 항목">
           {summary.modality ?? "확인 불가"}
@@ -234,7 +235,7 @@ function CardItem({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex gap-2">
       <dt className="w-16 shrink-0 text-gray-500">{label}</dt>
-      <dd className="min-w-0 break-words text-gray-900">{children}</dd>
+      <dd className="min-w-0 text-gray-800 [overflow-wrap:anywhere]">{children}</dd>
     </div>
   );
 }

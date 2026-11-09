@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowRight, Building2, CalendarClock, RefreshCw, RotateCcw, X } from "lucide-react";
+import { AlertTriangle, ArrowRight, Building2, CalendarClock, CheckCircle2, RefreshCw, RotateCcw, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
@@ -1041,25 +1041,40 @@ function SelectedSlotCard({ slot }: { slot: ExamSlot | null }) {
         aria-live="polite"
         className="rounded-xl border border-dashed border-line-strong bg-brand-canvas px-4 py-4 text-sm text-gray-500"
       >
-        <p className="font-semibold text-gray-600">선택한 대체 슬롯</p>
+        <p className="font-semibold text-gray-600">선택한 대체 슬롯 <span className="font-normal text-gray-500">· 아직 선택하지 않음</span></p>
         <p className="mt-1">오른쪽 달력에서 날짜를 고르고 시간을 선택해 주세요.</p>
       </section>
     );
   }
   return (
-    <section aria-label="선택한 대체 슬롯" aria-live="polite" className="rounded-xl border border-brand-mint bg-brand-mint-soft px-4 py-4">
-      <p className="text-sm font-bold text-brand-mint-strong">선택한 대체 슬롯</p>
-      <p className="mt-1.5 flex items-center gap-1.5 text-base font-bold tabular-nums text-gray-900">
+    <section aria-label="선택한 대체 슬롯" aria-live="polite" className="rounded-xl border-2 border-brand-mint bg-brand-mint-soft px-4 py-3.5">
+      <p className="flex items-center gap-1.5 text-sm font-bold text-brand-mint-strong">
+        <CheckCircle2 className="size-4 shrink-0" aria-hidden="true" />
+        선택한 대체 슬롯
+      </p>
+      <p className="mt-1.5 flex items-center gap-1.5 text-lg font-bold leading-snug tabular-nums text-gray-900">
         <CalendarClock className="size-4 shrink-0 text-brand-navy/70" aria-hidden="true" />
         {formatDateTimeWithWeekday(slot.startAt)}
       </p>
-      <p className="mt-1 text-sm text-gray-800">
-        {slot.organizationName} · {slot.examType} {slot.examTypeName ?? ""}
-      </p>
-      <p className="mt-0.5 flex items-center gap-1.5 text-sm text-gray-500">
-        <Building2 className="size-3.5" aria-hidden="true" />
-        {slot.equipmentName}
-      </p>
+      <dl className="mt-2 flex flex-col gap-1 text-sm">
+        <div className="flex gap-2">
+          <dt className="w-16 shrink-0 whitespace-nowrap text-gray-500">검사기관</dt>
+          <dd className="min-w-0 text-gray-800 [overflow-wrap:anywhere]">{slot.organizationName}</dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-16 shrink-0 whitespace-nowrap text-gray-500">검사 항목</dt>
+          <dd className="min-w-0 text-gray-800 [overflow-wrap:anywhere]">
+            {slot.examType} {slot.examTypeName ?? ""}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="w-16 shrink-0 whitespace-nowrap text-gray-500">장비</dt>
+          <dd className="flex min-w-0 items-center gap-1 text-gray-800 [overflow-wrap:anywhere]">
+            <Building2 className="size-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+            {slot.equipmentName}
+          </dd>
+        </div>
+      </dl>
     </section>
   );
 }

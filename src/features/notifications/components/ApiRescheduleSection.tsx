@@ -50,8 +50,8 @@ export async function ApiRescheduleAlert({ searchParams }: { searchParams: Promi
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="min-w-0">
-      <dt className="text-sm font-medium text-gray-500">{label}</dt>
-      <dd className="mt-0.5 break-words text-gray-900">{children}</dd>
+      <dt className="text-[13px] font-medium text-gray-500">{label}</dt>
+      <dd className="mt-0.5 break-words text-sm text-gray-800">{children}</dd>
     </div>
   );
 }
@@ -83,10 +83,13 @@ export default async function ApiRescheduleSection({ searchParams }: { searchPar
         예약 재조정 필요
         <span className="ml-2 text-base font-semibold tabular-nums text-primary">{result.totalElements}건</span>
       </h2>
-      <p className="mb-5 mt-2 text-[15px] text-gray-600">
-        {result.totalElements > 0 && "아래 예약 건은 재조정이 필요합니다."}
-        {result.detailIncomplete && <span className="ml-1 text-sm text-amber-700">일부 예약 정보를 불러오지 못해 &lsquo;—&rsquo;로 표시했습니다.</span>}
-      </p>
+      {/* 건수·의미는 위 배너와 제목에 있으므로 반복 문장은 두지 않는다 */}
+      <p className="mb-4 mt-1 text-sm text-gray-500">기존 예약일시를 확인하고 [새 슬롯 검색]으로 대체 슬롯을 선택해 주세요.</p>
+      {result.detailIncomplete && (
+        <p role="status" className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-800">
+          일부 예약 정보를 불러오지 못해 &lsquo;—&rsquo;로 표시했습니다.
+        </p>
+      )}
 
       {result.rows.length === 0 ? (
         <p role="status" className="rounded-lg border border-dashed border-line px-6 py-12 text-center text-[15px] text-gray-500">
@@ -106,25 +109,32 @@ export default async function ApiRescheduleSection({ searchParams }: { searchPar
               scheduledAt: row.examStartTime.state === "ok" ? row.examStartTime.value.slice(0, 16) : null,
             };
             return (
+              // 카드: 왼쪽 빨간 선(재조정 필요) · 기존 예약일시를 가장 크게 · 나머지 정보는 한 줄 보조 정보 · 오른쪽 주 동작 [새 슬롯 검색]
               <li
                 key={row.referralId}
-                className="flex flex-col gap-4 rounded-xl border border-line px-5 py-4 md:flex-row md:items-center md:justify-between md:gap-6"
+                className="flex flex-col gap-4 rounded-xl border border-line border-l-4 border-l-red-400 bg-white px-5 py-4 shadow-card md:flex-row md:items-center md:justify-between md:gap-6"
               >
-                <dl className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-3 text-[15px] sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)_minmax(0,1.3fr)_auto]">
-                  <Field label="예약번호">
-                    {/* 예약번호 = 현재 예약 ID (축약·복사). 의뢰 ID는 행 key와 대화상자에만 쓴다 */}
-                    {row.reservationId ? <ReferralIdCopyButton referralId={row.reservationId} label="예약번호" /> : <DetailValue cell={{ state: "none" }} />}
-                  </Field>
-                  <Field label="검사기관">
-                    <DetailValue cell={row.examInstitution} />
-                  </Field>
-                  <Field label="검사유형">{typeText}</Field>
-                  <Field label="기존 예약일시">
-                    <DetailValue cell={row.examStartTime} format={formatDateTimeWithWeekday} />
-                  </Field>
-                  <Field label="상태">
-                    <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
-                  </Field>
+                <dl className="flex min-w-0 flex-1 flex-col gap-3">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                    <dt className="sr-only">기존 예약일시</dt>
+                    <dd className="text-lg font-bold tabular-nums text-gray-900">
+                      <DetailValue cell={row.examStartTime} format={formatDateTimeWithWeekday} />
+                    </dd>
+                    <dt className="sr-only">상태</dt>
+                    <dd>
+                      <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
+                    </dd>
+                  </div>
+                  <div className="grid min-w-0 grid-cols-1 gap-x-6 gap-y-2.5 sm:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_auto]">
+                    <Field label="검사기관">
+                      <DetailValue cell={row.examInstitution} />
+                    </Field>
+                    <Field label="검사유형">{typeText}</Field>
+                    <Field label="예약번호">
+                      {/* 예약번호 = 현재 예약 ID (축약·복사). 의뢰 ID는 행 key와 대화상자에만 쓴다 */}
+                      {row.reservationId ? <ReferralIdCopyButton referralId={row.reservationId} label="예약번호" /> : <DetailValue cell={{ state: "none" }} />}
+                    </Field>
+                  </div>
                 </dl>
                 <RescheduleSearchButton
                   entry={{ kind: "api", referralId: row.referralId, summary }}

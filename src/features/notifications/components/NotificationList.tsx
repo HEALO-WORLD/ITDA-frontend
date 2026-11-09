@@ -19,14 +19,14 @@ const TYPE_META: Record<NotificationType, NotificationTypeMeta> = {
   RESCHEDULE_REQUIRED: { label: "재조정 필요", icon: AlertCircle, className: "bg-red-50 text-red-600" },
   RESERVATION_CONFIRMED: { label: "예약 확정", icon: CheckCircle2, className: "bg-emerald-50 text-emerald-600" },
   RESERVATION_CANCELLED: { label: "예약 취소", icon: XCircle, className: "bg-gray-100 text-gray-500" },
-  RESULT_REGISTERED: { label: "검사 결과 등록", icon: FileCheck2, className: "bg-primary-soft text-primary" },
+  RESULT_REGISTERED: { label: "검사 결과 등록", icon: FileCheck2, className: "bg-info-soft text-info" },
 };
 
 /** API 알림 표시. 백엔드 알림 유형 값 목록이 확정되지 않아 유형별 아이콘·문구를 붙이지 않는다 */
 export const API_NOTIFICATION_META: NotificationTypeMeta = {
   label: "알림",
   icon: Bell,
-  className: "bg-primary-soft text-primary",
+  className: "bg-info-soft text-info",
 };
 
 /**
@@ -99,30 +99,32 @@ export function NotificationRow({
   const { label, icon: Icon, className } = meta;
 
   return (
-    <li className="flex gap-3 py-4">
-      <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${className}`}>
+    <li className={`flex gap-3 px-3 py-4 transition-colors ${item.isRead ? "" : "bg-primary-soft/50"}`}>
+      <span className={`flex size-10 shrink-0 items-center justify-center rounded-full ${className} ${item.isRead ? "opacity-60" : ""}`}>
         <Icon className="size-5" aria-hidden="true" />
       </span>
       <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-2">
-          <p className={`text-[15px] text-gray-900 ${item.isRead ? "font-medium" : "font-bold"}`}>
+        <div className="flex flex-col gap-0.5 sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+          <p className={`min-w-0 break-words text-[15px] ${item.isRead ? "font-medium text-gray-600" : "font-bold text-gray-900"}`}>
             <span className="sr-only">{label} 알림: </span>
             {item.title}
           </p>
-          <div className="flex shrink-0 items-center gap-2 pt-0.5">
+          <div className="flex shrink-0 items-center gap-2 sm:pt-0.5">
             <time
               dateTime={item.occurredAt}
               title={formatDateTimeWithWeekday(item.occurredAt)}
-              className="text-sm text-gray-500"
+              className="text-[13px] tabular-nums text-gray-500"
             >
               {formatShortDateTime(item.occurredAt)}
             </time>
             {!item.isRead && (
-              <span className="size-2.5 rounded-full bg-primary" role="img" aria-label="읽지 않음" />
+              <span className="inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 text-[11px] font-bold text-white" role="img" aria-label="읽지 않음">
+                <span aria-hidden="true">NEW</span>
+              </span>
             )}
           </div>
         </div>
-        <p className="mt-1 text-sm text-gray-600">{item.message}</p>
+        <p className={`mt-1 break-words text-sm ${item.isRead ? "text-gray-500" : "text-gray-700"}`}>{item.message}</p>
         {!item.isRead && (
           <button
             type="button"

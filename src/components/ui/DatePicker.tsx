@@ -209,7 +209,23 @@ export default function DatePicker({
   }
 
   return (
-    <div ref={containerRef} className="relative">
+    <div
+      ref={containerRef}
+      className="relative"
+      // 열려 있을 때만 Esc를 여기서 처리한다 (트리거·팝업 어디에 포커스가 있어도).
+      // preventDefault: 부모 <dialog>가 Esc를 닫기 요청으로 처리하지 않게 한다 (stopPropagation만으로는 네이티브 모달이 닫힌다).
+      // 닫혀 있을 때는 아무것도 막지 않아 부모 모달의 Esc 닫기는 그대로다
+      onKeyDown={
+        isOpen
+          ? (event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+            }
+          : undefined
+      }
+    >
       {chip ? (
         <button
           ref={triggerRef}
@@ -252,12 +268,6 @@ export default function DatePicker({
           id={dialogId}
           role="dialog"
           aria-label={`${label} 선택`}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              close();
-            }
-          }}
           style={floating ? (floatingStyle ?? undefined) : undefined}
           className={`${floating ? "fixed" : "absolute left-0 top-full mt-2"} z-30 w-[320px] rounded-xl border border-line bg-white p-4 shadow-lg`}
         >
