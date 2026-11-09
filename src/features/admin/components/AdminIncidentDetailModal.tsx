@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import Modal from "@/components/ui/Modal";
 import StatusBadge, { type StatusTone } from "@/components/ui/StatusBadge";
 import { ROUTES } from "@/constants/navigation";
+import ImpactWindowBadge from "@/features/incidents/components/ImpactWindowBadge";
 import { ManualReviewBadge, ManualReviewNotice } from "@/features/incidents/components/ManualReviewNotice";
 import { AUTO_PROCESSING_NOTE, getResultCodeLabel, PROCESSING_STATUS_LABELS as PROCESSING_LABELS } from "@/features/incidents/processingLabels";
 import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto } from "@/features/incidents/remote";
@@ -59,7 +60,7 @@ export default function AdminIncidentDetailModal({ institutionNames }: { institu
       titleAddon={
         valid && id ? (
           <>
-            {incident && <StatusBadge tone={incident.status === "OCCURRED" ? "danger" : "neutral"}>{incident.status === "OCCURRED" ? "장애 발생" : incident.status}</StatusBadge>}
+            {incident && <ImpactWindowBadge startAt={incident.startAt} endAt={incident.endAt} />}
             <div className="basis-full sm:basis-auto">
               <ShortId id={id} label="장애 ID" />
             </div>
@@ -86,7 +87,7 @@ export default function AdminIncidentDetailModal({ institutionNames }: { institu
                   </Info>
                   <Info label="장애 사유">{incident!.reason || <Empty reason="none" />}</Info>
                   <Info label="장애 발생 시각">{formatDateTimeWithWeekday(incident!.occurredAt)}</Info>
-                  <Info label="영향 구간 (시작~종료)">
+                  <Info label="중단 기간 (시작~종료)">
                     {formatDateTimeWithWeekday(incident!.startAt)} ~ {formatDateTimeWithWeekday(incident!.endAt)}
                   </Info>
                   <Info label="등록 · 수정 시각">
