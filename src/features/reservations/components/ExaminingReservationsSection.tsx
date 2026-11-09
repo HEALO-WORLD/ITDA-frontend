@@ -34,10 +34,15 @@ import {
   type ReservationSortDto,
   type ReservationStatusDto,
 } from "@/features/referrals/remote";
-import { getSeoulNow } from "@/lib/date/seoulDate";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
-import { loadExaminingEquipments, loadExaminingReservationPage, type ExaminingReservationQuery } from "../server";
+import {
+  loadExaminingEquipments,
+  loadExaminingReservationPage,
+  loadTodayConfirmedReservationCount,
+  type ExaminingReservationQuery,
+  type TodayConfirmedCountResult,
+} from "../server";
 
 import ExaminingReservationDetailModal, { ExaminingReservationDetailButton } from "./ExaminingReservationDetailModal";
 
@@ -69,14 +74,16 @@ interface Query {
  * - 장비 이름: 우리 기관 장비 목록 1회 (실패하면 ID로 표시하고 장비 조건은 ID 입력으로 받는다)
  * - 예약 응답에 없는 환자명·의뢰기관·검사 유형은 보이지 않는다 (검사기관은 의뢰 단건 API 권한이 없다)
  * - 배포 와이어프레임(Mock 화면)처럼 요약 바 → '예약 목록' 카드(검색 조건·건수·표·페이지)로 배치한다.
- *   요약은 상태별 전체 건수 API가 없어 현재 페이지만 센다 ('현재 페이지 기준'으로 표시)
+ *   요약은 '오늘 검사 예정' 하나: 같은 목록 API에 오늘·CONFIRMED 조건만 넣어 받은 totalElements (현재 페이지로 세지 않는다)
  */
 export default async function ExaminingReservationsSection({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const query = parseQuery(await searchParams);
   if (!query) {
     return <AdminFailureNotice failure={{ ok: false, reason: "ERROR", message: "검색 조건 값이 올바르지 않습니다. 장비·상태를 다시 선택하고, 검사 시작일이 종료일보다 늦지 않게 선택해 주세요.", code: null }} />;
   }
-  const [equipments, list] = await Promise.all([loadExaminingEquipments(), loadExaminingReservationPage(query.list)]);
+  // 오늘 검사 예정 건수는 목록 조건(query)을 넘기지 않는 별도 조회다 (목록 검색·페이지와 무관한 기관 전체 기준)
+  const [equipments, list, todayCount] = await Promise.all([loadExaminingEquipments(), loadExaminingReservationPage(query.list), loadTodayConfirmedReservationCount()]);
+  // 목록이 실패하면(로그인·권한 오류 포함) 목록 실패 안내 하나만 보인다
   if (!list.ok) return <AdminFailureNotice failure={list} />;
   const equipmentNames: Record<string, string> = Object.fromEntries((equipments.ok ? equipments.equipments : []).map((item) => [item.id.toLowerCase(), item.name]));
 
@@ -97,7 +104,7 @@ export default async function ExaminingReservationsSection({ searchParams }: { s
 
   return (
     <div className="flex flex-col gap-5">
-      <ReservationSummary items={list.items} />
+      <TodayExamSummary result={todayCount} />
       <section aria-labelledby="exam-resv-list-title" className="flex min-w-0 flex-col gap-4 rounded-xl border border-line bg-white px-4 pb-5 pt-5 sm:px-6">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 id="exam-resv-list-title" className="text-lg font-bold text-gray-900">
@@ -260,24 +267,25 @@ function isDate(value: string): boolean {
 }
 
 /**
- * 예약 현황 요약 (와이어프레임: 오늘 예약 · 확정 · 처리 중 · 재조정 필요 · 취소).
- * 상태별 전체 건수 API가 없어 현재 페이지에 받은 예약만 센다. 처리 중 = 요청·선점, 재조정 필요 = 실패·차단
+ * 오늘 검사 예정 (우리 기관의 오늘(Asia/Seoul) 확정 예약 전체 건수, loadTodayConfirmedReservationCount).
+ * 목록의 검색 조건·페이지와 관계없다. 조회에 실패하면 0건이 아니라 '집계 확인 불가'로 보인다.
+ * (재조정 필요 건수는 장비 장애·재조정 화면의 의뢰 기준 집계와 혼동되지 않도록 이 화면에서 세지 않는다)
  */
-function ReservationSummary({ items }: { items: { reservationStatus: string; startTime: string | null }[] }) {
-  const today = getSeoulNow().dateKey;
-  const count = (...statuses: string[]) => items.filter((item) => statuses.includes(item.reservationStatus)).length;
-  const reschedule = count("FAILED", "BLOCKED");
+function TodayExamSummary({ result }: { result: TodayConfirmedCountResult }) {
   return (
     <SummaryBar
-      ariaLabel="예약 현황 요약"
-      scope={`현재 페이지 기준 (${items.length}건) · 전체 상태별 건수는 제공되지 않습니다`}
+      ariaLabel="오늘 검사 예정 요약"
+      scope={result.ok ? `${result.date} · 검사기관 전체 확정 예약 기준` : "검사기관 전체 확정 예약 기준"}
       items={[
-        { label: "오늘 예약", value: `${items.filter((item) => item.startTime?.startsWith(today) && item.reservationStatus !== "CANCELED").length}건` },
-        { label: "확정", value: `${count("CONFIRMED")}건`, valueClass: "text-emerald-700" },
-        { label: "처리 중", value: `${count("REQUESTED", "HELD")}건`, valueClass: "text-primary" },
-        { label: "재조정 필요", value: `${reschedule}건`, valueClass: reschedule > 0 ? "text-red-600" : "text-gray-900" },
-        { label: "취소", value: `${count("CANCELED")}건`, valueClass: "text-gray-500" },
+        result.ok
+          ? { label: "오늘 검사 예정", value: `${result.count}건` }
+          : { label: "오늘 검사 예정", value: "집계 확인 불가", valueClass: "rounded-md bg-gray-100 px-2 py-0.5 text-sm! font-semibold text-gray-600" },
       ]}
+      note={
+        result.ok
+          ? "아래 목록의 검색 조건·페이지와 관계없이, 오늘 검사가 확정된 예약 전체 건수입니다."
+          : "오늘 검사 예정 건수를 불러오지 못했습니다. 예약 목록은 그대로 확인할 수 있습니다."
+      }
     />
   );
 }
