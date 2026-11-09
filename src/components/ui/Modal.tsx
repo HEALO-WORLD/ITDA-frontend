@@ -1,5 +1,5 @@
 import { X } from "lucide-react";
-import { useEffect, useId, useRef, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from "react";
 
 interface ModalProps {
   open: boolean;
@@ -74,6 +74,18 @@ export default function Modal({
     if (!open && dialog.open) dialog.close();
   }, [open]);
 
+  // 부모가 Modal을 즉시 제거하는 방식으로 닫을 때(예: 취소·X → {open && <Dialog />}가 사라짐)도 네이티브 닫기 흐름을 거친다.
+  // 열린 <dialog>를 close() 없이 DOM에서 빼면 브라우저가 포커스를 연 요소로 되돌리지 않고 body로 보낸다.
+  // useLayoutEffect 정리 함수는 DOM 제거 전에 실행되므로 이때 close()하면 브라우저가 연 요소로 포커스를 되돌린다
+  // (연 요소가 이미 없으면 브라우저가 아무것도 하지 않는다). 이미 닫힌 경우(Esc·open=false)는 건너뛰어 중복으로 닫지 않는다.
+  // 이때 뒤늦게 오는 close 이벤트는 아래 onClose에서 무시한다 (제거된 dialog)
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    return () => {
+      if (dialog?.open) dialog.close();
+    };
+  }, []);
+
   // 열려 있는 동안 배경(페이지) 스크롤을 막는다. 닫히면 이전 값으로 되돌려 목록 스크롤 위치는 그대로다
   useEffect(() => {
     if (!open) return;
@@ -94,9 +106,12 @@ export default function Modal({
         // 요청 처리 중처럼 닫으면 안 될 때: Esc로 닫히지 않게 한다 (기본값 false는 기존과 같다)
         if (preventClose) event.preventDefault();
       }}
-      onClose={() => {
-        // 이 시점의 open은 최신 값이다. Esc로 닫혔으면 아직 true, 부모가 닫았으면 이미 false
-        if (open) onClose();
+      onClose={(event) => {
+        // 이 시점의 open은 최신 값이다. Esc로 닫혔으면 아직 true, 부모가 닫았으면 이미 false.
+        // 언마운트 중 close()로 닫힌 dialog(DOM에서 빠짐)나 그사이 다시 열린 dialog(개발 모드 Strict Mode의 재실행)의
+        // 늦은 close 이벤트로는 onClose를 부르지 않는다 (다른 모달까지 닫히는 것을 막는다)
+        const dialog = event.currentTarget;
+        if (open && dialog.isConnected && !dialog.open) onClose();
       }}
       onClick={(event) => {
         if (closeOnBackdrop && !preventClose && event.target === event.currentTarget) onClose();

@@ -20,7 +20,7 @@ export default function SummaryBar({ ariaLabel, items, scope, note }: { ariaLabe
           <SummaryRow key={item.label} item={item} divider={index > 0} />
         ))}
       </ul>
-      {note && <p className="mt-2 text-xs text-gray-500">{note}</p>}
+      {note && <p className="mt-3 border-t border-line pt-3 text-[13px] leading-relaxed text-gray-600">{note}</p>}
     </section>
   );
 }

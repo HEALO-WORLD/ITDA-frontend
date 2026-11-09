@@ -167,9 +167,9 @@ describe("검사결과 화면", () => {
     assert.match(expired, /다시 로그인/);
   });
 
-  it("버튼: '상세'와 같은 모양의 [검사결과], 열기 전에는 조회하지 않는다", () => {
+  it("버튼: '상세'와 같은 크기(h-9)·한 단계 낮은 위계(회색 테두리·글자)의 [검사결과], 열기 전에는 조회하지 않는다", () => {
     const html = renderToStaticMarkup(createElement(ui.default, { referralId: REFERRAL }));
-    assert.match(html, /<button[^>]*aria-haspopup="dialog"[^>]*aria-label="[^"]*검사결과"[^>]*class="inline-flex h-9[^"]*border-primary\/40[^"]*">검사결과<\/button>/);
+    assert.match(html, /<button[^>]*aria-haspopup="dialog"[^>]*aria-label="[^"]*검사결과"[^>]*class="inline-flex h-9[^"]*border-line[^"]*text-gray-700[^"]*">검사결과<\/button>/);
     assert.equal(state.calls.length, 0);
   });
 });

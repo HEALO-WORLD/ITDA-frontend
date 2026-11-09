@@ -140,23 +140,27 @@ export default function ReferralApiTable({ rows, page, totalPages, totalElements
             </thead>
             <tbody>
               {rows.map((row) => (
-                <tr key={row.referralId} className={rowClass}>
+                <tr key={row.referralId} className={`${rowClass} align-middle`}>
                   <td className={`${tdClass} whitespace-nowrap`}>
                     <ReferralIdCopyButton referralId={row.referralId} />
                   </td>
-                  <td className={`${tdClass} whitespace-nowrap font-semibold text-gray-900`}>{row.patientName}</td>
-                  <td className={`${tdClass} whitespace-nowrap`}>
-                    <DetailValue cell={row.examInstitution} />
+                  {/* 주요 정보: 환자명은 굵은 진한 글자, 검사기관은 보통 굵기 (긴 이름은 말줄임, 전체 이름은 툴팁) */}
+                  <td className={`${tdClass} whitespace-nowrap text-[15px] font-semibold text-gray-900`}>{row.patientName}</td>
+                  <td className={`${tdClass} max-w-[240px]`}>
+                    <span className="block truncate font-medium text-gray-800" title={row.examInstitution.state === "ok" ? row.examInstitution.value : undefined}>
+                      <DetailValue cell={row.examInstitution} />
+                    </span>
                   </td>
-                  <td className={tdClass}>{row.examTypeLabel}</td>
-                  <td className={`${tdClass} whitespace-nowrap`}>
+                  <td className={`${tdClass} min-w-[140px] break-keep`}>{row.examTypeLabel}</td>
+                  <td className={`${tdClass} whitespace-nowrap tabular-nums`}>
                     <DetailValue cell={row.examStartTime} format={formatDateTimeWithWeekday} />
                   </td>
                   <td className={`${tdClass} text-center`}>
                     <ReferralStatusBadge status={toBadgeStatus(row.referralStatus)} />
                   </td>
-                  <td className={`${tdClass} text-center`}>
-                    <div className="flex items-center justify-center gap-2">
+                  <td className={`${tdClass} w-px text-center`}>
+                    {/* 상세(네이비 강조) · 검사결과(회색 보조), 같은 높이·간격 */}
+                    <div className="flex items-center justify-center gap-1.5 whitespace-nowrap">
                       <ReferralApiDetailButton
                         referralId={row.referralId}
                         examTypeLabel={row.examTypeLabel}

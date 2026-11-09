@@ -42,10 +42,11 @@ export default function RoleSidebar({ role }: RoleSidebarProps) {
                   href={href}
                   aria-current={isActive ? "page" : undefined}
                   className={`${itemBase} ${
-                    isActive ? "bg-primary-soft font-semibold text-primary" : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                    // 활성: 민트 연한 배경 + 네이비 글자(+ 왼쪽 민트 막대) / 나머지: 회색 글자, 올리면 연한 배경
+                    isActive ? "bg-primary-soft font-semibold text-primary" : "text-gray-600 hover:bg-gray-100/70 hover:text-gray-900"
                   }`}
                 >
-                  {isActive && <span className="absolute -left-3 top-1.5 bottom-1.5 hidden w-1 rounded-r bg-primary md:block" aria-hidden="true" />}
+                  {isActive && <span className="absolute -left-3 top-1.5 bottom-1.5 hidden w-1 rounded-r bg-brand-mint md:block" aria-hidden="true" />}
                   <Icon className={`size-[18px] ${isActive ? "text-primary" : "text-gray-400"}`} strokeWidth={1.8} aria-hidden="true" />
                   {label}
                 </Link>

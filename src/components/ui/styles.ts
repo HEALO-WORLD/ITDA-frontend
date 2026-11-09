@@ -17,14 +17,20 @@ export const filterPanelClass = "flex flex-col gap-3 rounded-xl border border-li
 export const controlClass =
   "h-10 w-full rounded-lg border border-line bg-white px-3 text-sm text-gray-900 shadow-sm outline-none transition-colors placeholder:text-gray-400 focus:border-primary focus:ring-2 focus:ring-primary/15 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400";
 
-// ── 버튼 ──
+// ── 버튼 ── (Primary: 네이비 배경·흰 글자 / Secondary: 흰 배경·테두리·네이비 글자 / Detail: 흰 배경·네이비 강조 / 비활성: 회색)
 export const primaryButtonClass =
-  "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none";
 export const secondaryButtonClass =
-  "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50";
+  "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-sm font-semibold text-primary shadow-sm transition-colors hover:border-line-strong hover:bg-gray-50 disabled:cursor-not-allowed disabled:bg-gray-50 disabled:text-gray-400 disabled:shadow-none";
+/** 보조 동작(초기화 등): 테두리 없는 가벼운 버튼 (주 동작 버튼 옆에서 위계를 낮춘다) */
+export const ghostButtonClass =
+  "inline-flex h-10 items-center justify-center gap-1.5 rounded-lg px-3 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 disabled:cursor-not-allowed disabled:text-gray-400";
 /** 표의 '상세' 버튼·링크 (Mock·API·관리자 공통) */
 export const detailButtonClass =
   "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg border border-primary/40 bg-white px-3.5 text-sm font-semibold text-primary transition-colors hover:border-primary hover:bg-primary-soft";
+/** 표 안의 두 번째 조회 버튼 (예: 검사결과). '상세'보다 한 단계 낮은 위계: 회색 테두리·글자 */
+export const subtleDetailButtonClass =
+  "inline-flex h-9 items-center justify-center whitespace-nowrap rounded-lg border border-line bg-white px-3.5 text-sm font-semibold text-gray-700 transition-colors hover:border-line-strong hover:bg-gray-50";
 
 // ── 빈 상태·건수 ──
 export const emptyStateClass = "rounded-xl border border-dashed border-line-strong bg-white px-6 py-14 text-center text-[15px] text-gray-500";
@@ -34,6 +40,6 @@ export const emptyStateClass = "rounded-xl border border-dashed border-line-stro
 export const searchCardClass = "flex flex-col gap-5 rounded-xl border border-line bg-white px-5 py-5 sm:px-8 sm:py-6";
 export const searchGridClass = "grid grid-cols-1 items-start gap-x-5 gap-y-4 sm:grid-cols-2 xl:grid-cols-4";
 export const searchButtonClass =
-  "inline-flex h-11 min-w-[112px] items-center justify-center gap-2 rounded-lg bg-primary px-6 text-base font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60";
+  "inline-flex h-11 min-w-[112px] items-center justify-center gap-2 rounded-lg bg-primary px-6 text-base font-bold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none";
 export const resetButtonClass =
-  "inline-flex h-11 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-[15px] font-semibold text-gray-700 hover:bg-gray-50";
+  "inline-flex h-11 items-center justify-center gap-1.5 rounded-lg border border-line bg-white px-4 text-[15px] font-semibold text-primary transition-colors hover:border-line-strong hover:bg-gray-50";
