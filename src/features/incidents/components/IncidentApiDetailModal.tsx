@@ -21,10 +21,11 @@ import { formatDateTimeWithWeekday } from "@/lib/format/date";
 import { loadExaminingIncidentDetailAction, type ExaminingIncidentDetailResult } from "../detailActions";
 import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto, type IncidentReferralItem } from "../remote";
 import type { IncidentLoadFailure } from "../server";
+import { AUTO_PROCESSING_NOTE, getResultCodeLabel, PROCESSING_STATUS_LABELS as PROCESSING_LABELS } from "../processingLabels";
+
 import { ManualReviewBadge, ManualReviewNotice } from "./ManualReviewNotice";
 
 const PARAM = "incidentId";
-const PROCESSING_LABELS: Record<IncidentProcessingStatusDto, string> = { PENDING: "대기", PROCESSING: "처리 중", SUCCEEDED: "처리 완료", FAILED: "실패" };
 const PROCESSING_TONE: Record<IncidentProcessingStatusDto, StatusTone> = { PENDING: "neutral", PROCESSING: "info", SUCCEEDED: "success", FAILED: "warning" };
 const FAILURE_TITLES: Record<IncidentLoadFailure["reason"], string> = {
   SIGNED_OUT: "로그인이 필요합니다.",
@@ -135,6 +136,7 @@ export default function IncidentApiDetailModal({ equipmentNames }: { equipmentNa
                   <Count label={PROCESSING_LABELS.SUCCEEDED} value={incident!.completedCount} />
                   <Count label={PROCESSING_LABELS.FAILED} value={incident!.failedCount} alert />
                 </ul>
+                <p className="mt-2.5 break-keep text-xs leading-relaxed text-gray-500">{AUTO_PROCESSING_NOTE}</p>
               </InfoCard>
             </div>
             <InfoCard icon={AlertTriangle} title="영향받은 의뢰 후속 처리" className="min-w-0 self-start">
@@ -232,14 +234,20 @@ export function AffectedItem({ item }: { item: IncidentReferralItem }) {
         <Small label="예약">
           <ShortId id={item.reservationId} label="예약 ID" />
         </Small>
-        <Small label="결과 코드">{item.resultCode ? <code className="font-mono text-xs">{item.resultCode}</code> : "없음"}</Small>
+        <Small label="처리 결과">{item.resultCode ? <ResultCode code={item.resultCode} /> : "없음"}</Small>
         <Small label="재시도">{item.retryCount}회</Small>
         <Small label="다음 재시도">{item.nextRetryAt ? formatDateTimeWithWeekday(item.nextRetryAt) : "없음"}</Small>
-        <Small label="처리 완료">{item.processedAt ? formatDateTimeWithWeekday(item.processedAt) : "없음"}</Small>
+        <Small label="자동 처리 시각">{item.processedAt ? formatDateTimeWithWeekday(item.processedAt) : "없음"}</Small>
       </dl>
       {manualReview && <ManualReviewNotice />}
     </li>
   );
+}
+
+/** 결과 코드: 알려진 코드는 한글 문구(원래 코드는 title), 모르는 코드는 원래 값 그대로 (화면이 깨지지 않게) */
+function ResultCode({ code }: { code: string }) {
+  const label = getResultCodeLabel(code);
+  return label ? <span title={code}>{label}</span> : <code className="font-mono text-xs">{code}</code>;
 }
 
 function Small({ label, children }: { label: string; children: ReactNode }) {

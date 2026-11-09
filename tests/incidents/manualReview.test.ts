@@ -21,7 +21,8 @@ const RESERVATION = "aaaaaaaa-8888-4888-8888-888888888888";
 const TASK = "bbbbbbbb-9999-4999-8999-999999999999";
 
 const NOTICE = "장비 장애 발생 당시 검사가 진행 중이어서 자동 재조정 대상에서 제외되었습니다.";
-const NOTICE_MEANING = "‘처리 완료’는 자동 장애 처리 작업이 끝났다는 뜻이며, 검사 완료나 담당자의 확인 완료를 뜻하지 않습니다.";
+// 처리 상태 문구가 '자동 처리 완료'로 바뀌어 안내도 같은 문구를 쓴다 (의미는 그대로)
+const NOTICE_MEANING = "‘자동 처리 완료’는 자동 장애 처리 작업이 끝났다는 뜻이며, 검사 완료나 담당자의 확인 완료를 뜻하지 않습니다.";
 
 type Access = { ok: true; headers: HeadersInit; user: { userId: string; institutionId: string } };
 const okAccess: Access = { ok: true, headers: { Authorization: "Bearer test" }, user: { userId: USER, institutionId: ORG } };
