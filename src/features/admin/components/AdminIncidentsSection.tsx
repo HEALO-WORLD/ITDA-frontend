@@ -2,7 +2,7 @@ import { RotateCcw, Search } from "lucide-react";
 import Link from "next/link";
 
 import { SelectInput, TextInput } from "@/components/ui/FormControls";
-import SharedStatusBadge from "@/components/ui/StatusBadge";
+import ImpactWindowBadge from "@/features/incidents/components/ImpactWindowBadge";
 import { resetButtonClass, searchButtonClass, searchCardClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import NotificationPagination from "@/features/notifications/components/NotificationPagination";
@@ -128,8 +128,8 @@ function IncidentTable({
             <th scope="col" className={thClass}>검사기관</th>
             <th scope="col" className={thClass}>장비 ID</th>
             <th scope="col" className={thClass}>장애 사유</th>
-            <th scope="col" className={thClass}>영향 구간</th>
-            <th scope="col" className={`${thClass} text-center!`}>장애 상태</th>
+            <th scope="col" className={thClass}>중단 기간</th>
+            <th scope="col" className={`${thClass} text-center!`}>상태</th>
             <th scope="col" className={`${thClass} text-center!`}>상세</th>
           </tr>
         </thead>
@@ -146,7 +146,7 @@ function IncidentTable({
                 </td>
                 <td className={`${tdClass} max-w-[280px] truncate`} title={incident.reason}>{incident.reason || <Dash />}</td>
                 <td className={`${tdClass} whitespace-nowrap text-sm tabular-nums`}>{formatDateTime(incident.startAt)} ~ {formatDateTime(incident.endAt)}</td>
-                <td className={`${tdClass} text-center`}><StatusBadge status={incident.status} /></td>
+                <td className={`${tdClass} whitespace-nowrap text-center`}><ImpactWindowBadge startAt={incident.startAt} endAt={incident.endAt} /></td>
                 <td className={`${tdClass} text-center`}>
                   <AdminIncidentDetailButton incidentId={incident.incidentId} label={`${formatDateTime(incident.occurredAt)} 장애 상세 보기`} />
                 </td>
@@ -203,10 +203,6 @@ function parsePage(raw: string): number | null {
 }
 
 const short = (id: string) => `${id.slice(0, 8)}…${id.slice(-4)}`;
-
-function StatusBadge({ status }: { status: string }) {
-  return <SharedStatusBadge tone={status === "OCCURRED" ? "danger" : "neutral"}>{status === "OCCURRED" ? "장애 발생" : status}</SharedStatusBadge>;
-}
 
 function Dash() {
   return <span className="text-gray-400">-</span>;

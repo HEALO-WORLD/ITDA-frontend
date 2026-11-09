@@ -23,6 +23,7 @@ import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto, type In
 import type { IncidentLoadFailure } from "../server";
 import { AUTO_PROCESSING_NOTE, getResultCodeLabel, PROCESSING_STATUS_LABELS as PROCESSING_LABELS } from "../processingLabels";
 
+import ImpactWindowBadge from "./ImpactWindowBadge";
 import { ManualReviewBadge, ManualReviewNotice } from "./ManualReviewNotice";
 
 const PARAM = "incidentId";
@@ -78,7 +79,7 @@ export default function IncidentApiDetailModal({ equipmentNames }: { equipmentNa
       titleAddon={
         valid && id ? (
           <>
-            {incident && <StatusBadge tone={incident.status === "OCCURRED" ? "danger" : "neutral"}>{incident.status === "OCCURRED" ? "장애 발생" : incident.status}</StatusBadge>}
+            {incident && <ImpactWindowBadge startAt={incident.startAt} endAt={incident.endAt} />}
             <div className="basis-full sm:basis-auto">
               <ShortId id={id} label="장애 ID" />
             </div>
@@ -113,11 +114,11 @@ export default function IncidentApiDetailModal({ equipmentNames }: { equipmentNa
                       <ShortId id={incident!.equipmentId} label="장비 ID" />
                     )}
                   </Info>
-                  <Info label="장애 상태">
-                    <StatusBadge tone={incident!.status === "OCCURRED" ? "danger" : "neutral"}>{incident!.status === "OCCURRED" ? "장애 발생" : incident!.status}</StatusBadge>
+                  <Info label="상태">
+                    <ImpactWindowBadge startAt={incident!.startAt} endAt={incident!.endAt} />
                   </Info>
                   <Info label="장애 발생 시각">{formatDateTimeWithWeekday(incident!.occurredAt)}</Info>
-                  <Info label="영향 구간 (시작~종료)">
+                  <Info label="중단 기간 (시작~종료)">
                     {formatDateTimeWithWeekday(incident!.startAt)} ~ {formatDateTimeWithWeekday(incident!.endAt)}
                   </Info>
                   <Info label="장애 사유">{incident!.reason || <Empty reason="none" />}</Info>

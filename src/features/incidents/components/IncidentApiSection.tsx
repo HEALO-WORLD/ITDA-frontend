@@ -16,6 +16,7 @@ import { loadIncidentPage, loadIncidentEquipmentLookup, loadIncidentSummary, typ
 import IncidentApiDetailModal, { IncidentApiDetailButton } from "./IncidentApiDetailModal";
 import IncidentApiSummary from "./IncidentApiSummary";
 import IncidentDowntimeRegister from "./IncidentDowntimeRegister";
+import ImpactWindowBadge from "./ImpactWindowBadge";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -182,7 +183,7 @@ function IncidentApiTable({
           <col className="w-[88px]" />
           <col className="w-[156px]" />
           <col className="w-[180px]" />
-          <col className="w-[104px]" />
+          <col className="w-[128px]" />
           <col className="w-[88px]" />
         </colgroup>
         <thead className="bg-gray-50">
@@ -191,8 +192,8 @@ function IncidentApiTable({
             <th scope="col" className={thClass}>장비명</th>
             <th scope="col" className={thClass}>검사 유형</th>
             <th scope="col" className={thClass}>장애 발생일시</th>
-            <th scope="col" className={thClass}>영향 구간</th>
-            <th scope="col" className={`${thClass} text-center!`}>장애 상태</th>
+            <th scope="col" className={thClass}>중단 기간</th>
+            <th scope="col" className={`${thClass} text-center!`}>상태</th>
             <th scope="col" className={`${thClass} text-center!`}>상세</th>
           </tr>
         </thead>
@@ -228,8 +229,8 @@ function IncidentApiTable({
                   <span className="block">{formatDateTime(incident.startAt)}</span>
                   <span className="block text-gray-500">~ {formatDateTime(incident.endAt)}</span>
                 </td>
-                <td className={`${tdClass} text-center`}>
-                  <IncidentApiStatusBadge status={incident.status} />
+                <td className={`${tdClass} whitespace-nowrap text-center`}>
+                  <ImpactWindowBadge startAt={incident.startAt} endAt={incident.endAt} />
                 </td>
                 <td className={`${tdClass} text-center`}>
                   <IncidentApiDetailButton incidentId={incident.incidentId} label={`${formatDateTime(incident.occurredAt)} 장애 상세 보기`} />
@@ -240,21 +241,6 @@ function IncidentApiTable({
         </tbody>
       </table>
     </div>
-  );
-}
-
-/** 장애 상태 배지. OCCURRED 외 값(백엔드 미확정)은 받은 값 그대로 보여 준다 */
-function IncidentApiStatusBadge({ status }: { status: string }) {
-  const isOccurred = status === "OCCURRED";
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[13px] font-semibold leading-none ring-1 ring-inset ring-black/5 ${
-        isOccurred ? "bg-red-50 text-red-600" : "bg-gray-100 text-gray-700"
-      }`}
-    >
-      <span className={`size-1.5 rounded-full ${isOccurred ? "bg-red-500" : "bg-gray-400"}`} aria-hidden="true" />
-      {isOccurred ? "장애 발생" : status}
-    </span>
   );
 }
 
