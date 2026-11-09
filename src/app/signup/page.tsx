@@ -30,10 +30,10 @@ export default function SignupPage() {
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader subtitle="의료기관 검사 의뢰·예약 플랫폼" />
-      <main className="flex flex-1 flex-col items-center justify-center px-4 py-16">
-        <section className="w-full max-w-[652px] rounded-xl border border-line bg-white px-14 py-14">
-          <h1 className="text-center text-[34px] font-bold text-gray-900">회원가입</h1>
-          <p className="mt-3 text-center text-lg text-gray-600">소속 기관을 선택하고 계정을 만드세요.</p>
+      <main className="flex flex-1 flex-col items-center justify-center px-4 py-10 sm:py-16">
+        <section className="w-full max-w-[652px] rounded-xl border border-line bg-white px-6 py-10 shadow-card sm:px-14 sm:py-14">
+          <h1 className="text-center text-[28px] font-bold text-gray-900 sm:text-[34px]">회원가입</h1>
+          <p className="mt-3 text-center text-base text-gray-600 sm:text-lg">소속 기관을 선택하고 계정을 만드세요.</p>
 
           <div className="mt-10">
             {mode === "api" ? (

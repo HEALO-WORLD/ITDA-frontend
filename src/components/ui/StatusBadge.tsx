@@ -8,7 +8,7 @@ export type StatusTone = "success" | "info" | "warning" | "danger" | "neutral" |
 
 const TONE_CLASS: Record<StatusTone, string> = {
   success: "bg-emerald-50 text-emerald-700 ring-emerald-600/20",
-  info: "bg-primary-soft text-primary ring-primary/20",
+  info: "bg-info-soft text-info ring-info/20",
   warning: "bg-orange-50 text-orange-700 ring-orange-600/20",
   danger: "bg-red-50 text-red-600 ring-red-600/20",
   neutral: "bg-gray-100 text-gray-700 ring-gray-500/20",
@@ -17,7 +17,7 @@ const TONE_CLASS: Record<StatusTone, string> = {
 
 const DOT_CLASS: Record<StatusTone, string> = {
   success: "bg-emerald-500",
-  info: "bg-primary",
+  info: "bg-info",
   warning: "bg-orange-500",
   danger: "bg-red-500",
   neutral: "bg-gray-500",

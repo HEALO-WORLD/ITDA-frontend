@@ -1,21 +1,32 @@
 @import "tailwindcss";
 
 /*
- * 디자인 토큰 (Modern Healthcare B2B SaaS)
- * - Primary: 기존 ITDA 블루 유지
- * - 회색(gray-*)은 슬레이트 톤으로 바꿔 모든 화면의 글자·배경·테두리를 차분한 네이비 계열로 맞춘다
- *   (클래스 이름은 그대로라 기존 화면 구조·기능에는 영향이 없다)
- * - 의미 색상: success(그린)·warning(앰버)·danger(레드)·info(블루). 배지·안내 영역은 *-soft 배경 + 진한 글자
+ * 디자인 토큰 (ITDA 업무용 화면 공통, 로고 기준 네이비·민트)
+ * - 브랜드: brand-navy(#0B2545) · brand-mint(#5EEAD4). primary = 네이비 (주요 버튼·활성 메뉴·제목·선택·포커스),
+ *   primary-soft = 민트 계열 연한 배경 (선택된 항목·활성 메뉴 배경). 민트는 흰 배경 위 작은 글자색으로 쓰지 않는다
+ *   (민트 배경에는 네이비 글자, 진한 청록 글자가 필요하면 brand-mint-strong)
+ * - 캔버스(페이지 배경) #F6F8FB · 구분선 #E2E8F0 · 카드·모달 #FFFFFF
+ * - 회색(gray-*)은 슬레이트 톤. 가장 진한 글자(gray-900)는 브랜드 네이비로 맞춘다 (클래스 이름은 그대로)
+ * - 의미 색상은 브랜드색과 분리해 유지: success(그린)·warning(앰버)·danger(레드)·info(블루, 진행 중·정보).
+ *   진행 중 상태를 primary로 표시하지 않는다 (StatusBadge info = info 토큰)
  */
 @theme {
-  --color-primary: #0b63f3;
-  --color-primary-hover: #0a56d6;
-  --color-primary-soft: #eaf1fe;
-  --color-navy: #0f1d3a;
+  --color-brand-navy: #0b2545;
+  --color-brand-navy-hover: #163a63;
+  --color-brand-mint: #5eead4;
+  --color-brand-mint-soft: #ecfdf9;
+  --color-brand-mint-strong: #0f766e;
+  --color-brand-canvas: #f6f8fb;
+
+  --color-primary: var(--color-brand-navy);
+  --color-primary-hover: var(--color-brand-navy-hover);
+  --color-primary-soft: var(--color-brand-mint-soft);
+  /* 이전 이름 호환 (로고 등) */
+  --color-navy: var(--color-brand-navy);
   --color-line: #e2e8f0;
   --color-line-strong: #cbd5e1;
   --color-surface: #ffffff;
-  --color-surface-muted: #f5f7fa;
+  --color-surface-muted: var(--color-brand-canvas);
 
   --color-gray-50: #f8fafc;
   --color-gray-100: #f1f5f9;
@@ -26,7 +37,7 @@
   --color-gray-600: #475569;
   --color-gray-700: #334155;
   --color-gray-800: #1e293b;
-  --color-gray-900: #0f172a;
+  --color-gray-900: var(--color-brand-navy);
 
   --color-success: #15803d;
   --color-success-soft: #ecfdf3;
@@ -38,14 +49,6 @@
   --color-info-soft: #eaf1fe;
 
   --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 3px rgb(15 23 42 / 0.04);
-
-  /* ITDA 브랜드 (로고 기준). 지금은 .itda-brand 범위(시범: 의뢰기관 슬롯 검색)에서만 쓴다 */
-  --color-brand-navy: #0b2545;
-  --color-brand-navy-hover: #163a63;
-  --color-brand-mint: #5eead4;
-  --color-brand-mint-soft: #ecfdf9;
-  --color-brand-mint-strong: #0f766e;
-  --color-brand-canvas: #f6f8fb;
 
   --font-sans: "Pretendard", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
 }
@@ -59,24 +62,10 @@ body {
 }
 
 /*
- * ITDA 브랜드 범위 (시범 적용: /referring/slots).
- * - 범위 안에서만 primary를 딥 네이비, primary-soft를 민트 계열로 바꾼다 → 기존 bg-primary·text-primary·ring-primary 클래스가 그대로 브랜드 색이 된다
- * - `itda:` 변형은 범위 안에서만 적용되는 추가 스타일 (같은 컴포넌트를 쓰는 재조정·알림 대화상자는 기존 모양 유지)
- * - 범위 밖 화면에는 영향이 없다
+ * `itda:` 변형: .itda-brand 범위(의뢰기관 슬롯 검색 화면, PC 재조정 모달 .itda-brand--embedded)에서만 적용되는 화면 전용 배치·모양.
+ * 색 토큰은 이제 전체 공통이라 범위에서 따로 바꾸지 않는다 (브랜드 색은 모든 화면에 같다). 범위 클래스와 변형은 화면 전용 배치 때문에 유지한다
  */
 @custom-variant itda (&:where(.itda-brand, .itda-brand *));
-
-.itda-brand {
-  --color-primary: var(--color-brand-navy);
-  --color-primary-hover: var(--color-brand-navy-hover);
-  --color-primary-soft: var(--color-brand-mint-soft);
-  --color-gray-900: var(--color-brand-navy);
-}
-
-/* 페이지 배경은 페이지 범위에서만 바꾼다 (모달 안 범위 .itda-brand--embedded는 뒤 페이지 배경을 바꾸지 않는다) */
-body:has(.itda-brand:not(.itda-brand--embedded)) {
-  background: var(--color-brand-canvas);
-}
 
 /* 키보드 포커스 표시 (마우스 클릭에는 보이지 않는다). 개별 요소가 따로 정한 표시는 그대로 둔다 */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
