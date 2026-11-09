@@ -14,7 +14,7 @@ import { DOWNTIME_REASON_MAX_LENGTH } from "./downtimeRules";
  * - 백엔드는 Gateway가 만든 X-Institution-Id·X-Role로 범위를 정한다 (EXAMINER: 자기 기관, ADMIN: 전체, REQUESTER: 403).
  *   프론트는 기관 ID를 보내지 않는다 (institutionId 검색 조건은 ADMIN 전용이라 쓰지 않는다)
  * - 인증 헤더는 서버 전용 모듈(server.ts)이 `headers`로 넘긴다
- * ⚠️ origin/dev Gateway 정책에는 목록(ADMIN 전용)만 있고 상세·영향 의뢰 규칙이 없어 지금은 EXAMINER가 모두 403을 받는다.
+ * Gateway 정책(origin/dev 기준): 목록·현황 집계·상세·영향 의뢰 GET 모두 EXAMINER·ADMIN 허용 (REQUESTER는 403).
  * ⚠️ 장애를 만드는 Consumer가 origin/dev에 없어 실제 목록은 비어 있을 수 있다.
  *
  * Mock 구현으로 대신하지 않는다: incidents가 API 대상이 아니거나 입력이 계약과 다르면 요청 없이 설정 오류,
@@ -174,7 +174,55 @@ export async function fetchIncidentReferralPage(
   return data;
 }
 
+/**
+ * 장비 장애 현황 집계 (백엔드 EquipmentIncidentSummaryResponse). 세 건수는 같은 기관·같은 기준 시각(asOf)으로 계산한다.
+ * - activeDowntimeEquipmentCount: 기준 시각에 등록된 중단 구간(시작 포함·종료 미포함)에 있는 장비 수. 실제 고장·복구 상태가 아니다
+ * - affectedReferralCount: 전체 장애 이력에서 영향 대상으로 탐지된 의뢰 수 (누적)
+ * - needsRescheduleReferralCount: 지금 재조정이 필요하고(NEEDS_RESCHEDULE) 가장 최근 차단 예약이 이 기관인 의뢰 수 (현재 상태)
+ * 복구 완료 장애 수는 제공하지 않는다. 장애 이벤트(Kafka) 반영이 늦으면 Slot Service 원본과 잠시 다를 수 있다.
+ */
+export interface EquipmentIncidentSummaryDto {
+  institutionId: string;
+  /** 집계 기준 시각 (KST LocalDateTime 문자열, 시간대 표기 없음). Date로 바꾸지 않고 원본 그대로 둔다 */
+  asOf: string;
+  activeDowntimeEquipmentCount: number;
+  affectedReferralCount: number;
+  needsRescheduleReferralCount: number;
+}
+
+/**
+ * 장비 장애 현황 `GET /api/v1/equipment-incidents/summary`.
+ * 검사기관(EXAMINER) 전용 호출: institutionId 쿼리는 보내지 않는다 (백엔드가 Gateway의 X-Institution-Id로 자기 기관을 정하고,
+ * 요청 값은 무시한다. 지정이 필요한 ADMIN 조회는 이 함수의 범위가 아니다). 인증 헤더는 다른 조회와 같이 options.headers로 받는다.
+ */
+export async function fetchIncidentSummary(options: RequestOptions = {}): Promise<EquipmentIncidentSummaryDto> {
+  requireApiFeature("incidents");
+  const data = await apiRequestData<unknown>("/api/v1/equipment-incidents/summary", options);
+  if (!isIncidentSummary(data)) throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
+  return data;
+}
+
 // ── 응답 형식 검증 (모르는 형태를 추측해 바꾸지 않는다) ──
+
+/** 백엔드 LocalDateTime 직렬화 형식 (초·소수 초는 생략될 수 있다. 시간대 표기 없음) */
+const LOCAL_DATE_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?$/;
+
+/** LocalDateTime 문자열이 형식에 맞고 실제 있는 날짜·시각인지 (시간대 변환 없이 숫자만 확인) */
+function isLocalDateTime(value: unknown): value is string {
+  if (typeof value !== "string" || !LOCAL_DATE_TIME.test(value)) return false;
+  const [year, month, day, hour, minute, second = 0] = value.split(/[-T:.]/).slice(0, 6).map(Number);
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth && hour <= 23 && minute <= 59 && second <= 59;
+}
+
+function isIncidentSummary(value: unknown): value is EquipmentIncidentSummaryDto {
+  return (
+    isRecord(value) &&
+    isUuid(value.institutionId) &&
+    isLocalDateTime(value.asOf) &&
+    [value.activeDowntimeEquipmentCount, value.affectedReferralCount, value.needsRescheduleReferralCount].every(isCount)
+  );
+}
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null;
 const isNonEmptyString = (value: unknown): value is string => typeof value === "string" && value !== "";
@@ -241,6 +289,7 @@ const FALLBACK_MESSAGES = {
   list: "장비 장애 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
   detail: "장비 장애 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
   referrals: "영향받은 의뢰 처리 현황을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
+  summary: "장비 장애 현황을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.",
 } as const;
 
 export type IncidentApiAction = keyof typeof FALLBACK_MESSAGES;

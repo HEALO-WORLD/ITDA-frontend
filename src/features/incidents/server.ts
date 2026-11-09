@@ -11,9 +11,11 @@ import {
   fetchIncidentDetail,
   fetchIncidentPage,
   fetchIncidentReferralPage,
+  fetchIncidentSummary,
   getIncidentErrorMessage,
   type EquipmentIncidentDetailDto,
   type EquipmentIncidentDto,
+  type EquipmentIncidentSummaryDto,
   type IncidentApiAction,
   type IncidentProcessingStatusDto,
   type IncidentReferralDto,
@@ -111,6 +113,26 @@ export async function loadIncidentReferralPage(
   }
 }
 
+/**
+ * 장비 장애 현황 집계 `GET /api/v1/equipment-incidents/summary` (요청: users/me 1 + 집계 1).
+ * 검사기관 역할을 users/me로 확인한 뒤에만 요청하고, 기관 ID는 보내지 않는다 (Gateway·백엔드가 토큰의 기관으로 정한다).
+ * 실패는 0건으로 바꾸지 않고 실패 결과로 돌려준다 (화면은 집계를 '확인 불가'로 보여 줘야 한다).
+ */
+export async function loadIncidentSummary(): Promise<{ ok: true; summary: EquipmentIncidentSummaryDto } | IncidentLoadFailure> {
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+  const headers = access.headers;
+  try {
+    const data = await fetchIncidentSummary({ headers });
+    const { institutionId, asOf, activeDowntimeEquipmentCount, affectedReferralCount, needsRescheduleReferralCount } = data;
+    return { ok: true, summary: { institutionId, asOf, activeDowntimeEquipmentCount, affectedReferralCount, needsRescheduleReferralCount } };
+  } catch (error) {
+    // 프리렌더 중단 등 Next 내부 오류는 실패로 바꾸지 않고 다시 던져 Next가 처리하게 한다
+    unstable_rethrow(error);
+    return toFailure(error, "summary");
+  }
+}
+
 // 응답에 있는 필드만 골라 담는다 (lastError 등 화면에 쓰지 않는 값은 넘기지 않는다)
 function pickIncident(dto: EquipmentIncidentDto): EquipmentIncidentDto {
   const { incidentId, equipmentId, institutionId, reason, status, occurredAt, startAt, endAt, createdAt } = dto;
@@ -160,7 +182,7 @@ function toFailure(error: unknown, action: IncidentApiAction): IncidentLoadFailu
         ? "UNAUTHORIZED"
         : status === 403
           ? "FORBIDDEN"
-          : status === 404 && action !== "list"
+          : status === 404 && (action === "detail" || action === "referrals")
             ? "NOT_FOUND"
             : isNetwork
               ? "NETWORK"

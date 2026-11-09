@@ -11,11 +11,11 @@ import { formatDateTime } from "@/lib/format/date";
 
 import { isDowntimeRegistrationEnabled } from "../downtimeConfig";
 import { isUuid, type EquipmentIncidentDto } from "../remote";
-import { loadIncidentPage, loadIncidentEquipmentLookup, type IncidentEquipmentLookup, type IncidentLoadFailure } from "../server";
+import { loadIncidentPage, loadIncidentEquipmentLookup, loadIncidentSummary, type IncidentEquipmentLookup, type IncidentLoadFailure } from "../server";
 
 import IncidentApiDetailModal, { IncidentApiDetailButton } from "./IncidentApiDetailModal";
+import IncidentApiSummary from "./IncidentApiSummary";
 import IncidentDowntimeRegister from "./IncidentDowntimeRegister";
-import { IncidentSummaryBar } from "./IncidentSummary";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -36,9 +36,10 @@ const Q = {
  * - 상세: [상세]를 누르면 `?incidentId=`를 붙여 중앙 대화상자(IncidentApiDetailModal)로 장애 상세·영향 의뢰 처리 현황을 보여 준다
  *   (영향 의뢰 조건 `?referralStatus=`·`?referralPage=`). 대화상자가 열 때만 조회하므로 목록은 다시 그리지 않는다
  * - 접근 제어는 Gateway(토큰·역할)와 백엔드(기관 범위)가 한다. 프론트는 역할을 추정하지 않고 결과(401·403·404)를 안내한다
- * - 배포 와이어프레임(Mock 화면)과 같은 구성: 요약 바 → 장애 목록 카드(검색 조건·장애 등록 버튼·표)
+ * - 배포 와이어프레임(Mock 화면)과 같은 구성: 현황 요약 → 장애 목록 카드(검색 조건·장애 등록 버튼·표)
+ *   현황 요약은 집계 API(검사기관 전체 기준, 목록의 장비 필터·페이지와 무관). 집계만 실패하면 목록은 그대로 보이고 집계는 '확인 불가'
  *   장비명·검사 유형은 우리 기관 장비 목록 1회로 찾는다 (행마다 요청하지 않는다). 못 찾으면 장비 ID로 보인다
- * - 백엔드에 없는 기능은 모양만 두고 비활성·안내: 장애 등록(장애 생성 API 없음)·복구, 발생일 기간 검색, 복구 완료·재조정 필요 집계
+ * - 백엔드에 없는 기능은 모양만 두고 비활성·안내: 장애 등록(기능 스위치)·복구, 발생일 기간 검색. 복구 완료 건수는 집계 API에 없어 표시하지 않는다
  * - 실패해도 Mock 데이터로 대체하지 않는다
  */
 export default async function IncidentApiSection({ searchParams }: IncidentApiSectionProps) {
@@ -47,8 +48,10 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
   const rawEquipmentId = first(params[Q.equipmentId]);
   const equipmentId = isUuid(rawEquipmentId) ? rawEquipmentId : undefined;
 
-  const [list, equipmentLookup] = await Promise.all([loadIncidentPage(page, equipmentId), loadIncidentEquipmentLookup()]);
+  // 목록·장비 이름·현황 집계를 함께 조회한다 (users/me 확인은 요청 단위로 한 번만 한다). 집계에는 장비 필터·페이지를 넘기지 않는다
+  const [list, equipmentLookup, summary] = await Promise.all([loadIncidentPage(page, equipmentId), loadIncidentEquipmentLookup(), loadIncidentSummary()]);
 
+  // 목록이 실패하면(로그인·권한 오류 포함) 목록 실패 안내 하나만 보인다 (같은 원인의 집계 실패 안내를 겹쳐 보이지 않는다)
   if (!list.ok) return <FailureNotice failure={list} />;
 
   const listQuery: Record<string, string> = equipmentId ? { [Q.equipmentId]: equipmentId } : {};
@@ -58,15 +61,7 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
 
   return (
     <div className="flex flex-col gap-5">
-      <IncidentSummaryBar
-        items={[
-          { label: equipmentId ? "이 장비의 장애 이력" : "장애 이력", value: `${list.totalElements}건`, valueClass: list.totalElements > 0 ? "text-red-600" : "text-gray-900" },
-          // 조회할 수 없는 집계는 숫자 대신 회색 칩으로 구분한다 (문구·의미는 그대로)
-          { label: "복구 완료 이력", value: "조회 준비 중", valueClass: "rounded-md bg-gray-100 px-2 py-0.5 text-sm! font-semibold text-gray-600" },
-          { label: "재조정 필요 예약", value: "상세에서 확인", valueClass: "rounded-md bg-gray-100 px-2 py-0.5 text-sm! font-semibold text-gray-600" },
-        ]}
-        note="장애 복구 기능과 재조정 필요 예약 집계 API가 서버에 아직 없어 장애 이력 건수만 표시합니다. 영향받은 의뢰는 각 장애의 [상세]에서 확인할 수 있습니다."
-      />
+      <IncidentApiSummary result={summary} />
       <section
         aria-labelledby="incident-api-list-title"
         className="min-w-0 rounded-xl border border-line bg-white px-4 pb-4 pt-5 sm:px-6"
