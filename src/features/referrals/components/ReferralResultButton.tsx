@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRef, useState } from "react";
 
 import Modal from "@/components/ui/Modal";
-import { detailButtonClass } from "@/components/ui/styles";
+import { subtleDetailButtonClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
@@ -58,7 +58,7 @@ export default function ReferralResultButton({
 
   return (
     <>
-      <button type="button" onClick={show} aria-haspopup="dialog" aria-label={`${displayId} 검사결과`} className={detailButtonClass}>
+      <button type="button" onClick={show} aria-haspopup="dialog" aria-label={`${displayId} 검사결과`} className={subtleDetailButtonClass}>
         검사결과
       </button>
       <Modal
