@@ -134,7 +134,7 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
         disabled={pending || unavailable !== null}
         title={unavailable ?? (pending ? "장애 등록을 처리하고 있습니다." : undefined)}
         aria-haspopup="dialog"
-        className="inline-flex h-10 items-center gap-1.5 rounded-lg bg-primary px-3.5 text-sm font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
+        className={primaryButtonClass}
       >
         <Plus className="size-4" aria-hidden="true" />
         {pending && !open ? "등록 처리 중" : "장비 장애 등록"}
