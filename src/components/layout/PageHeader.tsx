@@ -13,7 +13,7 @@ export default function PageHeader({ title, description, actions }: PageHeaderPr
     <div className="mb-6 flex flex-wrap items-end justify-between gap-4 border-b border-line pb-5">
       <div className="min-w-0">
         <h1 className="text-2xl font-bold tracking-tight text-gray-900 sm:text-[28px]">{title}</h1>
-        {description && <p className="mt-1.5 text-[15px] text-gray-500">{description}</p>}
+        {description && <p className="mt-1.5 text-[15px] text-gray-600">{description}</p>}
       </div>
       {actions}
     </div>
