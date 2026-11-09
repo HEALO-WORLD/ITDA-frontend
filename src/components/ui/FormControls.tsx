@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronDown } from "lucide-react";
-import type { InputHTMLAttributes, SelectHTMLAttributes } from "react";
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 
 /** 검색 필터 등에서 쓰는 공통 입력 컨트롤 (와이어프레임: 흰 배경, 연회색 테두리, 우측 아이콘) */
 
@@ -14,6 +14,8 @@ export const iconClass =
 interface FieldProps {
   id: string;
   label: string;
+  /** 라벨 뒤에 붙는 요소 (예: 필수 표시 *, '(선택)'). 없으면 기존과 같다 */
+  labelAddon?: ReactNode;
 }
 
 export interface SelectOption {
@@ -26,11 +28,12 @@ type SelectInputProps = FieldProps &
     options: SelectOption[];
   };
 
-export function SelectInput({ id, label, options, className = "", ...props }: SelectInputProps) {
+export function SelectInput({ id, label, labelAddon, options, className = "", ...props }: SelectInputProps) {
   return (
     <div className={className}>
       <label htmlFor={id} className={fieldLabelClass}>
         {label}
+        {labelAddon}
       </label>
       <div className="relative">
         <select id={id} className={controlClass} {...props}>
@@ -52,13 +55,14 @@ type TextInputProps = FieldProps &
     error?: string;
   };
 
-export function TextInput({ id, label, error, className = "", ...props }: TextInputProps) {
+export function TextInput({ id, label, labelAddon, error, className = "", ...props }: TextInputProps) {
   const errorId = `${id}-error`;
 
   return (
     <div className={className}>
       <label htmlFor={id} className={fieldLabelClass}>
         {label}
+        {labelAddon}
       </label>
       <input
         id={id}
@@ -79,11 +83,12 @@ export function TextInput({ id, label, error, className = "", ...props }: TextIn
 
 type DateInputProps = FieldProps & Omit<InputHTMLAttributes<HTMLInputElement>, "id" | "type">;
 
-export function DateInput({ id, label, className = "", ...props }: DateInputProps) {
+export function DateInput({ id, label, labelAddon, className = "", ...props }: DateInputProps) {
   return (
     <div className={className}>
       <label htmlFor={id} className={fieldLabelClass}>
         {label}
+        {labelAddon}
       </label>
       <div className="relative">
         {/* 브라우저 기본 달력 아이콘은 투명하게 아이콘 위치에 겹쳐 클릭 영역으로만 사용한다 */}
