@@ -68,7 +68,16 @@ export interface IncidentReferralDto {
   /** 처리 결과 코드. 값 목록 미확정이라 문자열 그대로 (성공 전에는 null) */
   resultCode: string | null;
   processedAt: string | null;
+  /**
+   * 검사기관 담당자의 수동 확인 필요 여부 (백엔드가 판단한 값을 그대로 쓴다).
+   * 검사 진행 중 장비 장애로 자동 재조정에서 제외됐고 지금도 같은 예약의 검사가 진행 중이면 true.
+   * 이 필드가 없던 이전 백엔드 응답도 받을 수 있도록 선택 값으로 둔다 (화면에는 IncidentReferralItem으로 넘긴다)
+   */
+  manualReviewRequired?: boolean;
 }
+
+/** 화면에 넘기는 영향 의뢰 항목: manualReviewRequired를 항상 boolean으로 채운다 (응답에 없으면 false) */
+export type IncidentReferralItem = IncidentReferralDto & { manualReviewRequired: boolean };
 
 /** 백엔드가 받는 페이지 크기 (그 밖의 값은 서버가 조용히 10으로 바꾸므로 보내기 전에 막는다) */
 export const INCIDENT_PAGE_SIZES = [10, 30, 50] as const;
@@ -201,7 +210,9 @@ function isIncidentReferral(value: unknown): value is IncidentReferralDto {
     INCIDENT_PROCESSING_STATUSES.includes(value.processingStatus as IncidentProcessingStatusDto) &&
     isCount(value.retryCount) &&
     [value.nextRetryAt, value.lockedUntil, value.processedAt].every(isNullableTime) &&
-    (value.resultCode === null || isNonEmptyString(value.resultCode))
+    (value.resultCode === null || isNonEmptyString(value.resultCode)) &&
+    // 없으면(이전 백엔드) 통과, 있으면 boolean만 받는다 (null·문자열 등은 형식 오류)
+    (value.manualReviewRequired === undefined || typeof value.manualReviewRequired === "boolean")
   );
 }
 

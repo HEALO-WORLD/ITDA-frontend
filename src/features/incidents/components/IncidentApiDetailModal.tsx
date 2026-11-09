@@ -19,8 +19,9 @@ import { DetailError, DetailLoading, Empty, Info, SectionNote } from "@/features
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import { loadExaminingIncidentDetailAction, type ExaminingIncidentDetailResult } from "../detailActions";
-import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto, type IncidentReferralDto } from "../remote";
+import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto, type IncidentReferralItem } from "../remote";
 import type { IncidentLoadFailure } from "../server";
+import { ManualReviewBadge, ManualReviewNotice } from "./ManualReviewNotice";
 
 const PARAM = "incidentId";
 const PROCESSING_LABELS: Record<IncidentProcessingStatusDto, string> = { PENDING: "대기", PROCESSING: "처리 중", SUCCEEDED: "처리 완료", FAILED: "실패" };
@@ -212,13 +213,20 @@ function AffectedReferrals({
   );
 }
 
-/** 영향 의뢰 1건 (이전 패널 표의 열: 의뢰 ID·예약 ID·처리 상태·결과 코드·재시도·다음 재시도·처리 완료) */
-function AffectedItem({ item }: { item: IncidentReferralDto }) {
+/**
+ * 영향 의뢰 1건 (이전 패널 표의 열: 의뢰 ID·예약 ID·처리 상태·결과 코드·재시도·다음 재시도·처리 완료)
+ * 수동 확인 대상이면 처리 상태 배지 옆에 "수동 확인 필요" 배지와 카드 아래 안내를 더한다 (테스트에서 직접 렌더링하므로 export)
+ */
+export function AffectedItem({ item }: { item: IncidentReferralItem }) {
+  const manualReview = item.manualReviewRequired === true;
   return (
-    <li className={`rounded-lg border bg-white px-3.5 py-3 ${item.processingStatus === "FAILED" ? "border-amber-200" : "border-line"}`}>
+    <li className={`rounded-lg border bg-white px-3.5 py-3 ${item.processingStatus === "FAILED" || manualReview ? "border-amber-200" : "border-line"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <ShortId id={item.referralId} label="의뢰 ID" />
-        <StatusBadge tone={PROCESSING_TONE[item.processingStatus]}>{PROCESSING_LABELS[item.processingStatus]}</StatusBadge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusBadge tone={PROCESSING_TONE[item.processingStatus]}>{PROCESSING_LABELS[item.processingStatus]}</StatusBadge>
+          {manualReview && <ManualReviewBadge />}
+        </div>
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
         <Small label="예약">
@@ -229,6 +237,7 @@ function AffectedItem({ item }: { item: IncidentReferralDto }) {
         <Small label="다음 재시도">{item.nextRetryAt ? formatDateTimeWithWeekday(item.nextRetryAt) : "없음"}</Small>
         <Small label="처리 완료">{item.processedAt ? formatDateTimeWithWeekday(item.processedAt) : "없음"}</Small>
       </dl>
+      {manualReview && <ManualReviewNotice />}
     </li>
   );
 }
