@@ -1,7 +1,7 @@
 import ExaminingApiNotificationBoard from "@/features/examining-notifications/components/ExaminingApiNotificationBoard";
 import { parsePageParam } from "@/features/examinations/server";
 
-import { loadNotificationPage } from "../server";
+import { loadNotificationPage, loadUnreadNotificationCount } from "../server";
 import { NOTIFICATION_UNREAD_FILTER } from "../types";
 
 import ApiNotificationList from "./ApiNotificationList";
@@ -26,14 +26,16 @@ export default async function ApiNotificationSection({ variant, searchParams }: 
   const filter = Array.isArray(params.filter) ? params.filter[0] : params.filter;
   const unreadOnly = variant === "examining" && filter === NOTIFICATION_UNREAD_FILTER;
 
-  const result = await loadNotificationPage(variant === "referring" ? "notifications" : "examining-notifications", {
-    page,
-    unreadOnly,
-  });
+  // 의뢰기관: 읽지 않은 알림 수를 목록과 같은 요청 시점에 함께 조회한다.
+  // 레이아웃의 조회 결과는 화면 이동(클라이언트 이동) 때 다시 불러오지 않아, 그사이 새 알림이 오면 목록과 수가 어긋난다
+  const [result, unreadCount] = await Promise.all([
+    loadNotificationPage(variant === "referring" ? "notifications" : "examining-notifications", { page, unreadOnly }),
+    variant === "referring" ? loadUnreadNotificationCount("notifications") : null,
+  ]);
   if (!result.ok) return <NotificationFailureNotice failure={result} />;
 
   return variant === "referring" ? (
-    <ApiNotificationList notifications={result.notifications} page={result.page} totalPages={result.totalPages} />
+    <ApiNotificationList notifications={result.notifications} page={result.page} totalPages={result.totalPages} unreadCount={unreadCount ?? undefined} />
   ) : (
     <ExaminingApiNotificationBoard
       notifications={result.notifications}
