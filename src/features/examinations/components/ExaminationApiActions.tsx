@@ -4,11 +4,14 @@ import { AlertTriangle } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import Modal from "@/components/ui/Modal";
+import { abbreviateReferralId } from "@/features/referrals/referralId";
 
 import { changeExaminationStatusAction, registerExaminationResultAction } from "../actions";
 import type { ExaminationProgressItem } from "../remote";
 import { PROGRESS_ACTION_LABELS, type NextProgressStatus } from "../rules";
 import type { ExaminationActionResult } from "../types";
+
+import { PROGRESS_STATUS_LABELS } from "./ExaminationBadges";
 
 type ExaminationApiActionTarget = Pick<
   ExaminationProgressItem,
@@ -17,7 +20,14 @@ type ExaminationApiActionTarget = Pick<
 
 interface ExaminationApiActionsProps {
   examination: ExaminationApiActionTarget;
+  /** 검사 완료 확인 창에 보여 줄 값 (목록에서 이미 받은 값. 추가 조회하지 않는다). 이름을 모르면 null */
+  detail?: { referralId: string; examTypeName: string | null; equipmentName: string | null };
 }
+
+const secondaryClass =
+  "h-10 whitespace-nowrap rounded-lg border border-line bg-white px-4 text-sm font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-300";
+const confirmClass =
+  "h-10 whitespace-nowrap rounded-lg bg-primary px-4 text-sm font-bold text-white hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400";
 
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
 
@@ -31,12 +41,18 @@ const buttonClass =
  * - 결과 등록은 완료됐고 결과가 없는 검사에만 보인다 (한 번만 등록 가능)
  * - 처리 중에는 다시 요청하지 않는다 (상태 갱신 전 연속 클릭까지 ref로 막는다)
  * - 성공·409는 Server Function의 refresh()로 목록이 서버 값으로 다시 그려진다. 화면에서 먼저 바꾸지 않는다
+ * - 검사 완료는 오조작을 막으려고 확인 창을 거친다: 버튼은 창만 열고, [검사 완료 확정]에서만 요청한다
+ *   (요청 중에는 확정·취소·Esc·닫기 버튼을 막고, 실패하면 창을 유지한 채 안내한다. 409는 서버가 다시 불러온 상태라 다시 확정하지 않게 막는다)
+ *   장비 장애 수동 확인과는 별개다 (수동 확인 이력 API가 없어 여기서 다루지 않는다)
  */
-export default function ExaminationApiActions({ examination }: ExaminationApiActionsProps) {
+export default function ExaminationApiActions({ examination, detail }: ExaminationApiActionsProps) {
   const pendingRef = useRef(false);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<ExaminationActionResult | null>(null);
   const [registerOpen, setRegisterOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  /** 확인 창 안의 실패 안내 (창을 다시 열면 지운다) */
+  const [confirmError, setConfirmError] = useState<Extract<ExaminationActionResult, { ok: false }> | null>(null);
 
   const next: NextProgressStatus | null =
     examination.progressStatus === "WAITING"
@@ -46,6 +62,35 @@ export default function ExaminationApiActions({ examination }: ExaminationApiAct
         : null;
   const startBlocked = next === "IN_PROGRESS" && examination.reservationStatus !== "CONFIRMED";
   const canRegister = examination.progressStatus === "COMPLETED" && !examination.resultRegistered;
+
+  const openConfirm = () => {
+    if (pendingRef.current) return;
+    setOutcome(null);
+    setConfirmError(null);
+    setConfirmOpen(true);
+  };
+
+  /** [검사 완료 확정]: 기존 Server Function을 한 번만 부른다. 성공하면 창을 닫고(목록은 refresh로 서버 값), 실패하면 창 안에 안내 */
+  const confirmComplete = async () => {
+    if (examination.progressStatus !== "IN_PROGRESS" || pendingRef.current || confirmError?.reason === "CONFLICT") return;
+    pendingRef.current = true;
+    setPending(true);
+    setConfirmError(null);
+    try {
+      const result = await changeExaminationStatusAction(examination.examinationId, "COMPLETED");
+      if (result.ok) {
+        setConfirmOpen(false);
+        setOutcome(result);
+      } else {
+        setConfirmError(result);
+      }
+    } catch {
+      setConfirmError({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  };
 
   const changeStatus = async () => {
     if (!next || startBlocked || pendingRef.current) return;
@@ -65,7 +110,14 @@ export default function ExaminationApiActions({ examination }: ExaminationApiAct
   return (
     <div className="flex flex-col items-start gap-1">
       {next && (
-        <button type="button" onClick={changeStatus} disabled={pending || startBlocked} aria-busy={pending} className={buttonClass}>
+        <button
+          type="button"
+          onClick={next === "COMPLETED" ? openConfirm : changeStatus}
+          disabled={pending || startBlocked}
+          aria-busy={pending}
+          aria-haspopup={next === "COMPLETED" ? "dialog" : undefined}
+          className={buttonClass}
+        >
           {pending ? `${PROGRESS_ACTION_LABELS[next]} 처리 중` : PROGRESS_ACTION_LABELS[next]}
         </button>
       )}
@@ -88,6 +140,69 @@ export default function ExaminationApiActions({ examination }: ExaminationApiAct
           {outcome.message}
         </p>
       )}
+
+      <Modal
+        open={confirmOpen}
+        title="검사를 완료하시겠습니까?"
+        description={
+          <>
+            실제 검사가 완료되었는지 확인해 주세요.
+            <br />
+            완료 처리 후 검사 결과를 등록할 수 있습니다.
+          </>
+        }
+        closeOnBackdrop={false}
+        preventClose={pending}
+        onClose={() => !pendingRef.current && setConfirmOpen(false)}
+        footer={
+          <>
+            <button type="button" onClick={() => setConfirmOpen(false)} disabled={pending} className={secondaryClass}>
+              {confirmError?.reason === "CONFLICT" ? "닫기" : "취소"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void confirmComplete()}
+              disabled={pending || confirmError?.reason === "CONFLICT"}
+              aria-busy={pending}
+              className={confirmClass}
+            >
+              {pending ? "검사 완료 처리 중" : "검사 완료 확정"}
+            </button>
+          </>
+        }
+      >
+        {confirmOpen && (
+          <div className="flex flex-col gap-4">
+            {confirmError && (
+              <div role="alert" className="flex items-start gap-2 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-700">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+                <p>
+                  {confirmError.message}
+                  {confirmError.reason === "CONFLICT" && " 최신 상태를 다시 불러왔습니다. 목록에서 상태를 확인해 주세요."}
+                </p>
+              </div>
+            )}
+            <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-5 gap-y-2.5 rounded-xl border border-line bg-gray-50/60 px-4 py-4 text-sm">
+              <dt className="text-gray-500">의뢰 번호</dt>
+              <dd className="font-mono text-[13px] text-gray-900" title={detail?.referralId}>
+                {detail ? abbreviateReferralId(detail.referralId) : <span className="font-sans text-gray-400">확인 불가</span>}
+              </dd>
+              <dt className="text-gray-500">검사 유형</dt>
+              <dd className="break-words font-semibold text-gray-900">{detail?.examTypeName ?? <span className="font-normal text-gray-400">확인 불가</span>}</dd>
+              <dt className="text-gray-500">검사 장비</dt>
+              <dd className="break-words text-gray-900">{detail?.equipmentName ?? <span className="text-gray-400">확인 불가</span>}</dd>
+              <dt className="text-gray-500">검사 예정 일시</dt>
+              <dd className="tabular-nums text-gray-900">
+                {examination.examDate.slice(0, 10)} {examination.startTime.slice(11, 16)} ~ {examination.endTime.slice(11, 16)}
+              </dd>
+              <dt className="text-gray-500">현재 상태</dt>
+              <dd className="text-gray-900">{PROGRESS_STATUS_LABELS.IN_PROGRESS}</dd>
+              <dt className="text-gray-500">변경 상태</dt>
+              <dd className="font-semibold text-emerald-700">{PROGRESS_STATUS_LABELS.COMPLETED}</dd>
+            </dl>
+          </div>
+        )}
+      </Modal>
 
       <Modal
         open={registerOpen}

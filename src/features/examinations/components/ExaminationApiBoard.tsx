@@ -140,6 +140,7 @@ export default function ExaminationApiBoard({ examinations, totalElements, page,
                               startTime: exam.startTime,
                               endTime: exam.endTime,
                             }}
+                            detail={{ referralId: exam.referralId, examTypeName: examTypeName ?? null, equipmentName: equipmentName ?? null }}
                           />
                         </div>
                       </td>
