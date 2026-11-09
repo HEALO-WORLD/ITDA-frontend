@@ -7,6 +7,7 @@ import type { ReactNode } from "react";
 import Modal from "@/components/ui/Modal";
 import StatusBadge, { type StatusTone } from "@/components/ui/StatusBadge";
 import { ROUTES } from "@/constants/navigation";
+import { ManualReviewBadge, ManualReviewNotice } from "@/features/incidents/components/ManualReviewNotice";
 import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto } from "@/features/incidents/remote";
 import { DetailLoading, Empty, Info, SectionNote } from "@/features/referrals/components/ReferralDetailParts";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
@@ -182,9 +183,11 @@ function AffectedReferrals({
   );
 }
 
-function AffectedItem({ item }: { item: AdminIncidentReferral }) {
+// 수동 확인 대상이면 처리 상태 배지 옆에 "수동 확인 필요" 배지와 카드 아래 안내를 더한다 (테스트에서 직접 렌더링하므로 export)
+export function AffectedItem({ item }: { item: AdminIncidentReferral }) {
+  const manualReview = item.manualReviewRequired === true;
   return (
-    <li className={`rounded-lg border bg-white px-3.5 py-3 ${item.processingStatus === "FAILED" ? "border-amber-200" : "border-line"}`}>
+    <li className={`rounded-lg border bg-white px-3.5 py-3 ${item.processingStatus === "FAILED" || manualReview ? "border-amber-200" : "border-line"}`}>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <ShortId id={item.referralId} label="의뢰 ID" />
@@ -192,7 +195,10 @@ function AffectedItem({ item }: { item: AdminIncidentReferral }) {
             의뢰 상세
           </Link>
         </div>
-        <StatusBadge tone={PROCESSING_TONE[item.processingStatus]}>{PROCESSING_LABELS[item.processingStatus]}</StatusBadge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusBadge tone={PROCESSING_TONE[item.processingStatus]}>{PROCESSING_LABELS[item.processingStatus]}</StatusBadge>
+          {manualReview && <ManualReviewBadge />}
+        </div>
       </div>
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-4">
         <Small label="재시도">{item.retryCount}회</Small>
@@ -205,6 +211,7 @@ function AffectedItem({ item }: { item: AdminIncidentReferral }) {
           </span>
         </Small>
       </dl>
+      {manualReview && <ManualReviewNotice />}
       {item.lastError && (
         <div className="mt-2.5">
           <p className="mb-1 text-xs font-semibold text-amber-800">마지막 오류 (관리자 전용)</p>

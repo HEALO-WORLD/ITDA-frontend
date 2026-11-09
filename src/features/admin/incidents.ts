@@ -11,6 +11,7 @@ import {
   type EquipmentIncidentDto,
   type IncidentProcessingStatusDto,
   type IncidentReferralDto,
+  type IncidentReferralItem,
 } from "@/features/incidents/remote";
 import { isApiError } from "@/lib/api/errors";
 import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
@@ -63,8 +64,8 @@ export async function loadAdminIncidentDetail(incidentId: string): Promise<{ ok:
   }
 }
 
-/** 영향 의뢰 처리 현황 1건 (관리자용: lastError 포함) */
-export type AdminIncidentReferral = IncidentReferralDto & { lastError: string | null };
+/** 영향 의뢰 처리 현황 1건 (관리자용: lastError 포함, manualReviewRequired는 항상 boolean) */
+export type AdminIncidentReferral = IncidentReferralItem & { lastError: string | null };
 
 export type AdminIncidentReferralPageResult =
   | { ok: true; referrals: AdminIncidentReferral[]; totalElements: number; totalPages: number; page: number }
@@ -83,7 +84,12 @@ export async function loadAdminIncidentReferrals(
     const referrals = data.contents.map((item) => {
       const lastError = (item as IncidentReferralDto & { lastError?: unknown }).lastError;
       if (lastError !== null && lastError !== undefined && typeof lastError !== "string") throw new TypeError("lastError");
-      return { ...item, lastError: typeof lastError === "string" ? lastError : null };
+      // manualReviewRequired는 이전 백엔드 응답에 없을 수 있어 false로 채운다 (형식은 fetchIncidentReferralPage가 이미 확인)
+      return {
+        ...item,
+        lastError: typeof lastError === "string" ? lastError : null,
+        manualReviewRequired: item.manualReviewRequired ?? false,
+      };
     });
     return { ok: true, referrals, totalElements: data.totalElements, totalPages: data.totalPages, page: data.number };
   } catch (error) {

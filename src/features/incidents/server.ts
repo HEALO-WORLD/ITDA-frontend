@@ -17,6 +17,7 @@ import {
   type IncidentApiAction,
   type IncidentProcessingStatusDto,
   type IncidentReferralDto,
+  type IncidentReferralItem,
 } from "./remote";
 
 /**
@@ -96,7 +97,7 @@ export async function loadIncidentReferralPage(
   incidentId: string,
   page: number,
   status?: IncidentProcessingStatusDto,
-): Promise<PageResult<IncidentReferralDto>> {
+): Promise<PageResult<IncidentReferralItem>> {
   const access = await requireRoleAccess("EXAMINING");
   if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
   const headers = access.headers;
@@ -116,9 +117,22 @@ function pickIncident(dto: EquipmentIncidentDto): EquipmentIncidentDto {
   return { incidentId, equipmentId, institutionId, reason, status, occurredAt, startAt, endAt, createdAt };
 }
 
-function pickReferral(dto: IncidentReferralDto): IncidentReferralDto {
+// manualReviewRequired는 이전 백엔드 응답에 없을 수 있어 false로 채운다 (화면에 undefined를 넘기지 않는다)
+function pickReferral(dto: IncidentReferralDto): IncidentReferralItem {
   const { id, incidentId, referralId, reservationId, processingStatus, retryCount, nextRetryAt, lockedUntil, resultCode, processedAt } = dto;
-  return { id, incidentId, referralId, reservationId, processingStatus, retryCount, nextRetryAt, lockedUntil, resultCode, processedAt };
+  return {
+    id,
+    incidentId,
+    referralId,
+    reservationId,
+    processingStatus,
+    retryCount,
+    nextRetryAt,
+    lockedUntil,
+    resultCode,
+    processedAt,
+    manualReviewRequired: dto.manualReviewRequired ?? false,
+  };
 }
 
 function toPageResult<D, T>(data: PagedResponseDto<D>, pick: (item: D) => T): PageResult<T> {
