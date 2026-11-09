@@ -1,9 +1,11 @@
 import "server-only";
 
 import { unstable_rethrow } from "next/navigation";
+import { connection } from "next/server";
 
 import { fetchReservation, fetchReservationPage, type ReservationListParams, type ReservationResponseDto } from "@/features/referrals/remote";
 import { isApiError } from "@/lib/api/errors";
+import { getSeoulNow, type DateKey } from "@/lib/date/seoulDate";
 import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import { EQUIPMENT_MAX_PAGE_SIZE, fetchInstitutionEquipments, type InstitutionEquipmentDto } from "./remote";
@@ -42,6 +44,37 @@ export async function loadExaminingReservationPage(query: ExaminingReservationQu
   } catch (error) {
     unstable_rethrow(error);
     return toFailure(error, "reservations", "예약 목록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.");
+  }
+}
+
+export type TodayConfirmedCountResult = { ok: true; count: number; date: DateKey } | ExaminingLoadFailure;
+
+/**
+ * 오늘 검사 예정 = 우리 기관의 오늘(Asia/Seoul) 검사 확정(CONFIRMED) 예약 수.
+ * 기존 예약 목록 API를 그대로 쓴다: `GET /api/v1/referrals/reservations?status=CONFIRMED&examDateFrom=오늘T00:00:00&examDateTo=오늘T23:59:59&page=0&size=10`
+ * - 건수는 응답의 totalElements (백엔드가 같은 조건으로 따로 센 전체 건수). 받은 행(contents)으로 세지 않는다
+ * - 검사일 조건은 백엔드에서 examDate 기준 양끝 포함이다. examDate는 예약 생성·재예약 때 슬롯 시작 시각과 같은 값으로 저장된다
+ * - 화면 목록의 장비·상태·실패 사유·기간·정렬·페이지 조건은 넘기지 않는다 (목록 검색과 무관한 기관 전체 기준)
+ * - 기관 범위는 다른 조회와 같이 백엔드가 토큰의 기관으로 정한다 (기관 ID를 보내지 않는다)
+ * 실패는 0건으로 바꾸지 않고 실패 결과로 돌려준다. now는 테스트에서 날짜 경계를 확인할 때만 넘긴다
+ * 현재 시각은 connection() 뒤에 읽는다: 프리렌더 중에 new Date()를 읽으면 Next가 오류로 막는다 (next-prerender-current-time)
+ */
+export async function loadTodayConfirmedReservationCount(now?: Date): Promise<TodayConfirmedCountResult> {
+  const access = await requireRoleAccess("EXAMINING");
+  if (!access.ok) return { ok: false, ...toRoleAccessFailure(access) };
+
+  // 요청 시점에만 이후 코드를 실행한다 (프리렌더는 여기서 멈춘다)
+  await connection();
+  const date = getSeoulNow(now ?? new Date()).dateKey;
+  try {
+    const data = await fetchReservationPage(
+      { status: "CONFIRMED", examDateFrom: `${date}T00:00:00`, examDateTo: `${date}T23:59:59`, page: 0, size: 10 },
+      { headers: access.headers },
+    );
+    return { ok: true, count: data.totalElements, date };
+  } catch (error) {
+    unstable_rethrow(error);
+    return toFailure(error, "today-confirmed-count", "오늘 검사 예정 건수를 불러오지 못했습니다.");
   }
 }
 
