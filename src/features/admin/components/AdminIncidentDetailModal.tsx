@@ -8,6 +8,7 @@ import Modal from "@/components/ui/Modal";
 import StatusBadge, { type StatusTone } from "@/components/ui/StatusBadge";
 import { ROUTES } from "@/constants/navigation";
 import { ManualReviewBadge, ManualReviewNotice } from "@/features/incidents/components/ManualReviewNotice";
+import { AUTO_PROCESSING_NOTE, getResultCodeLabel, PROCESSING_STATUS_LABELS as PROCESSING_LABELS } from "@/features/incidents/processingLabels";
 import { INCIDENT_PROCESSING_STATUSES, type IncidentProcessingStatusDto } from "@/features/incidents/remote";
 import { DetailLoading, Empty, Info, SectionNote } from "@/features/referrals/components/ReferralDetailParts";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
@@ -18,7 +19,6 @@ import type { AdminIncidentReferral } from "../incidents";
 import { AdminDetailButton, AdminDetailError, CloseButton, InfoCard, NETWORK_FAILURE, ShortId, shortIdText, TechInfo, useDetailResult, useUrlDetail } from "./AdminDetailParts";
 
 const PARAM = "incidentId";
-const PROCESSING_LABELS: Record<IncidentProcessingStatusDto, string> = { PENDING: "대기", PROCESSING: "처리 중", SUCCEEDED: "처리 완료", FAILED: "실패" };
 const PROCESSING_TONE: Record<IncidentProcessingStatusDto, StatusTone> = { PENDING: "neutral", PROCESSING: "info", SUCCEEDED: "success", FAILED: "warning" };
 
 /** 목록 행의 '상세' 버튼 */
@@ -99,11 +99,12 @@ export default function AdminIncidentDetailModal({ institutionNames }: { institu
               <InfoCard icon={ListChecks} title="후속 처리 현황">
                 <ul className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-3">
                   <Count label="전체" value={incident!.totalReferrals} />
-                  <Count label="대기" value={incident!.pendingCount} />
-                  <Count label="처리 중" value={incident!.processingCount} />
-                  <Count label="처리 완료" value={incident!.completedCount} />
-                  <Count label="실패" value={incident!.failedCount} alert />
+                  <Count label={PROCESSING_LABELS.PENDING} value={incident!.pendingCount} />
+                  <Count label={PROCESSING_LABELS.PROCESSING} value={incident!.processingCount} />
+                  <Count label={PROCESSING_LABELS.SUCCEEDED} value={incident!.completedCount} />
+                  <Count label={PROCESSING_LABELS.FAILED} value={incident!.failedCount} alert />
                 </ul>
+                <p className="mt-2.5 break-keep text-xs leading-relaxed text-gray-500">{AUTO_PROCESSING_NOTE}</p>
               </InfoCard>
             </div>
             <InfoCard icon={AlertTriangle} title="영향받은 의뢰" className="min-w-0 self-start">
@@ -203,8 +204,8 @@ export function AffectedItem({ item }: { item: AdminIncidentReferral }) {
       <dl className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-4">
         <Small label="재시도">{item.retryCount}회</Small>
         <Small label="다음 재시도">{item.nextRetryAt ? formatDateTimeWithWeekday(item.nextRetryAt) : "없음"}</Small>
-        <Small label="결과 코드">{item.resultCode ?? "없음"}</Small>
-        <Small label="처리 시각">{item.processedAt ? formatDateTimeWithWeekday(item.processedAt) : "없음"}</Small>
+        <Small label="처리 결과">{item.resultCode ? <ResultCode code={item.resultCode} /> : "없음"}</Small>
+        <Small label="자동 처리 시각">{item.processedAt ? formatDateTimeWithWeekday(item.processedAt) : "없음"}</Small>
         <Small label="예약">
           <span className="font-mono text-xs" title={item.reservationId}>
             {shortIdText(item.reservationId)}
@@ -220,6 +221,12 @@ export function AffectedItem({ item }: { item: AdminIncidentReferral }) {
       )}
     </li>
   );
+}
+
+/** 결과 코드: 알려진 코드는 한글 문구(원래 코드는 title), 모르는 코드는 원래 값 그대로 (화면이 깨지지 않게) */
+function ResultCode({ code }: { code: string }) {
+  const label = getResultCodeLabel(code);
+  return label ? <span title={code}>{label}</span> : <code className="font-mono text-xs">{code}</code>;
 }
 
 function Small({ label, children }: { label: string; children: ReactNode }) {
