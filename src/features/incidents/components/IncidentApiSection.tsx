@@ -1,6 +1,7 @@
-import { CalendarDays, ChevronDown, Info, Plus, Search } from "lucide-react";
+import { ChevronDown, Info, Plus, Search } from "lucide-react";
 import Link from "next/link";
 
+import { primaryButtonClass } from "@/components/ui/styles";
 import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 
 import { parsePageParam } from "@/features/examinations/server";
@@ -60,8 +61,9 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
       <IncidentSummaryBar
         items={[
           { label: equipmentId ? "이 장비의 장애 이력" : "장애 이력", value: `${list.totalElements}건`, valueClass: list.totalElements > 0 ? "text-red-600" : "text-gray-900" },
-          { label: "복구 완료 이력", value: "조회 준비 중", valueClass: "text-base! font-semibold text-gray-400" },
-          { label: "재조정 필요 예약", value: "상세에서 확인", valueClass: "text-base! font-semibold text-gray-400" },
+          // 조회할 수 없는 집계는 숫자 대신 회색 칩으로 구분한다 (문구·의미는 그대로)
+          { label: "복구 완료 이력", value: "조회 준비 중", valueClass: "rounded-md bg-gray-100 px-2 py-0.5 text-sm! font-semibold text-gray-600" },
+          { label: "재조정 필요 예약", value: "상세에서 확인", valueClass: "rounded-md bg-gray-100 px-2 py-0.5 text-sm! font-semibold text-gray-600" },
         ]}
         note="장애 복구 기능과 재조정 필요 예약 집계 API가 서버에 아직 없어 장애 이력 건수만 표시합니다. 영향받은 의뢰는 각 장애의 [상세]에서 확인할 수 있습니다."
       />
@@ -77,12 +79,7 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
           {canRegister ? (
             <IncidentDowntimeRegister equipments={registerEquipments} />
           ) : (
-            <button
-              type="button"
-              disabled
-              aria-describedby="incident-register-unavailable"
-              className="inline-flex h-10 cursor-not-allowed items-center gap-1.5 rounded-lg bg-gray-200 px-3.5 text-sm font-bold text-gray-400"
-            >
+            <button type="button" disabled aria-describedby="incident-register-unavailable" className={primaryButtonClass}>
               <Plus className="size-4" aria-hidden="true" />
               장비 장애 등록
             </button>
@@ -132,25 +129,18 @@ export default async function IncidentApiSection({ searchParams }: IncidentApiSe
 }
 
 /**
- * 검색 조건 (와이어프레임: 장애 상태 · 장비 · 기간 · 검색). 백엔드가 받는 장비 조건만 동작한다 (일반 GET 폼, 검색하면 첫 페이지).
- * 장애 상태는 OCCURRED 하나뿐이고 기간 조건은 백엔드에 없어 비활성으로 두고 이유를 보여 준다.
+ * 검색 조건: 백엔드가 받는 장비 조건 + 검색 (일반 GET 폼, 검색하면 첫 페이지).
+ * 장애 상태(OCCURRED 하나뿐)·기간 조건은 백엔드에 없어 항상 비활성이던 칸을 화면에서 숨기고, 아래 안내 문구로 이유를 알린다.
  */
 function IncidentFilterBar({ equipmentId, lookup, canRegister }: { equipmentId: string | undefined; lookup: IncidentEquipmentLookup; canRegister: boolean }) {
   const control = "h-10 rounded-lg border border-line bg-white text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20";
-  const disabledControl = "h-10 cursor-not-allowed rounded-lg border border-line bg-gray-50 text-sm text-gray-400";
   const options = lookup ? Object.entries(lookup).sort((a, b) => a[1].name.localeCompare(b[1].name, "ko", { numeric: true })) : [];
   return (
     <form role="search" aria-label="장비 장애 검색 조건" method="get" className="mb-4 flex flex-col gap-2">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative">
-          <select aria-label="장애 상태 (장애 발생 하나뿐이라 선택할 수 없음)" disabled className={`${disabledControl} appearance-none pl-3 pr-9`}>
-            <option>전체 상태</option>
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-gray-300" aria-hidden="true" />
-        </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         {lookup ? (
-          <div className="relative">
-            <select name="equipmentId" aria-label="장비" defaultValue={equipmentId ?? ""} className={`${control} max-w-[240px] cursor-pointer appearance-none pl-3 pr-9`}>
+          <div className="relative min-w-0 sm:w-[280px]">
+            <select name="equipmentId" aria-label="장비" defaultValue={equipmentId ?? ""} className={`${control} w-full cursor-pointer appearance-none pl-3 pr-9`}>
               <option value="">전체 장비</option>
               {options.map(([id, item]) => (
                 <option key={id} value={id}>
@@ -161,18 +151,14 @@ function IncidentFilterBar({ equipmentId, lookup, canRegister }: { equipmentId: 
             <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 text-gray-500" aria-hidden="true" />
           </div>
         ) : (
-          <input type="search" name="equipmentId" aria-label="장비 ID" defaultValue={equipmentId ?? ""} placeholder="장비 ID (전체 UUID)" className={`${control} w-[260px] px-3`} />
+          <input type="search" name="equipmentId" aria-label="장비 ID" defaultValue={equipmentId ?? ""} placeholder="장비 ID (전체 UUID)" className={`${control} w-full px-3 sm:w-[280px]`} />
         )}
-        <button type="button" disabled className={`${disabledControl} inline-flex items-center gap-2 px-3`} aria-label="기간 (서버 기능 준비 중)">
-          <CalendarDays className="size-4" aria-hidden="true" />
-          전체 기간
-        </button>
-        <button type="submit" className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-5 text-sm font-bold text-white transition-colors hover:bg-primary-hover">
+        <button type="submit" className={`${primaryButtonClass} min-w-[96px]`}>
           <Search className="size-4" aria-hidden="true" />
           검색
         </button>
       </div>
-      <p id="incident-register-unavailable" className="flex items-start gap-1.5 text-xs text-gray-500">
+      <p id="incident-register-unavailable" className="flex items-start gap-1.5 text-[13px] leading-relaxed text-gray-600">
         <Info className="mt-px size-3.5 shrink-0" aria-hidden="true" />
         {canRegister
           ? "장비 조건만 서버에서 검색합니다. 장애 상태·기간 검색은 서버 기능이 준비되면 사용할 수 있습니다."
@@ -194,13 +180,13 @@ function IncidentApiTable({
 }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-line bg-white shadow-card">
-      <table className="w-full min-w-[1040px] table-fixed border-collapse">
+      <table className="w-full min-w-[940px] table-fixed border-collapse">
         <colgroup>
           <col className="w-[156px]" />
           <col />
           <col className="w-[88px]" />
           <col className="w-[156px]" />
-          <col className="w-[280px]" />
+          <col className="w-[180px]" />
           <col className="w-[104px]" />
           <col className="w-[88px]" />
         </colgroup>
@@ -228,7 +214,7 @@ function IncidentApiTable({
                 </td>
                 <td className={tdClass}>
                   {equipment ? (
-                    <p className="truncate font-semibold text-gray-900" title={equipment.name}>
+                    <p className="truncate text-[15px] font-semibold text-gray-900" title={equipment.name}>
                       {equipment.name}
                     </p>
                   ) : (
@@ -236,14 +222,16 @@ function IncidentApiTable({
                       {incident.equipmentId}
                     </code>
                   )}
-                  <Link href={equipmentHref(incident.equipmentId)} className="text-xs font-medium text-primary hover:underline">
+                  <Link href={equipmentHref(incident.equipmentId)} className="mt-0.5 inline-block text-xs font-medium text-gray-500 underline-offset-2 hover:text-primary hover:underline">
                     이 장비의 장애만 보기
                   </Link>
                 </td>
                 <td className={`${tdClass} whitespace-nowrap`}>{equipment?.modality ?? <span className="text-gray-400">-</span>}</td>
                 <td className={`${tdClass} whitespace-nowrap tabular-nums`}>{formatDateTime(incident.occurredAt)}</td>
                 <td className={`${tdClass} whitespace-nowrap tabular-nums text-sm`}>
-                  {formatDateTime(incident.startAt)} ~ {formatDateTime(incident.endAt)}
+                  {/* 시작 ~ 종료를 두 줄로 (긴 날짜 범위도 열 폭 안에서 읽기 쉽게) */}
+                  <span className="block">{formatDateTime(incident.startAt)}</span>
+                  <span className="block text-gray-500">~ {formatDateTime(incident.endAt)}</span>
                 </td>
                 <td className={`${tdClass} text-center`}>
                   <IncidentApiStatusBadge status={incident.status} />
