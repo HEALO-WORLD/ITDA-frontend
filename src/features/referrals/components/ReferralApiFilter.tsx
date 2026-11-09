@@ -1,10 +1,10 @@
 "use client";
 
-import { RotateCcw, Search, SlidersHorizontal } from "lucide-react";
+import { RotateCcw, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
-import { controlClass, filterPanelClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
+import { controlClass, filterPanelClass, ghostButtonClass, primaryButtonClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 
 import { PATIENT_NAME_SEARCH_MAX_LENGTH, type ReferralStatusDto } from "../remote";
@@ -42,10 +42,12 @@ export function referralListHref({ patientName, status, examTypeId }: ReferralAp
 }
 
 /**
- * 의뢰 목록 검색 조건 (API 모드). 배치·모양은 Mock 의뢰 검색 조건과 같다: [환자명] [상태] [유형] [상세 필터] [검색] [초기화].
+ * 의뢰 목록 검색 조건 (API 모드): [환자명] [상태] [유형] [검색] [초기화].
  * 검색(버튼·Enter)을 누르면 주소를 바꿔 서버가 전체 의뢰에서 다시 조회한다 (현재 페이지 10건만 거르지 않는다).
  * 스크립트가 없어도 일반 GET 폼으로 같은 주소로 이동한다 (빈 값은 서버가 조건 없음으로 본다).
- * 상세 필터(검사기관·검사 기간)는 의뢰 목록 API가 지원하지 않아 쓸 수 없게 둔다.
+ * 상세 필터(검사기관·검사 기간)는 의뢰 목록 API가 지원하지 않아(동작 없는 비활성 버튼이었다) API 화면에서는 보이지 않는다.
+ * 백엔드가 조건을 지원하면 이 자리에 버튼을 다시 둔다.
+ * 배치: PC(xl)는 한 줄 [환자명 | 상태 · 유형 | 검색 · 초기화], 그보다 좁으면 환자명 한 줄 + 선택 2칸 + 버튼으로 줄바꿈
  */
 export default function ReferralApiFilter({ applied, statusOptions, examTypeOptions, examTypeNotice }: ReferralApiFilterProps) {
   const router = useRouter();
@@ -70,8 +72,8 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
       onSubmit={submit}
       className={filterPanelClass}
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[190px] flex-[2_1_230px]">
+      <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+        <div className="relative min-w-0 xl:flex-[1.4]">
           <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" aria-hidden="true" />
           <input
             type="search"
@@ -85,72 +87,56 @@ export default function ReferralApiFilter({ applied, statusOptions, examTypeOpti
           />
         </div>
 
-        <select
-          name="status"
-          aria-label="예약 상태"
-          value={draft.status}
-          onChange={(event) => update({ status: event.target.value as ReferralStatusDto | "" })}
-          className={`${controlClass} min-w-[125px] flex-[1_1_125px]`}
-        >
-          <option value="">전체 상태</option>
-          {statusOptions.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center xl:flex-[2]">
+          <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+            <select
+              name="status"
+              aria-label="예약 상태"
+              value={draft.status}
+              onChange={(event) => update({ status: event.target.value as ReferralStatusDto | "" })}
+              className={`${controlClass} min-w-0 cursor-pointer`}
+            >
+              <option value="">전체 상태</option>
+              {statusOptions.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
 
-        <select
-          name="examTypeId"
-          aria-label="검사 유형"
-          value={draft.examTypeId}
-          onChange={(event) => update({ examTypeId: event.target.value })}
-          disabled={examTypeNotice !== null}
-          aria-describedby={examTypeNotice ? "referral-exam-type-unavailable" : undefined}
-          className={`${controlClass} min-w-[110px] flex-[1_1_110px] disabled:bg-gray-50 disabled:text-gray-400`}
-        >
-          <option value="">전체 유형</option>
-          {examTypeOptions.map(({ value, label }) => (
-            <option key={value} value={value}>
-              {label}
-            </option>
-          ))}
-        </select>
+            <select
+              name="examTypeId"
+              aria-label="검사 유형"
+              value={draft.examTypeId}
+              onChange={(event) => update({ examTypeId: event.target.value })}
+              disabled={examTypeNotice !== null}
+              aria-describedby={examTypeNotice ? "referral-exam-type-unavailable" : undefined}
+              className={`${controlClass} min-w-0 cursor-pointer disabled:bg-gray-50 disabled:text-gray-400`}
+            >
+              <option value="">전체 유형</option>
+              {examTypeOptions.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            disabled
-            aria-describedby="referral-detail-filter-unavailable"
-            title="검사기관·검사 기간 조건은 의뢰 목록 API에서 아직 지원하지 않습니다."
-            className={`${secondaryButtonClass} cursor-not-allowed text-gray-400 hover:bg-white`}
-          >
-            <SlidersHorizontal className="size-4" aria-hidden="true" />
-            상세 필터
-          </button>
+          {/* 주 동작(검색)은 네이비, 보조 동작(초기화)은 가벼운 버튼으로 위계를 나눈다 */}
+          <div className="flex shrink-0 gap-2">
+            <button type="submit" className={`${primaryButtonClass} min-w-[96px] flex-1 sm:flex-none`}>
+              <Search className="size-4" aria-hidden="true" />
+              검색
+            </button>
 
-          <button
-            type="submit"
-            className={primaryButtonClass}
-          >
-            <Search className="size-4" aria-hidden="true" />
-            검색
-          </button>
-
-          <button
-            type="button"
-            onClick={reset}
-            className={secondaryButtonClass}
-          >
-            <RotateCcw className="size-4" aria-hidden="true" />
-            초기화
-          </button>
+            <button type="button" onClick={reset} className={ghostButtonClass}>
+              <RotateCcw className="size-4" aria-hidden="true" />
+              초기화
+            </button>
+          </div>
         </div>
       </div>
 
-      <p id="referral-detail-filter-unavailable" className="sr-only">
-        상세 필터(검사기관·검사 기간)는 의뢰 목록 API에서 아직 지원하지 않아 사용할 수 없습니다.
-      </p>
       {examTypeNotice?.kind === "empty" && (
         <p id="referral-exam-type-unavailable" role="status" className="text-sm text-gray-600">
           등록된 검사 유형이 없어 선택할 수 있는 검사 유형이 없습니다. 의뢰 목록은 그대로 확인할 수 있습니다.

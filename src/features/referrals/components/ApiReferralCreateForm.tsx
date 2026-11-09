@@ -204,7 +204,7 @@ function ReferralProgress({ created }: { created: Created }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoIndex, isFinal]);
 
-  const tone = stage === "CONFIRMED" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : stage === "FAILED" ? "border-red-200 bg-red-50 text-red-800" : "border-primary/30 bg-primary-soft text-gray-900";
+  const tone = stage === "CONFIRMED" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : stage === "FAILED" ? "border-red-200 bg-red-50 text-red-800" : "border-info/30 bg-info-soft text-gray-900";
   const title = stage === "CONFIRMED" ? "예약 확정" : stage === "FAILED" ? "예약 실패" : stage === "OTHER" ? "상태 확인 필요" : "접수됨 · 처리 중";
   return (
     <section aria-labelledby="referral-progress-title" className={`mt-5 rounded-lg border px-4 py-4 ${tone}`}>

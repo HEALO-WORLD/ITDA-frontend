@@ -95,11 +95,11 @@ export function FailureReasonNotice({ reason, compact = false }: { reason: Failu
 
 /** 이력 사유별 아이콘·색 (과하지 않게 아이콘 원만 칠한다) */
 const HISTORY_META: Record<ReferralHistoryReasonDto, { icon: LucideIcon; className: string }> = {
-  REFERRAL_CREATED: { icon: FilePlus2, className: "bg-primary-soft text-primary" },
+  REFERRAL_CREATED: { icon: FilePlus2, className: "bg-info-soft text-info" },
   RESERVATION_CONFIRMED: { icon: CheckCircle2, className: "bg-emerald-50 text-emerald-600" },
   RESERVATION_FAILED: { icon: XCircle, className: "bg-orange-50 text-orange-600" },
   RESERVATION_BLOCKED: { icon: Ban, className: "bg-red-50 text-red-600" },
-  RESCHEDULED: { icon: RotateCcw, className: "bg-primary-soft text-primary" },
+  RESCHEDULED: { icon: RotateCcw, className: "bg-info-soft text-info" },
   CANCELED_BY_REQUESTER: { icon: Ban, className: "bg-gray-100 text-gray-500" },
 };
 

@@ -26,8 +26,9 @@ export default async function ReferralsPage({ searchParams }: PageProps<"/referr
           aria-labelledby="referral-list-title"
           className="rounded-xl border border-line bg-white px-4 pb-5 pt-5 shadow-card sm:px-7 sm:pb-6 sm:pt-6"
         >
+          {/* 전체 의뢰·예약을 검색·조회하는 목록 (조회 범위·정렬은 그대로) */}
           <h2 id="referral-list-title" className="mb-5 text-lg font-semibold text-gray-900 sm:text-xl">
-            최근 의뢰·예약 내역
+            의뢰·예약 목록
           </h2>
           <Suspense
             fallback={

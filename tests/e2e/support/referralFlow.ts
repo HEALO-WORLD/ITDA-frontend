@@ -2,9 +2,20 @@ import { expect, type Page } from "@playwright/test";
 
 import type { GatewaySession } from "./gateway";
 import type { ReservationTestData } from "./reservationData";
+import {
+  applySlotSearch,
+  chooseCriteriaChip,
+  openSlotSearchAndWaitAutoSearch,
+  resultCalendar,
+  selectResultDate,
+  slotCards,
+  slotResultSection,
+  visibleSlotIds,
+} from "./slotResults";
 
 /**
  * db-write E2E 공통 화면 흐름 (referral-reservation.db-write.spec.ts와 같은 셀렉터·문구·성공 조건).
+ * 슬롯 검색은 PC(Desktop Chrome 1280px) 화면 기준: 조건 칩·자동 검색·[검색 적용]·결과 달력·시간 카드(data-slot-id) (support/slotResults.ts)
  * 모두 실제 화면·실제 API를 쓴다 (응답을 가짜로 바꾸지 않는다).
  */
 
@@ -34,20 +45,35 @@ export interface ConfirmedReferral {
  * 예약 E2E(referral-reservation.db-write.spec.ts)와 같은 성공 조건이다.
  */
 export async function createConfirmedReferralViaUi(page: Page, data: ReservationTestData, requester: GatewaySession): Promise<ConfirmedReferral> {
-  const results = page.locator('section[aria-labelledby="slot-result-title"]');
-  await page.goto("/referring/slots");
-  await page.locator("#slot-organization").selectOption({ label: PARTNER_EXAMINER });
-  await page.locator("#slot-exam-type").selectOption("CT");
-  await page.locator("#slot-exam-item").selectOption({ label: data.examTypeName });
-  const response = page.waitForResponse((res) => new URL(res.url()).pathname === "/referring/slots/search");
-  await page.getByRole("button", { name: "슬롯 검색", exact: true }).click();
-  expect((await response).status()).toBe(200);
+  const results = slotResultSection(page);
+  // PC(1280px): 접속하면 기본 조건으로 자동 검색 → 조건 칩으로 B영상의학과·CT·이번 실행의 고유 검사 항목을 고르고 [검색 적용]
+  await openSlotSearchAndWaitAutoSearch(page);
+  await chooseCriteriaChip(page, "slot-chip-organization", "협력 검사기관 선택", PARTNER_EXAMINER);
+  await chooseCriteriaChip(page, "slot-chip-exam-type", "검사 유형 선택", "CT");
+  await chooseCriteriaChip(page, "slot-chip-exam-item", "세부 검사 항목 선택", data.examTypeName);
+  const response = await applySlotSearch(page);
+  expect(new URL(response.url()).searchParams.get("examTypeId")?.toLowerCase(), "검색은 이번 실행의 검사 항목으로").toBe(data.examTypeId.toLowerCase());
+  const body = (await response.json()) as { slots: { id: string }[] };
+  expect(body.slots.map((slot) => slot.id.toLowerCase()), "검색 결과는 이번 실행의 슬롯 1건").toEqual([data.slotId.toLowerCase()]);
   await expect(results.getByText("총 1건의 검색 결과가 있습니다.")).toBeVisible();
 
-  const row = results.getByRole("row").filter({ hasText: data.examTypeName });
-  await expect(row).toHaveCount(1);
-  await row.getByRole("button", { name: "예약 요청" }).click();
+  // 결과 달력: 1건뿐이므로 새 검색의 처음 선택 날짜 = 슬롯 날짜, 그날 예약 가능 1건
+  const day = resultCalendar(results).locator(`button[data-date="${data.slotDate}"]`);
+  await expect(day).toHaveAttribute("aria-current", "date");
+  await expect(day).toHaveAttribute("data-available-count", "1");
+  await selectResultDate(results, data.slotDate);
+  const card = slotCards(results).filter({ hasText: data.examTypeName });
+  await expect(card).toHaveCount(1);
+  await expect(card).toContainText(PARTNER_EXAMINER);
+  await expect(card).toContainText(data.equipmentName);
+  // 시간 버튼 = 이번 실행의 슬롯 (원본 slotId)
+  expect(await visibleSlotIds(results)).toEqual([data.slotId]);
+  const timeButton = card.locator(`button[data-slot-id="${data.slotId}"]`);
+  await expect(timeButton).toHaveAccessibleName(/예약 요청$/);
+  await timeButton.click();
   const dialog = page.getByRole("dialog", { name: "새 검사 의뢰" });
+  await expect(dialog.getByRole("region", { name: "선택한 검사 슬롯" })).toContainText(PARTNER_EXAMINER);
+  await expect(dialog.getByRole("region", { name: "선택한 검사 슬롯" })).toContainText(data.examTypeName);
   await expect(dialog.getByRole("region", { name: "선택한 검사 슬롯" })).toContainText(data.equipmentName);
 
   await dialog.getByLabel("환자 이름").fill(data.patientName);
