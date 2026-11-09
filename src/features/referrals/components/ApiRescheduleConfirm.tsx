@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, Info, Loader2, RefreshCw, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowRight, Check, CheckCircle2, ChevronRight, Info, Loader2, RefreshCw, X } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -82,7 +82,8 @@ export function getRescheduleView(phase: Phase, progress: ProgressResult | null)
     case "CHECKING":
       return { title: "예약 변경 확인", banner: { tone: "info", busy: true, message: "선택한 슬롯으로 재조정할 수 있는지 확인하고 있습니다." }, newCardLabel: "변경할 예약", actions: "REQUEST" };
     case "READY":
-      return { title: "예약 변경 확인", banner: { tone: "success", message: "재조정 요청 전 확인을 통과했습니다. 아직 예약은 변경되지 않았습니다." }, newCardLabel: "변경할 예약", actions: "REQUEST" };
+      // 요청 전 확인 통과는 성공(초록)이 아니라 정보(파랑)로: 아직 예약은 바뀌지 않았다 (성공은 서버 확정일 때만)
+      return { title: "예약 변경 확인", banner: { tone: "info", message: "재조정 요청 전 확인을 통과했습니다. 아직 예약은 변경되지 않았습니다. [이 슬롯으로 재조정 요청]을 눌러야 변경이 요청됩니다." }, newCardLabel: "변경할 예약", actions: "REQUEST" };
     case "SUBMITTING":
       return { title: "예약 변경 확인", banner: { tone: "info", busy: true, message: "재조정을 요청하고 있습니다." }, newCardLabel: "변경할 예약", actions: "REQUEST" };
     case "REJECTED":
@@ -172,14 +173,22 @@ const STATUS_STATE_TEXT: Record<StatusStepState, string> = { pending: "대기", 
 /** 요청 상태 단계 줄 (PC 재조정 모달 3단계) */
 export function RescheduleStatusSteps({ steps }: { steps: StatusStep[] }) {
   return (
-    <ol aria-label="재조정 요청 상태" className="grid grid-cols-3 gap-2 rounded-xl border border-line bg-brand-canvas px-4 py-3">
+    // 위쪽 '진행 단계'(사용자가 하는 작업)와 구분: 서버가 요청을 처리한 결과. 요청 전에는 모두 대기
+    <div className="flex flex-col gap-2 rounded-xl border border-dashed border-line-strong bg-gray-50/80 px-4 py-3 sm:flex-row sm:items-center sm:gap-4">
+      <p className="shrink-0">
+        <span className="block text-[13px] font-bold text-gray-700">서버 처리 상태</span>
+        <span className="block text-xs text-gray-500">요청 후 서버 응답에 따라 바뀝니다</span>
+      </p>
+    <ol aria-label="재조정 요청 상태" className="flex min-w-0 flex-1 flex-wrap items-center gap-x-1.5 gap-y-2">
       {steps.map(({ label, state, note }, index) => {
         const Icon = state === "done" ? Check : state === "error" ? X : state === "warning" ? AlertTriangle : state === "current" ? Loader2 : null;
         return (
-          <li key={label} aria-current={state === "current" ? "step" : undefined} className="flex min-w-0 items-center gap-2.5">
+          <li key={label} aria-current={state === "current" ? "step" : undefined} className="flex min-w-0 items-center gap-1.5">
+            {index > 0 && <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-gray-300" />}
+            <span className={`flex items-center gap-2 rounded-full border bg-white py-1 pl-1 pr-3 ${state === "pending" ? "border-line" : state === "error" ? "border-red-200" : state === "warning" ? "border-amber-300" : "border-line-strong"}`}>
             <span
               aria-hidden="true"
-              className={`flex size-7 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
+              className={`flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-bold ${
                 state === "done"
                   ? "bg-brand-mint text-brand-navy"
                   : state === "current"
@@ -191,26 +200,28 @@ export function RescheduleStatusSteps({ steps }: { steps: StatusStep[] }) {
                         : "bg-white text-gray-400 ring-1 ring-inset ring-line-strong"
               }`}
             >
-              {Icon ? <Icon className={`size-4 ${state === "current" ? "animate-spin" : ""}`} /> : index + 1}
+              {Icon ? <Icon className={`size-3.5 ${state === "current" ? "animate-spin" : ""}`} /> : <span className="size-1.5 rounded-full bg-gray-300" />}
             </span>
-            <span className="min-w-0">
-              <span className={`block text-sm font-semibold ${state === "pending" ? "text-gray-400" : "text-gray-900"}`}>{label}</span>
+            <span className="min-w-0 whitespace-nowrap">
+              <span className={`text-[13px] font-semibold ${state === "pending" ? "text-gray-400" : "text-gray-900"}`}>{label}</span>
               <span
-                className={`block text-xs ${state === "error" ? "text-red-700" : state === "warning" ? "text-amber-800" : state === "pending" ? "text-gray-400" : "text-gray-600"}`}
+                className={`ml-1.5 text-xs ${state === "error" ? "text-red-700" : state === "warning" ? "text-amber-800" : state === "pending" ? "text-gray-400" : "text-gray-600"}`}
               >
                 {note ?? STATUS_STATE_TEXT[state]}
               </span>
               <span className="sr-only">, {STATUS_STATE_TEXT[state]}</span>
             </span>
+            </span>
           </li>
         );
       })}
     </ol>
+    </div>
   );
 }
 
 const BANNER_CLASS: Record<Tone, string> = {
-  info: "border-primary/20 bg-primary-soft text-gray-800",
+  info: "border-info/20 bg-info-soft text-gray-800",
   success: "border-emerald-200 bg-emerald-50 text-emerald-800",
   warning: "border-amber-300 bg-amber-50 text-amber-900",
   error: "border-red-200 bg-red-50 text-red-700",

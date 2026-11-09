@@ -1,4 +1,4 @@
-import { CalendarDays, Check, RotateCcw, Search } from "lucide-react";
+import { CalendarDays, Check, Lock, RotateCcw, Search } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
@@ -552,6 +552,12 @@ export default function SlotSearchFilter({
               </button>
             </div>
           </div>
+          {surface === "wizard" && (isExamTypeLocked || lockedExamTypeItem) && (
+            <p className="flex items-center gap-1.5 text-[13px] text-gray-600">
+              <Lock className="size-3.5 shrink-0 text-gray-400" aria-hidden="true" />
+              검사 유형·세부 검사 항목은 기존 의뢰와 같게 고정됩니다. 협력 검사기관·날짜·시간대는 바꿀 수 있습니다.
+            </p>
+          )}
           {hasPendingChanges && (
             <p id="slot-criteria-pending" role="status" className="flex items-center gap-2 text-sm text-amber-800">
               <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-amber-500" />
