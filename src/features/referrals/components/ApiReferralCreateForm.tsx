@@ -6,6 +6,7 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { TextInput } from "@/components/ui/FormControls";
 import { ROUTES } from "@/constants/navigation";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import type { ApiExamSlot } from "@/features/slots/apiSlots";
 import { createSubmitLock } from "@/features/slots/submitLock";
 import { formatDateLong } from "@/lib/format/date";
@@ -24,6 +25,7 @@ import DetailList from "./DetailList";
  * - 멱등 키: 같은 내용이면 같은 키. 결과를 알 수 없으면(연결 끊김·시간 초과·5xx·응답 확인 불가) 내용을 잠그고
  *   [같은 요청으로 다시 확인]만 허용한다 (같은 키라 이미 접수됐으면 기존 의뢰를 돌려받는다)
  * - 201은 '접수'다: 의뢰·예약을 다시 조회해 처리 중 → 확정/실패를 보여 준다 (자동 확인 최대 3회, 이후 수동)
+ * - 렌더링 시점 로그인 세션을 함께 보낸다. 다른 탭에서 계정이 바뀌었으면(SESSION_CHANGED) 입력·요청을 잠그고 새로고침 안내만 한다
  */
 
 const AUTO_CHECK_DELAYS_MS = [2_000, 5_000, 10_000];
@@ -49,10 +51,14 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
   const [failure, setFailure] = useState<Extract<CreateReferralActionResult, { ok: false }> | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [created, setCreated] = useState<Created | null>(null);
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공) */
+  const renderedLoginSession = useRenderedLoginSession();
+  /** 다른 탭에서 계정이 바뀌어 서버가 요청하지 않았다: 이 화면에서는 다시 보내지 않는다 */
+  const sessionChanged = failure?.reason === "SESSION_CHANGED";
 
   const submit = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault();
-    if (lock.running || created) return;
+    if (lock.running || created || sessionChanged) return;
     const error = validatePatientName(patientName);
     setNameError(error);
     if (error) return;
@@ -64,7 +70,7 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
       onBusyChange?.(true);
       setFailure(null);
       try {
-        const result = await createReferralAction({ ...content, idempotencyKey, confirmExisting: tracker.isLocked });
+        const result = await createReferralAction({ ...content, idempotencyKey, confirmExisting: tracker.isLocked }, renderedLoginSession);
         if (result.ok) {
           setCreated(result);
           setUncertain(false);
@@ -118,7 +124,7 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
               required
               maxLength={PATIENT_NAME_MAX_LENGTH}
               value={patientName}
-              disabled={pending || uncertain}
+              disabled={pending || uncertain || sessionChanged}
               onChange={(e) => {
                 setPatientName(e.target.value);
                 setNameError(null);
@@ -132,11 +138,11 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
           </div>
 
           {failure && (
-            <div role="alert" className={`mt-4 flex items-start gap-2 rounded-lg px-4 py-3 text-[15px] ${uncertain ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-700"}`}>
+            <div role="alert" className={`mt-4 flex items-start gap-2 rounded-lg px-4 py-3 text-[15px] ${uncertain && !sessionChanged ? "bg-amber-50 text-amber-900" : "bg-red-50 text-red-700"}`}>
               <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
               <div>
                 <p>{failure.message}</p>
-                {uncertain && (
+                {uncertain && !sessionChanged && (
                   <p className="mt-1 text-sm">
                     같은 요청 키로 다시 보내므로 이미 접수된 의뢰가 있으면 새로 만들지 않고 그 의뢰를 확인합니다. 결과를 확인하기 전에는 입력을 바꿀 수 없습니다.
                   </p>
@@ -161,7 +167,7 @@ export default function ApiReferralCreateForm({ slot, onCancel, onCreated, onBus
             </button>
             <button
               type="submit"
-              disabled={pending}
+              disabled={pending || sessionChanged}
               className="h-12 rounded-lg bg-primary px-6 text-[15px] font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
             >
               {pending ? "요청 중" : uncertain ? "같은 요청으로 다시 확인" : "의뢰·예약 요청"}
