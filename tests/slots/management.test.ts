@@ -117,6 +117,8 @@ before(async () => {
         gateway.calls.push({ path: `users/me:${role}` });
         return gateway.access;
       },
+      // 슬롯 생성 Server Action(generateServer)이 함께 불러오는 변경 요청용 확인. 이 파일은 슬롯 생성을 부르지 않는다
+      requireRoleMutationAccess: async () => gateway.access,
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({
         reason: access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : access.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN",
         message: access.message,
