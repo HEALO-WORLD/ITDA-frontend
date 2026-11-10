@@ -1,8 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, useTransition, type FormEvent } from "react";
+import { useEffect, useRef, useState, useTransition, type FormEvent } from "react";
 
+import { notifySessionChanged } from "@/features/auth/authChannel";
 import type { LoginResult } from "@/features/auth/types";
 import { getApiMode } from "@/lib/api/config";
 import { isDemoModeEnabled } from "@/lib/dev/demoMode";
@@ -68,6 +69,11 @@ export default function LoginForm() {
   /** 상태 갱신 전 연속 제출까지 막는다 (버튼 비활성화는 다음 렌더부터 적용된다) */
   const submittingRef = useRef(false);
 
+  // 로그인 화면에 들어오면(로그아웃 뒤 포함) 다른 탭의 보호 화면이 로그인 상태를 다시 확인하게 알린다 (신호만, 계정 정보 없음)
+  useEffect(() => {
+    notifySessionChanged();
+  }, []);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (submittingRef.current || isNavigating) return;
@@ -116,6 +122,8 @@ export default function LoginForm() {
       setValues({ loginId: "", password: "" });
       if (result.redirectTo) {
         const redirectTo = result.redirectTo;
+        // 다른 탭에 계정이 바뀌었을 수 있음을 알린다 (그 탭들이 /auth/session으로 직접 확인한다)
+        notifySessionChanged();
         // 이동 중에는 isNavigating으로 다시 제출하지 못하게 막는다
         startNavigation(() => {
           router.replace(redirectTo);

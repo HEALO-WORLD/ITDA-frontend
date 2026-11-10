@@ -8,14 +8,21 @@ import AppHeader from "@/components/layout/AppHeader";
 import AppShell from "@/components/layout/AppShell";
 import { ADMIN_HOME_ROUTE, HOME_ROUTE_BY_ROLE, ORGANIZATION_ROLE_BY_USER_ROLE, ROUTES } from "@/constants/navigation";
 import { getApiMode } from "@/lib/api/config";
-import { getAuthState, type AuthFailureReason } from "@/lib/auth/session";
+import { getAuthState, readLoginSessionTag, readRefreshToken, type AuthFailureReason } from "@/lib/auth/session";
 import type { OrganizationRole, SessionUser } from "@/types/auth";
+
+import SessionGuard from "./SessionGuard";
+import SessionRestore from "./SessionRestore";
 
 /**
  * API 모드 역할별 화면 접근 확인 (서버 컴포넌트, 레이아웃의 Suspense 안에서 렌더링한다).
  *
  * 사용자 정보 API(users/me)로 확인한 역할만 믿는다 (토큰을 해석하지 않고, 실패하면 Mock 사용자로 대체하지 않는다).
  * - 미로그인 → 로그인 화면 · 401(만료·위조) → 로그인 화면(만료 안내)
+ * - 단, Access Token이 없거나 401인데 Refresh 쿠키가 있으면 현재 주소 그대로 자동 복구 화면을 보여 준다 (SessionRestore가 재발급 후 다시 확인).
+ *   서버 컴포넌트는 쿠키를 바꾸지 않는다. 403·404·네트워크·5xx는 Refresh Token 문제가 아니므로 복구하지 않는다
+ * - 확인을 통과한 화면은 SessionGuard로 감싼다: 같은 영역 안의 이동은 이 게이트를 다시 실행하지 않으므로 이동 뒤 쿠키 상태를 확인한다.
+ *   이 렌더링의 로그인 세션 구분 값을 넘겨, 다른 탭에서 계정이 바뀌면(헤더는 이전 사용자) 문서를 다시 불러오게 한다
  * - 다른 역할의 화면 → 그 사용자의 첫 화면 · ADMIN이 업무 화면 → 안내 + 관리자 화면 링크 (역할 화면을 열지 않는다)
  * - role="ADMIN"(관리자 화면): users/me 역할이 ADMIN일 때만 관리자 틀(AdminShell)로 연다. REQUESTER·EXAMINER는 자기 첫 화면으로
  * - 403·404·네트워크·그 밖의 실패 → 권한을 허용하지 않고 안내 (네트워크·오류는 다시 시도)
@@ -38,19 +45,26 @@ const ROLE_LABELS: Record<OrganizationRole, string> = {
 
 export default async function ApiRoleGate({ role, children }: { role: OrganizationRole | "ADMIN"; children: ReactNode }) {
   const state = await getAuthState();
-  if (state.status === "signed-out") redirect(ROUTES.login);
+  if (state.status === "signed-out") {
+    if (await readRefreshToken()) return <SessionRestoreScreen />;
+    redirect(ROUTES.login);
+  }
   if (state.status === "unverified") {
-    if (state.reason === "UNAUTHORIZED") redirect(`${ROUTES.login}?reason=expired`);
+    if (state.reason === "UNAUTHORIZED") {
+      if (await readRefreshToken()) return <SessionRestoreScreen />;
+      redirect(`${ROUTES.login}?reason=expired`);
+    }
     return <AuthProblem reason={state.reason} message={state.message} />;
   }
 
+  const loginSession = await readLoginSessionTag();
   const userRole = ORGANIZATION_ROLE_BY_USER_ROLE[state.role];
   // 관리자 화면: users/me 역할이 ADMIN일 때만 연다. 다른 역할은 자기 첫 화면으로 보낸다
   if (role === "ADMIN") {
     if (state.role !== "ADMIN" || userRole !== null) redirect(userRole ? HOME_ROUTE_BY_ROLE[userRole] : ROUTES.login);
     return (
       <AdminShell organizationName={state.user.institutionName} roleLabel={`관리자 · ${state.user.loginId}`} showLogout>
-        {children}
+        <SessionGuard loginSession={loginSession}>{children}</SessionGuard>
       </AdminShell>
     );
   }
@@ -67,7 +81,7 @@ export default async function ApiRoleGate({ role, children }: { role: Organizati
   };
   return (
     <AppShell user={user} showLogout>
-      {children}
+      <SessionGuard loginSession={loginSession}>{children}</SessionGuard>
     </AppShell>
   );
 }
@@ -81,6 +95,18 @@ export function AuthChecking() {
         <p role="status" className="text-[15px] text-gray-500">
           로그인 정보를 확인하고 있습니다.
         </p>
+      </main>
+    </div>
+  );
+}
+
+/** 로그인 상태 자동 복구 (Access Token 만료, Refresh 쿠키 있음). 주소는 그대로 두고 화면만 바꾼다 */
+function SessionRestoreScreen() {
+  return (
+    <div className="flex min-h-screen flex-col">
+      <AppHeader subtitle="의료기관 검사 의뢰·예약 플랫폼" />
+      <main className="flex flex-1 items-center justify-center px-4 py-16">
+        <SessionRestore />
       </main>
     </div>
   );
