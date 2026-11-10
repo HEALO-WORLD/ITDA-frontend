@@ -480,6 +480,46 @@ export function getReferralDetailErrorMessage(error: unknown): string {
   return error.message;
 }
 
+/**
+ * 예약 취소 `PATCH /api/v1/referrals/reservations/{reservationId}/cancel` (Gateway: REQUESTER 전용, 요청 본문 없음).
+ * 성공은 200 `data: null`. 취소 가능 여부(확정 예약·검사 시작 2시간 전·검사 SCHEDULED)는 백엔드가 최종 판단한다.
+ * 공통 클라이언트는 재시도하지 않는다. NETWORK·TIMEOUT·PARSE는 서버가 이미 처리했을 수 있다.
+ */
+export async function cancelReservation(reservationId: string, options: Pick<ApiRequestOptions, "headers" | "signal"> = {}): Promise<void> {
+  requireApiFeature("referrals");
+  if (!isUuid(reservationId)) throw new ApiError("CONFIG", "예약 ID 형식이 올바르지 않습니다.");
+  const data = await apiRequestData<unknown>(`/api/v1/referrals/reservations/${encodeURIComponent(reservationId)}/cancel`, {
+    ...options,
+    method: "PATCH",
+  });
+  if (data !== null && data !== undefined) throw new ApiError("PARSE", "예약 취소 결과를 확인할 수 없습니다.", { body: data });
+}
+
+/** 예약 취소 오류 코드별 안내 (백엔드 ErrorCode·Gateway 코드 기준) */
+export const RESERVATION_CANCEL_ERROR_MESSAGES: Record<string, string> = {
+  RESERVATION_CANCEL_DEADLINE_PASSED: "검사 시작 2시간 전이 지나 예약을 취소할 수 없습니다.",
+  EXAMINATION_CANCEL_NOT_ALLOWED: "검사가 이미 진행 중이거나 끝나 예약을 취소할 수 없습니다.",
+  INVALID_RESERVATION_STATUS: "확정된 예약이 아니어서 취소할 수 없습니다. 최신 예약 상태를 확인해 주세요.",
+  INVALID_REFERRAL_STATUS: "의뢰 상태가 바뀌어 예약을 취소할 수 없습니다. 최신 의뢰 상태를 확인해 주세요.",
+  RESERVATION_NOT_FOUND: "예약을 찾을 수 없거나 취소할 수 있는 예약이 아닙니다.",
+  REFERRAL_NOT_FOUND: "의뢰를 찾을 수 없거나 취소할 수 있는 의뢰가 아닙니다.",
+  MISSING_HEADER: "로그인 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+  ACCESS_DENIED: "예약 취소는 의뢰기관 담당자만 할 수 있습니다.",
+};
+
+const RESERVATION_CANCEL_UNKNOWN_RESULT_MESSAGE = "예약 취소 결과를 확인하지 못했습니다. 이미 처리되었을 수 있으니 최신 상태를 확인해 주세요.";
+
+/** 예약 취소 실패 안내. 서버 메시지 본문은 보여 주지 않고, 알려진 코드만 정해 둔 문구로 바꾼다 (401 등은 공통 안내) */
+export function getReservationCancelErrorMessage(error: unknown): string {
+  if (!isApiError(error)) return "예약을 취소하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+  if (error.kind === "NETWORK" || error.kind === "TIMEOUT" || error.kind === "ABORTED" || error.kind === "PARSE") return RESERVATION_CANCEL_UNKNOWN_RESULT_MESSAGE;
+  // 5xx: 백엔드가 커밋한 뒤 응답 단계에서 실패했을 수 있다 (결과 불명)
+  if (error.kind === "HTTP" && (error.status ?? 0) >= 500) return RESERVATION_CANCEL_UNKNOWN_RESULT_MESSAGE;
+  if (error.kind === "HTTP" && error.status !== 401 && error.code && RESERVATION_CANCEL_ERROR_MESSAGES[error.code]) return RESERVATION_CANCEL_ERROR_MESSAGES[error.code];
+  if (error.kind === "HTTP" && error.status === 409) return "예약 상태가 바뀌어 취소할 수 없습니다. 최신 상태를 확인해 주세요.";
+  return error.message;
+}
+
 /** LocalDateTime 문자열이 형식에 맞고 실제 있는 날짜·시각인지 (시간대 변환 없이 숫자만 확인) */
 function isValidLocalDateTime(value: unknown): value is string {
   if (typeof value !== "string" || !LOCAL_DATE_TIME.test(value)) return false;
