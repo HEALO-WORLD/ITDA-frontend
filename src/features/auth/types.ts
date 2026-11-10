@@ -30,6 +30,40 @@ export type LoginResult =
   | { ok: true; redirectTo: string | null; message: string | null }
   | { ok: false; reason: LoginFailureReason; message: string };
 
+/** 토큰 재발급 실패 구분 (`POST /auth/reissue`) */
+export type ReissueFailureReason =
+  /** 다른 출처에서 온 요청 (요청하지 않음) */
+  | "FORBIDDEN_ORIGIN"
+  /** Mock 모드 (요청하지 않음) */
+  | "MOCK_MODE"
+  /** API 모드·주소 설정 오류 */
+  | "CONFIG"
+  /** Refresh 쿠키 없음 (요청하지 않음) → 다시 로그인 */
+  | "NO_REFRESH_TOKEN"
+  /** 401 INVALID_REFRESH_TOKEN(만료·위조·폐기): 두 쿠키 삭제 → 다시 로그인 */
+  | "INVALID_REFRESH_TOKEN"
+  /** 401 REFRESH_TOKEN_REUSED(이미 쓴 토큰, family 폐기): 두 쿠키 삭제 → 다시 로그인 */
+  | "REFRESH_TOKEN_REUSED"
+  /** 연결 실패 (쿠키 유지, 다시 시도 가능) */
+  | "NETWORK"
+  /** 제한 시간 초과 (쿠키 유지, 다시 시도 가능) */
+  | "TIMEOUT"
+  /** 5xx (쿠키 유지, 다시 시도 가능) */
+  | "SERVER_ERROR"
+  /** 성공 응답 형식 오류. 백엔드는 이미 회전했을 수 있다 (쿠키 유지, 유예 시간 안의 재시도는 같은 새 토큰을 받는다) */
+  | "INVALID_RESPONSE"
+  /** 그 밖의 4xx (쿠키 유지, 다시 시도해도 같은 결과) */
+  | "REJECTED";
+
+/**
+ * 토큰 재발급 결과 (브라우저로 가는 값. 토큰은 담지 않는다).
+ * - retryable: 쿠키를 그대로 두었고 잠시 뒤 다시 시도할 수 있다
+ * - reloginRequired: 세션을 이어 갈 수 없다 (쿠키 없음·삭제됨) → 로그인 화면
+ */
+export type ReissueResult =
+  | { ok: true }
+  | { ok: false; reason: ReissueFailureReason; message: string; retryable: boolean; reloginRequired: boolean };
+
 /** 가입 가능 기관 유형 (백엔드 InstitutionType 중 가입 목록에 나오는 값. 운영사 PLATFORM은 목록에서 빠진다) */
 export type SignupInstitutionType = "REQUESTER" | "EXAM";
 

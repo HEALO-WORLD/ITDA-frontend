@@ -10,8 +10,8 @@ import type { LoginFailureReason } from "./types";
  *
  * 백엔드 AuthController·LoginRequest·TokenResponse·ErrorCode를 기준으로 옮겼다 (ITDA 저장소 origin/dev 기준 확인).
  * 내 정보 조회(fetchMyInfo)는 토큰이 필요하다 (lib/auth/session.ts의 getAuthState·로그인 Route Handler에서만 부른다).
- * 서버 전용: 로그인 Route Handler(`app/auth/login/route.ts`)에서만 부른다. 발급받은 토큰은 브라우저로 돌려주지 않고
- * HttpOnly 쿠키(lib/auth/session.ts)에만 저장한다.
+ * 서버 전용: 로그인·로그아웃·재발급 Route Handler(`app/auth/{login,logout,reissue}/route.ts`)에서만 부른다.
+ * 발급받은 토큰(Access·Refresh)은 브라우저로 돌려주지 않고 HttpOnly 쿠키(lib/auth/session.ts)에만 저장한다.
  * Mock 모드에서는 공통 API Client가 요청을 보내지 않고 설정 오류를 낸다 (Mock 로그인을 만들지 않는다).
  */
 
@@ -28,6 +28,10 @@ export interface TokenResponseDto {
   tokenType: string;
   /** 토큰 유효 시간(초). 백엔드 jwt.access-token-expiration (현재 1h) */
   expiresIn: number;
+  /** Refresh Token (RTR: 재발급·로그아웃에 쓴다. 백엔드 ITDA PR #184) */
+  refreshToken: string;
+  /** Refresh Token 유효 시간(초) */
+  refreshExpiresIn: number;
 }
 
 /** 백엔드 호출 실패에서 나올 수 있는 구분 (MOCK_MODE·FORBIDDEN_ORIGIN은 Route Handler가 직접 정한다) */
@@ -35,7 +39,7 @@ type RemoteLoginFailureReason = Exclude<LoginFailureReason, "MOCK_MODE" | "FORBI
 
 /**
  * 로그인 `POST /api/v1/auth/login`.
- * 응답이 계약과 다르면(토큰 없음, Bearer가 아님, 만료 시간이 양의 정수가 아님) PARSE 오류로 본다.
+ * 응답이 계약과 다르면(Access·Refresh 토큰 없음, Bearer가 아님, 두 만료 시간 중 하나라도 양의 정수가 아님) PARSE 오류로 본다.
  */
 export async function requestLogin(body: LoginRequestDto): Promise<TokenResponseDto> {
   const data = await apiRequestData<unknown>("/api/v1/auth/login", { method: "POST", body });
@@ -46,17 +50,40 @@ export async function requestLogin(body: LoginRequestDto): Promise<TokenResponse
   return data;
 }
 
+const isNonBlankString = (value: unknown): value is string => typeof value === "string" && value.trim() !== "";
+const isPositiveInteger = (value: unknown): value is number => typeof value === "number" && Number.isInteger(value) && value > 0;
+
 function isTokenResponse(value: unknown): value is TokenResponseDto {
   if (typeof value !== "object" || value === null) return false;
   const token = value as Record<string, unknown>;
   return (
-    typeof token.accessToken === "string" &&
-    token.accessToken.trim() !== "" &&
+    isNonBlankString(token.accessToken) &&
     token.tokenType === "Bearer" &&
-    typeof token.expiresIn === "number" &&
-    Number.isInteger(token.expiresIn) &&
-    token.expiresIn > 0
+    isPositiveInteger(token.expiresIn) &&
+    isNonBlankString(token.refreshToken) &&
+    isPositiveInteger(token.refreshExpiresIn)
   );
+}
+
+/**
+ * 토큰 재발급 `POST /api/v1/auth/reissue` (RTR. Gateway 공개 경로: Authorization 없이 Refresh Token만 본문으로 보낸다).
+ * 성공하면 Access·Refresh 토큰을 모두 새로 받는다 (보낸 Refresh Token은 더 이상 쓰지 않는다. 백엔드 유예 10초 안의 재요청은 같은 새 토큰을 돌려준다).
+ * 응답이 계약과 다르면 로그인과 같은 기준으로 PARSE 오류로 본다. 오류에 응답 원본(토큰)을 담지 않는다.
+ * 실패: 401 INVALID_REFRESH_TOKEN(만료·위조·폐기) · 401 REFRESH_TOKEN_REUSED(이미 쓴 토큰 → family 폐기)
+ */
+export async function requestReissue(refreshToken: string): Promise<TokenResponseDto> {
+  const data = await apiRequestData<unknown>("/api/v1/auth/reissue", { method: "POST", body: { refreshToken } });
+  if (!isTokenResponse(data)) throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.");
+  return data;
+}
+
+/**
+ * 로그아웃 `POST /api/v1/auth/logout` (Gateway 공개 경로: Authorization 없이 Refresh Token만 본문으로 보낸다).
+ * 백엔드는 멱등이다 (이미 만료·폐기된 토큰도 200). 응답 본문은 쓰지 않는다.
+ * 실패하면 ApiError를 던진다. 쿠키 삭제는 호출한 쪽(로그아웃 Route Handler)이 결과와 상관없이 한다.
+ */
+export async function requestLogout(refreshToken: string, options: { timeoutMs?: number } = {}): Promise<void> {
+  await apiRequestData<unknown>("/api/v1/auth/logout", { method: "POST", body: { refreshToken }, timeoutMs: options.timeoutMs });
 }
 
 /** 백엔드 Role */

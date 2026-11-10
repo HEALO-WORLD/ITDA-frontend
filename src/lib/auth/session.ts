@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash, randomUUID } from "node:crypto";
+
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { cache } from "react";
@@ -12,7 +14,7 @@ import type { OrganizationRole } from "@/types/auth";
 /**
  * 로그인 세션 (서버 전용).
  *
- * 백엔드가 발급한 액세스 토큰(JWT)을 HttpOnly 쿠키에만 보관한다.
+ * 백엔드가 발급한 액세스 토큰(JWT)과 Refresh Token을 각각 HttpOnly 쿠키에만 보관한다.
  * - 브라우저 스크립트는 토큰을 읽을 수 없다 (localStorage·sessionStorage·NEXT_PUBLIC_ 환경변수에 두지 않는다)
  * - 프론트는 토큰을 해석하거나 그 안의 역할·기관 값을 믿지 않는다. 검증은 Gateway가 하고,
  *   X-User-Id·X-Institution-Id·X-Role 헤더도 Gateway가 토큰에서 만든다 (프론트는 만들지 않는다)
@@ -22,31 +24,81 @@ import type { OrganizationRole } from "@/types/auth";
  */
 
 const ACCESS_TOKEN_COOKIE = "itda_access_token";
+const REFRESH_TOKEN_COOKIE = "itda_refresh_token";
+/**
+ * 로그인 세션 식별 쿠키 (무작위 값. 토큰·개인정보가 아니고 인증에 쓰지 않는다).
+ * 로그인할 때마다 새 값(같은 계정 재로그인 포함), 토큰 재발급(회전) 때는 그대로 → 다른 탭의 계정 전환·로그아웃을 회전과 구분한다
+ */
+const LOGIN_SESSION_COOKIE = "itda_login_session";
 
 /**
- * 토큰 쿠키 저장 (로그인 Route Handler에서 호출).
+ * 두 토큰 쿠키의 공통 속성.
  * - Secure: HTTPS에서만 전송 (localhost는 브라우저가 안전한 출처로 보아 http에서도 동작한다. Safari는 예외일 수 있다)
  * - SameSite=Lax: 다른 사이트에서 보낸 POST·fetch에는 쿠키가 실리지 않는다. 변경 요청은 Origin 검사도 함께 한다
- * - maxAge: 백엔드 expiresIn과 같게 맞춰 토큰이 만료되면 쿠키도 사라지게 한다
+ */
+const TOKEN_COOKIE_OPTIONS = { httpOnly: true, secure: true, sameSite: "lax", path: "/" } as const;
+
+/**
+ * 액세스 토큰 쿠키 저장 (로그인 Route Handler에서 호출).
+ * maxAge: 백엔드 expiresIn과 같게 맞춰 토큰이 만료되면 쿠키도 사라지게 한다
  */
 export async function setAccessTokenCookie(accessToken: string, expiresInSeconds: number): Promise<void> {
-  (await cookies()).set(ACCESS_TOKEN_COOKIE, accessToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: expiresInSeconds,
-  });
+  (await cookies()).set(ACCESS_TOKEN_COOKIE, accessToken, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
 }
 
-/** 토큰 쿠키 삭제 (로그아웃 Route Handler에서 호출) */
-export async function clearAccessTokenCookie(): Promise<void> {
-  (await cookies()).delete(ACCESS_TOKEN_COOKIE);
+/**
+ * Refresh Token 쿠키 저장 (로그인 Route Handler에서 호출). 액세스 토큰과 같은 보안 속성, maxAge는 백엔드 refreshExpiresIn.
+ * 재발급·로그아웃 요청 본문에만 쓰고 Gateway 보호 API의 Authorization에는 쓰지 않는다
+ */
+export async function setRefreshTokenCookie(refreshToken: string, expiresInSeconds: number): Promise<void> {
+  (await cookies()).set(REFRESH_TOKEN_COOKIE, refreshToken, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** Refresh Token 읽기 (로그아웃 Route Handler). 없으면 null (RTR 이전에 로그인한 세션 등) */
+export async function readRefreshToken(): Promise<string | null> {
+  const value = (await cookies()).get(REFRESH_TOKEN_COOKIE)?.value;
+  return value ? value : null;
+}
+
+/** 로그인 세션 식별 쿠키를 새 값으로 저장 (로그인 Route Handler). maxAge는 Refresh Token과 같게 */
+export async function startLoginSession(expiresInSeconds: number): Promise<void> {
+  (await cookies()).set(LOGIN_SESSION_COOKIE, randomUUID(), { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** 토큰 재발급 뒤 로그인 세션 식별 쿠키의 수명만 Refresh Token에 맞춰 늘린다 (값은 그대로. 없으면 만들지 않는다) */
+export async function extendLoginSession(expiresInSeconds: number): Promise<void> {
+  const store = await cookies();
+  const value = store.get(LOGIN_SESSION_COOKIE)?.value;
+  if (value) store.set(LOGIN_SESSION_COOKIE, value, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** 쿠키 값을 화면에 넘길 구분 값으로 바꾼다 (SHA-256 앞 16자. 원래 값으로 되돌릴 수 없다) */
+export function toSessionTag(value: string): string {
+  return createHash("sha256").update(value).digest("base64url").slice(0, 16);
+}
+
+/** 현재 로그인 세션 구분 값 (보호 화면 렌더링 시점과 지금을 비교하는 데 쓴다). 쿠키가 없으면 null (STEP 3-2 이전 로그인 포함) */
+export async function readLoginSessionTag(): Promise<string | null> {
+  const value = (await cookies()).get(LOGIN_SESSION_COOKIE)?.value;
+  return value ? toSessionTag(value) : null;
+}
+
+/** 두 토큰 쿠키와 로그인 세션 식별 쿠키 삭제 (로그아웃 Route Handler에서 호출). 저장할 때와 같은 path·보안 속성으로 지운다 */
+export async function clearSessionCookies(): Promise<void> {
+  const store = await cookies();
+  store.delete({ name: ACCESS_TOKEN_COOKIE, ...TOKEN_COOKIE_OPTIONS });
+  store.delete({ name: REFRESH_TOKEN_COOKIE, ...TOKEN_COOKIE_OPTIONS });
+  store.delete({ name: LOGIN_SESSION_COOKIE, ...TOKEN_COOKIE_OPTIONS });
 }
 
 async function readAccessToken(): Promise<string | null> {
   const value = (await cookies()).get(ACCESS_TOKEN_COOKIE)?.value;
   return value ? value : null;
+}
+
+/** Access 쿠키가 있는지만 (세션 상태 확인 Route Handler용. 값은 돌려주지 않는다) */
+export async function readAccessTokenPresence(): Promise<boolean> {
+  return (await readAccessToken()) !== null;
 }
 
 /** 서버에서 확인한 사용자 역할 (백엔드 Role enum) */

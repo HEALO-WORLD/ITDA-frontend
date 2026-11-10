@@ -2,13 +2,13 @@ import { getLoginFailureReason, LOGIN_FAILURE_MESSAGES, requestLogin } from "@/f
 import type { LoginFailureReason, LoginResult } from "@/features/auth/types";
 import { getApiMode } from "@/lib/api/config";
 import { isSameOriginRequest } from "@/lib/auth/csrf";
-import { setAccessTokenCookie, verifyAccessToken } from "@/lib/auth/session";
+import { setAccessTokenCookie, setRefreshTokenCookie, startLoginSession, verifyAccessToken } from "@/lib/auth/session";
 import { getHomeRouteForUserRole } from "@/constants/navigation";
 
 /**
  * 로그인 `POST /auth/login` (화면 → Next 서버 → Gateway `POST /api/v1/auth/login`).
  *
- * 브라우저는 토큰을 받지 않는다: 서버가 받은 토큰을 HttpOnly 쿠키에 저장하고 결과(LoginResult)만 돌려준다.
+ * 브라우저는 토큰을 받지 않는다: 서버가 받은 Access·Refresh 토큰을 각각 HttpOnly 쿠키에 저장하고 결과(LoginResult)만 돌려준다.
  * 토큰을 받으면 `GET /api/v1/users/me`로 사용자를 확인하고, 확인된 경우에만 쿠키를 저장해 역할별 첫 화면 경로를 돌려준다.
  * API 모드에서만 동작한다. Mock 모드에서는 백엔드를 부르지 않고 거부한다 (Mock 로그인을 만들지 않는다).
  */
@@ -85,6 +85,9 @@ export async function POST(request: Request) {
     return respond({ ok: false, reason: "USER_INFO_FAILED", message: verified.message });
   }
   await setAccessTokenCookie(token.accessToken, token.expiresIn);
+  await setRefreshTokenCookie(token.refreshToken, token.refreshExpiresIn);
+  // 로그인할 때마다 새 로그인 세션 (다른 탭이 계정 전환을 알아챈다)
+  await startLoginSession(token.refreshExpiresIn);
   const redirectTo = getHomeRouteForUserRole(verified.role);
   return respond({
     ok: true,
