@@ -233,6 +233,41 @@ export async function requireRoleAccess(role: OrganizationRole | "ADMIN"): Promi
   return { ok: true, headers: toAuthorizationHeaders(state), user: state.user };
 }
 
+export const SESSION_CHANGED_MESSAGE = "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요.";
+
+/** 변경 요청 접근 확인 결과: 기존 RoleAccess + 로그인 세션 불일치(SESSION_CHANGED, 권한 부족과 구분한다) */
+export type RoleMutationAccess = RoleAccess | { ok: false; reason: "SESSION_CHANGED"; message: string };
+
+/** 로그인 세션 구분 값 형식 (readLoginSessionTag: SHA-256 base64url 앞 16자) */
+const LOGIN_SESSION_TAG = /^[A-Za-z0-9_-]{16}$/;
+
+/**
+ * 변경 요청용 접근 확인 (Server Action에서 백엔드 변경 API를 부르기 전에). requireRoleAccess를 대체하지 않고 그 위에 더한다.
+ *
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (클라이언트가 보낸 값. 인증·인가 근거가 아니라 사전 조건으로만 쓴다)
+ * 1. 형식 확인: undefined·문자열/null이 아님·형식 오류 → 거부 (fail-closed)
+ * 2. 기존 requireRoleAccess(role): 로그인·토큰·역할 확인 결과(SIGNED_OUT·UNAUTHORIZED 등)를 그대로 돌려준다
+ * 3. 현재 HttpOnly 쿠키의 구분 값과 비교: 다르면 SESSION_CHANGED (다른 탭의 계정 전환·같은 계정 재로그인). 읽기 실패도 거부
+ *    토큰 재발급(회전)은 구분 값을 바꾸지 않으므로 통과한다. 명시적인 null/null(구분 값 쿠키가 없던 기존 세션)은 허용한다
+ * 거부하면 헤더를 주지 않는다 → 호출한 쪽은 백엔드 변경 요청을 보내지 않는다. 권한 판단은 그대로 백엔드가 한다.
+ */
+export async function requireRoleMutationAccess(role: OrganizationRole | "ADMIN", expectedLoginSession: unknown): Promise<RoleMutationAccess> {
+  const sessionChanged = { ok: false, reason: "SESSION_CHANGED", message: SESSION_CHANGED_MESSAGE } as const;
+  if (expectedLoginSession !== null && (typeof expectedLoginSession !== "string" || !LOGIN_SESSION_TAG.test(expectedLoginSession))) {
+    return sessionChanged;
+  }
+  const access = await requireRoleAccess(role);
+  if (!access.ok) return access;
+  let current: string | null;
+  try {
+    current = await readLoginSessionTag();
+  } catch (error) {
+    unstable_rethrow(error);
+    return sessionChanged;
+  }
+  return current === expectedLoginSession ? access : sessionChanged;
+}
+
 /**
  * 접근 실패 → 데이터 함수의 공통 실패 구분 (각 기능의 실패 결과에 그대로 쓴다).
  * 만료(401)는 UNAUTHORIZED, 다른 역할·사용자 확인 실패는 FORBIDDEN (요청을 보내지 않았으므로 code는 없다).

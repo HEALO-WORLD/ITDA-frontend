@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { onSessionChanged } from "@/features/auth/authChannel";
+import { LoginSessionContext } from "@/features/auth/loginSessionContext";
 
 import SessionRestore from "./SessionRestore";
 
@@ -21,6 +22,7 @@ import SessionRestore from "./SessionRestore";
  * 확인 시점: 화면 이동 뒤(기존 확인과 같은 요청) + 다른 탭의 로그인·로그아웃 신호(BroadcastChannel) + 탭·창으로 돌아왔을 때(focus·visibilitychange).
  * 확인 요청이 진행 중이면 겹친 이벤트는 그 결과를 함께 쓴다 (시간으로 건너뛰지 않으므로 확인 직후 바뀐 계정도 다음 이벤트에서 감지한다).
  * 토큰 재발급(회전)은 로그인 세션 구분 값을 바꾸지 않으므로 다시 불러오지 않는다. 일반 API·POST 요청은 다시 실행하지 않는다.
+ * 렌더링 시점 구분 값은 LoginSessionContext로 하위 화면에 제공한다 (변경 요청이 서버에 함께 보낸다).
  */
 export default function SessionGuard({ children, loginSession }: { children: ReactNode; loginSession: string | null }) {
   const pathname = usePathname();
@@ -88,5 +90,5 @@ export default function SessionGuard({ children, loginSession }: { children: Rea
       </div>
     );
   }
-  return children;
+  return <LoginSessionContext.Provider value={loginSession}>{children}</LoginSessionContext.Provider>;
 }
