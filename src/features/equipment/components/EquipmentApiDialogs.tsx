@@ -17,6 +17,7 @@ import {
   rowClass,
 } from "@/components/ui/styles";
 import { NETWORK_FAILURE, useDetailResult } from "@/features/admin/components/AdminDetailParts";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 import type { ExamTypeDto } from "@/features/referrals/remote";
 
@@ -40,6 +41,7 @@ import {
   type EquipmentStatusDto,
 } from "../remote";
 import type { EquipmentDetailResult, ExamTypeOptionsResult } from "../server";
+import { markEquipmentSessionChanged, useEquipmentSessionChanged } from "../sessionChangeLock";
 
 /** 장비 상태 (EquipmentStatus. 상태 변경 API는 없다) */
 export const STATUS: Record<EquipmentStatusDto, { label: string; tone: StatusTone }> = {
@@ -60,10 +62,13 @@ export function EquipmentFormDialog({ equipment, onClose, onDone }: { equipment?
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 장비 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useEquipmentSessionChanged();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     const nextErrors: FieldErrors = {
       name: validateEquipmentName(name),
       ...(mode === "create" ? { modality: modality ? null : "장비 종류를 선택해 주세요." } : {}),
@@ -74,8 +79,11 @@ export function EquipmentFormDialog({ equipment, onClose, onDone }: { equipment?
     pendingRef.current = true;
     setPending(true);
     try {
-      const result = equipment ? await updateEquipmentAction(equipment.id, { name }) : await createEquipmentAction({ name, modality });
+      const result = equipment
+        ? await updateEquipmentAction(equipment.id, { name }, renderedLoginSession)
+        : await createEquipmentAction({ name, modality }, renderedLoginSession);
       if (result.ok || result.reason === "NOT_FOUND") return onDone(result);
+      if (result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
       if (result.fieldErrors) setErrors(result.fieldErrors);
       setFormError(result.message);
     } catch {
@@ -161,7 +169,7 @@ export function EquipmentFormDialog({ equipment, onClose, onDone }: { equipment?
           <button type="button" onClick={onClose} disabled={pending} className={secondaryButtonClass}>
             취소
           </button>
-          <button type="submit" disabled={pending} className={primaryButtonClass}>
+          <button type="submit" disabled={pending || sessionChanged} className={primaryButtonClass}>
             {pending ? "처리 중…" : mode === "create" ? "등록" : "저장"}
           </button>
         </div>
@@ -247,6 +255,9 @@ export function EquipmentDetailDialog({
   const [editResult, setEditResult] = useState<EquipmentActionResult | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 장비 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useEquipmentSessionChanged();
 
   // 열 때 한 번 조회하고, 추가·수정 결과를 반영할 때 reload()로 다시 조회한다 (늦게 온 이전 응답은 버린다)
   const { value: detail, retry: reload } = useDetailResult<EquipmentDetailResult>(equipment.id, () => loadEquipmentDetailAction(equipment.id), NETWORK_FAILURE);
@@ -282,7 +293,7 @@ export function EquipmentDetailDialog({
 
   const add = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     const duration = readDuration(minutes);
     const errors = { examTypeId: examTypeId ? null : "검사 유형을 선택해 주세요.", durationMinutes: duration.error };
     setAddErrors(errors);
@@ -290,8 +301,9 @@ export function EquipmentDetailDialog({
     if (errors.examTypeId || errors.durationMinutes) return;
     void guarded(async () => {
       try {
-        const result = await addEquipmentExamTypeAction(equipment.id, { examTypeId, durationMinutes: duration.value });
+        const result = await addEquipmentExamTypeAction(equipment.id, { examTypeId, durationMinutes: duration.value }, renderedLoginSession);
         setAddResult(result);
+        if (!result.ok && result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
         if (!result.ok && result.fieldErrors) setAddErrors(result.fieldErrors);
         if (needsReload(result)) {
           setExamTypeId("");
@@ -307,7 +319,7 @@ export function EquipmentDetailDialog({
 
   const saveDuration = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editing || pendingRef.current) return;
+    if (!editing || pendingRef.current || sessionChanged) return;
     const duration = readDuration(editing.value);
     if (duration.error) {
       setEditing({ ...editing, error: duration.error });
@@ -317,8 +329,9 @@ export function EquipmentDetailDialog({
     setEditResult(null);
     void guarded(async () => {
       try {
-        const result = await updateEquipmentExamTypeDurationAction(equipment.id, target.examTypeId, duration.value);
+        const result = await updateEquipmentExamTypeDurationAction(equipment.id, target.examTypeId, duration.value, renderedLoginSession);
         setEditResult(result);
+        if (!result.ok && result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
         if (needsReload(result)) {
           setEditing(null);
           reload();
@@ -427,7 +440,7 @@ export function EquipmentDetailDialog({
                                   error={editing.error}
                                   disabled={pending}
                                 />
-                                <button type="submit" disabled={pending} className={`${primaryButtonClass} h-9!`}>
+                                <button type="submit" disabled={pending || sessionChanged} className={`${primaryButtonClass} h-9!`}>
                                   {pending ? "저장 중…" : "저장"}
                                 </button>
                                 <button type="button" onClick={() => setEditing(null)} disabled={pending} className={`${secondaryButtonClass} h-9!`}>
@@ -555,7 +568,7 @@ export function EquipmentDetailDialog({
                   닫기
                 </button>
                 {options?.ok && available.length > 0 && (
-                  <button type="submit" disabled={pending} className={primaryButtonClass}>
+                  <button type="submit" disabled={pending || sessionChanged} className={primaryButtonClass}>
                     {pending ? "추가 중…" : "추가"}
                   </button>
                 )}

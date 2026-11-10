@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
+import { requireRoleMutationAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import { toBackendWeek } from "./operatingHours";
 import {
@@ -51,7 +51,8 @@ export type EquipmentActionResult =
   | { ok: true; message: string }
   | {
       ok: false;
-      reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "NETWORK" | "ERROR";
+      /** SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분) */
+      reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "SESSION_CHANGED" | "NETWORK" | "ERROR";
       message: string;
       fieldErrors?: Partial<Record<"name" | "modality" | "examTypeId" | "durationMinutes" | "operatingHours", string | null>>;
     };
@@ -94,7 +95,8 @@ export async function loadEquipmentOperatingHoursAction(equipmentId: unknown): P
   return loadEquipmentOperatingHours(equipmentId);
 }
 
-export async function createEquipmentAction(input: unknown): Promise<EquipmentActionResult> {
+/** 변경 Action 공통: expectedLoginSession은 화면이 렌더링될 때의 로그인 세션 구분 값. 지금 쿠키 값과 다르면 요청하지 않는다 (SESSION_CHANGED) */
+export async function createEquipmentAction(input: unknown, expectedLoginSession?: unknown): Promise<EquipmentActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   // 기관 ID는 받지 않는다 (users/me 소속 기관으로 등록)
@@ -102,6 +104,7 @@ export async function createEquipmentAction(input: unknown): Promise<EquipmentAc
   const fieldErrors = { name: validateEquipmentName(name), modality: isEquipmentModality(modality) ? null : "장비 종류를 선택해 주세요." };
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
   return run(
+    expectedLoginSession,
     "create",
     "장비를 등록했습니다.",
     (requestHeaders, institutionId) =>
@@ -110,7 +113,7 @@ export async function createEquipmentAction(input: unknown): Promise<EquipmentAc
   );
 }
 
-export async function updateEquipmentAction(equipmentId: unknown, input: unknown): Promise<EquipmentActionResult> {
+export async function updateEquipmentAction(equipmentId: unknown, input: unknown, expectedLoginSession?: unknown): Promise<EquipmentActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isEquipmentEntityId(equipmentId)) return invalid(INVALID_EQUIPMENT);
@@ -118,11 +121,11 @@ export async function updateEquipmentAction(equipmentId: unknown, input: unknown
   const { name } = asRecord(input);
   const nameError = validateEquipmentName(name);
   if (nameError) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors: { name: nameError } };
-  return run("update", "장비 정보를 수정했습니다.", (requestHeaders) => updateEquipment(equipmentId, { name: name as string }, { headers: requestHeaders }), "장비 수정에 실패했습니다.");
+  return run(expectedLoginSession, "update", "장비 정보를 수정했습니다.", (requestHeaders) => updateEquipment(equipmentId, { name: name as string }, { headers: requestHeaders }), "장비 수정에 실패했습니다.");
 }
 
 /** 지원 검사 유형 추가 (검사 유형 + 이 장비에서의 소요 시간, 둘 다 필수) */
-export async function addEquipmentExamTypeAction(equipmentId: unknown, input: unknown): Promise<EquipmentActionResult> {
+export async function addEquipmentExamTypeAction(equipmentId: unknown, input: unknown, expectedLoginSession?: unknown): Promise<EquipmentActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isEquipmentEntityId(equipmentId)) return invalid(INVALID_EQUIPMENT);
@@ -133,6 +136,7 @@ export async function addEquipmentExamTypeAction(equipmentId: unknown, input: un
   };
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: fieldErrors.examTypeId ?? fieldErrors.durationMinutes!, fieldErrors };
   return run(
+    expectedLoginSession,
     "exam-type-add",
     "지원 검사 유형을 추가했습니다.",
     (requestHeaders) => createEquipmentExamType(equipmentId, { examTypeId: examTypeId as string, durationMinutes: durationMinutes as number }, { headers: requestHeaders }),
@@ -142,13 +146,19 @@ export async function addEquipmentExamTypeAction(equipmentId: unknown, input: un
 }
 
 /** 연결된 지원 검사 유형의 소요 시간 수정 (검사 유형 ID는 공통 검사 유형 ID) */
-export async function updateEquipmentExamTypeDurationAction(equipmentId: unknown, examTypeId: unknown, durationMinutes: unknown): Promise<EquipmentActionResult> {
+export async function updateEquipmentExamTypeDurationAction(
+  equipmentId: unknown,
+  examTypeId: unknown,
+  durationMinutes: unknown,
+  expectedLoginSession?: unknown,
+): Promise<EquipmentActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isEquipmentEntityId(equipmentId) || !isEquipmentEntityId(examTypeId)) return invalid(INVALID_EQUIPMENT);
   const durationError = validateDurationMinutes(durationMinutes);
   if (durationError) return { ok: false, reason: "INVALID", message: durationError, fieldErrors: { durationMinutes: durationError } };
   return run(
+    expectedLoginSession,
     "exam-type-duration",
     "검사 소요 시간을 수정했습니다.",
     (requestHeaders) => updateEquipmentExamTypeDuration(equipmentId, examTypeId, durationMinutes as number, { headers: requestHeaders }),
@@ -162,13 +172,14 @@ export async function updateEquipmentExamTypeDurationAction(equipmentId: unknown
  * PUT은 빠진 요일을 지우므로, 화면은 서버에서 불러온 운영시간을 고친 전체 목록만 보낸다 (조회 실패 시 저장 버튼이 없다).
  * 운영하는 요일이 하나도 없으면 보내지 않는다 (모든 요일이 지워지는 것을 막는다).
  */
-export async function saveEquipmentOperatingHoursAction(equipmentId: unknown, days: unknown): Promise<EquipmentActionResult> {
+export async function saveEquipmentOperatingHoursAction(equipmentId: unknown, days: unknown, expectedLoginSession?: unknown): Promise<EquipmentActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isEquipmentEntityId(equipmentId)) return invalid(INVALID_EQUIPMENT);
   const parsed = parseOperatingDays(days);
   if (typeof parsed === "string") return { ok: false, reason: "INVALID", message: parsed, fieldErrors: { operatingHours: parsed } };
   return run(
+    expectedLoginSession,
     "operating-hours-save",
     "운영 시간을 저장했습니다.",
     (requestHeaders) => replaceEquipmentOperatingHours(equipmentId, parsed, { headers: requestHeaders }),
@@ -215,21 +226,26 @@ function toActionFailure(error: unknown, action: string, fallback: string, overr
   };
 }
 
-/** 검사기관 확인 실패 → 결과 */
-function toAccessFailure(access: Extract<Awaited<ReturnType<typeof requireRoleAccess>>, { ok: false }>): ActionFailure {
+/** 검사기관·로그인 세션 확인 실패 → 결과 (SESSION_CHANGED는 FORBIDDEN으로 바꾸지 않는다) */
+function toAccessFailure(access: Extract<Awaited<ReturnType<typeof requireRoleMutationAccess>>, { ok: false }>): ActionFailure {
+  if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
   const failure = toRoleAccessFailure(access);
   return { ok: false, reason: failure.reason, message: failure.reason === "SIGNED_OUT" ? "로그인이 필요합니다. 다시 로그인해 주세요." : failure.message };
 }
 
-/** 검사기관 확인 → 요청 → 결과. 성공·404·409는 화면을 다시 불러온다 */
+/**
+ * 검사기관·로그인 세션 확인 → 요청 → 결과. 성공·404·409는 화면을 다시 불러온다.
+ * 세션이 바뀌었으면(SESSION_CHANGED) 요청하지 않고 화면도 다시 불러오지 않는다
+ */
 async function run(
+  expectedLoginSession: unknown,
   action: string,
   successMessage: string,
   request: (requestHeaders: HeadersInit, institutionId: string) => Promise<unknown>,
   fallback: string,
   overrides?: Record<string, string>,
 ): Promise<EquipmentActionResult> {
-  const access = await requireRoleAccess("EXAMINING");
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
   if (!access.ok) return toAccessFailure(access);
   try {
     await request(access.headers, access.user.institutionId);
@@ -267,7 +283,7 @@ export type CreateEquipmentResult =
  * 입력은 요청 전에 모두 검사한다. 장비 등록이 실패하면 아무것도 만들지 않은 것이다.
  * 2·3이 실패해도 장비 등록은 성공으로 두고, 무엇이 저장되지 않았는지 구분해 알린다.
  */
-export async function createEquipmentWithExamTypesAction(input: unknown): Promise<CreateEquipmentResult> {
+export async function createEquipmentWithExamTypesAction(input: unknown, expectedLoginSession?: unknown): Promise<CreateEquipmentResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked as ActionFailure;
   const { name, modality, examTypes, operatingHours } = asRecord(input);
@@ -293,7 +309,8 @@ export async function createEquipmentWithExamTypesAction(input: unknown): Promis
   const hours = parseOperatingDays(operatingHours);
   if (typeof hours === "string") return { ok: false, reason: "INVALID", message: hours, fieldErrors: { operatingHours: hours } };
 
-  const access = await requireRoleAccess("EXAMINING");
+  // 장비 등록·검사 유형 연결·운영시간 저장(최대 22회 요청) 전에 한 번 확인한다: 세션이 바뀌었으면 하나도 보내지 않는다
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
   if (!access.ok) return toAccessFailure(access);
 
   let equipmentId: string;
