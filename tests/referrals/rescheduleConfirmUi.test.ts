@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { before, describe, it, mock } from "node:test";
 
 import { createElement } from "react";
@@ -195,6 +196,19 @@ describe("toRequestFailurePhase", () => {
     assert.equal(forbidden.message, "서버 메시지");
     assert.equal(Confirm.toRequestFailurePhase(failure("CANDIDATE_REJECTED")).kind, "FAILED");
     assert.equal(Confirm.toRequestFailurePhase(failure("UNAUTHORIZED")).kind, "FAILED");
+  });
+
+  it("SESSION_CHANGED(다른 탭 계정 변경)는 확실한 실패: 서버의 전용 안내 그대로, 목록 안내·재요청 없음", () => {
+    const phase = Confirm.toRequestFailurePhase(failure("SESSION_CHANGED"));
+    assert.deepEqual(phase, { kind: "FAILED", message: "서버 메시지", showList: false });
+    assert.equal(Confirm.getRescheduleView(phase, null).actions, "CLOSE");
+  });
+
+  it("재조정 요청에 렌더링 시점 로그인 세션을 함께 보낸다 (/auth/session에서 새로 읽은 값이 아님)", () => {
+    const source = readFileSync(new URL("../../src/features/referrals/components/ApiRescheduleConfirm.tsx", import.meta.url), "utf8");
+    assert.match(source, /const renderedLoginSession = useRenderedLoginSession\(\);/);
+    assert.match(source, /requestRescheduleAction\(target\.referralId, slotId, renderedLoginSession\)/);
+    assert.doesNotMatch(source, /\/auth\/session/);
   });
 });
 

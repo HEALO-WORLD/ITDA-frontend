@@ -158,7 +158,8 @@ describe("의뢰 생성 ↔ 재조정 분리", () => {
   it("기존 재조정 Server Function(checkRescheduleCandidateAction·requestRescheduleAction)이 그대로 있다", () => {
     const source = readFileSync("src/features/referrals/rescheduleActions.ts", "utf8");
     assert.match(source, /export async function checkRescheduleCandidateAction\(referralId: unknown, slotId: unknown\)/);
-    assert.match(source, /export async function requestRescheduleAction\(referralId: unknown, slotId: unknown\)/);
+    // STEP 3-2-2B-1: 렌더링 시점 로그인 세션(expectedLoginSession)을 마지막 인자로 받는다
+    assert.match(source, /export async function requestRescheduleAction\(referralId: unknown, slotId: unknown, expectedLoginSession\?: unknown\)/);
     assert.match(source, /\/api\/v1\/referrals|requestReschedule\(/);
   });
 });

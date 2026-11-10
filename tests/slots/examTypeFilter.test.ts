@@ -81,6 +81,8 @@ before(async () => {
         return state.access;
       },
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({ reason: access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : "FORBIDDEN", message: access.message, code: null }),
+      // 재조정 Server Action(rescheduleActions)이 함께 불러오는 변경 요청용 확인. 이 파일은 재조정 요청을 부르지 않는다
+      requireRoleMutationAccess: async () => state.access,
     },
   });
   mock.module("@/features/partnerships/remote", {
