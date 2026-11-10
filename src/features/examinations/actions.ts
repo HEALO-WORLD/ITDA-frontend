@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess } from "@/lib/auth/session";
+import { requireRoleMutationAccess } from "@/lib/auth/session";
 
 import {
   changeExaminationStatus,
@@ -21,8 +21,10 @@ import type { ExaminationActionResult } from "./types";
  *
  * 인자는 브라우저에서 오므로 믿지 않고 다시 검증한다.
  * - CSRF: Next가 Server Function의 Origin·Host를 비교하고, 여기서도 같은 출처인지 한 번 더 확인한다
- * - 인증: users/me로 검사기관(EXAMINER) 역할을 확인한 뒤에만 토큰을 Gateway로 넘긴다 (requireRoleAccess). 아니면 요청하지 않는다
+ * - 인증: users/me로 검사기관(EXAMINER) 역할을 확인한 뒤에만 토큰을 Gateway로 넘긴다. 아니면 요청하지 않는다
  *   (토큰 검증·EXAMINER 역할·검사 수행 기관 일치는 Gateway와 백엔드가 확인한다)
+ * - 로그인 세션 정합성: 화면이 렌더링될 때의 로그인 세션(expectedLoginSession)과 지금 쿠키의 로그인 세션이 다르면
+ *   (다른 탭에서 계정 전환·같은 계정 재로그인) 요청하지 않고 SESSION_CHANGED (requireRoleMutationAccess)
  * - 결과에는 토큰·서버 오류 본문을 담지 않는다
  * 성공하면 화면을 다시 불러와(refresh) 목록을 서버 값으로 맞춘다 (화면에서 먼저 바꾸지 않는다).
  * 409는 화면이 서버 상태와 다르다는 뜻이라 안내와 함께 다시 불러오고, 그 밖의 실패는 화면 데이터를 그대로 둔다.
@@ -39,6 +41,7 @@ const STATUS_SUCCESS_MESSAGES: Record<NextStatus, string> = {
 export async function changeExaminationStatusAction(
   examinationId: unknown,
   status: unknown,
+  expectedLoginSession?: unknown,
 ): Promise<ExaminationActionResult> {
   const blocked = await checkRequest(examinationId);
   if (blocked) return blocked;
@@ -46,7 +49,7 @@ export async function changeExaminationStatusAction(
     return { ok: false, reason: "INVALID", message: "변경할 검사 상태가 올바르지 않습니다." };
   }
 
-  const access = await authorizeExaminer();
+  const access = await authorizeExaminer(expectedLoginSession);
   if (!access.ok) return access.failure;
   const authorization = access.headers;
 
@@ -68,6 +71,7 @@ export async function changeExaminationStatusAction(
 export async function registerExaminationResultAction(
   examinationId: unknown,
   input: unknown,
+  expectedLoginSession?: unknown,
 ): Promise<ExaminationActionResult> {
   const blocked = await checkRequest(examinationId);
   if (blocked) return blocked;
@@ -79,7 +83,7 @@ export async function registerExaminationResultAction(
     return { ok: false, reason: "INVALID", message: "추가 소견 입력값이 올바르지 않습니다." };
   }
 
-  const access = await authorizeExaminer();
+  const access = await authorizeExaminer(expectedLoginSession);
   if (!access.ok) return access.failure;
   const authorization = access.headers;
 
@@ -98,10 +102,15 @@ const SIGNED_OUT: ExaminationActionResult = {
   message: "로그인이 필요합니다. 다시 로그인해 주세요.",
 };
 
-/** 검사기관(EXAMINER) 역할을 users/me로 확인한다. 아니면 요청하지 않는다 (requireRoleAccess) */
-async function authorizeExaminer(): Promise<{ ok: true; headers: HeadersInit } | { ok: false; failure: ExaminationActionResult }> {
-  const access = await requireRoleAccess("EXAMINING");
+/**
+ * 검사기관(EXAMINER) 역할을 users/me로 확인하고, 렌더링 시점 로그인 세션이 지금과 같은지 확인한다 (변경 요청 전용).
+ * 아니면 요청하지 않는다. 이 파일의 두 변경 Action만 부른다 (조회 Action은 각자 requireRoleAccess를 쓴다)
+ */
+async function authorizeExaminer(expectedLoginSession: unknown): Promise<{ ok: true; headers: HeadersInit } | { ok: false; failure: ExaminationActionResult }> {
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
   if (access.ok) return { ok: true, headers: access.headers };
+  // 다른 계정 쿠키로 바뀐 화면: 목록을 다시 그리지 않고 새로고침 안내만 한다
+  if (access.reason === "SESSION_CHANGED") return { ok: false, failure: { ok: false, reason: "SESSION_CHANGED", message: access.message } };
   if (access.reason === "SIGNED_OUT") return { ok: false, failure: SIGNED_OUT };
   if (access.reason === "UNAUTHORIZED") {
     return { ok: false, failure: { ok: false, reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었거나 올바르지 않습니다. 다시 로그인해 주세요." } };

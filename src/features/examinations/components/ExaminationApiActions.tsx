@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react";
 import { useId, useRef, useState, type FormEvent } from "react";
 
 import Modal from "@/components/ui/Modal";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { abbreviateReferralId } from "@/features/referrals/referralId";
 
 import { changeExaminationStatusAction, registerExaminationResultAction } from "../actions";
@@ -46,6 +47,10 @@ const buttonClass =
  *   장비 장애 수동 확인과는 별개다 (수동 확인 이력 API가 없어 여기서 다루지 않는다)
  */
 export default function ExaminationApiActions({ examination, detail }: ExaminationApiActionsProps) {
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공). 상태 변경·결과 등록에 함께 보낸다 */
+  const renderedLoginSession = useRenderedLoginSession();
+  /** 다른 탭에서 계정이 바뀌어 서버가 요청하지 않았다: 이 화면에서는 변경 요청을 다시 보내지 않는다 */
+  const [sessionChanged, setSessionChanged] = useState(false);
   const pendingRef = useRef(false);
   const [pending, setPending] = useState(false);
   const [outcome, setOutcome] = useState<ExaminationActionResult | null>(null);
@@ -64,7 +69,7 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
   const canRegister = examination.progressStatus === "COMPLETED" && !examination.resultRegistered;
 
   const openConfirm = () => {
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     setOutcome(null);
     setConfirmError(null);
     setConfirmOpen(true);
@@ -72,17 +77,18 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
 
   /** [검사 완료 확정]: 기존 Server Function을 한 번만 부른다. 성공하면 창을 닫고(목록은 refresh로 서버 값), 실패하면 창 안에 안내 */
   const confirmComplete = async () => {
-    if (examination.progressStatus !== "IN_PROGRESS" || pendingRef.current || confirmError?.reason === "CONFLICT") return;
+    if (examination.progressStatus !== "IN_PROGRESS" || pendingRef.current || sessionChanged || confirmError?.reason === "CONFLICT") return;
     pendingRef.current = true;
     setPending(true);
     setConfirmError(null);
     try {
-      const result = await changeExaminationStatusAction(examination.examinationId, "COMPLETED");
+      const result = await changeExaminationStatusAction(examination.examinationId, "COMPLETED", renderedLoginSession);
       if (result.ok) {
         setConfirmOpen(false);
         setOutcome(result);
       } else {
         setConfirmError(result);
+        if (result.reason === "SESSION_CHANGED") setSessionChanged(true);
       }
     } catch {
       setConfirmError({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
@@ -93,12 +99,14 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
   };
 
   const changeStatus = async () => {
-    if (!next || startBlocked || pendingRef.current) return;
+    if (!next || startBlocked || pendingRef.current || sessionChanged) return;
     pendingRef.current = true;
     setPending(true);
     setOutcome(null);
     try {
-      setOutcome(await changeExaminationStatusAction(examination.examinationId, next));
+      const result = await changeExaminationStatusAction(examination.examinationId, next, renderedLoginSession);
+      setOutcome(result);
+      if (!result.ok && result.reason === "SESSION_CHANGED") setSessionChanged(true);
     } catch {
       setOutcome({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
     } finally {
@@ -113,7 +121,7 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
         <button
           type="button"
           onClick={next === "COMPLETED" ? openConfirm : changeStatus}
-          disabled={pending || startBlocked}
+          disabled={pending || startBlocked || sessionChanged}
           aria-busy={pending}
           aria-haspopup={next === "COMPLETED" ? "dialog" : undefined}
           className={buttonClass}
@@ -129,6 +137,7 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
             setOutcome(null);
             setRegisterOpen(true);
           }}
+          disabled={sessionChanged}
           className={buttonClass}
         >
           결과 등록
@@ -162,7 +171,7 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
             <button
               type="button"
               onClick={() => void confirmComplete()}
-              disabled={pending || confirmError?.reason === "CONFLICT"}
+              disabled={pending || sessionChanged || confirmError?.reason === "CONFLICT"}
               aria-busy={pending}
               className={confirmClass}
             >
@@ -214,11 +223,13 @@ export default function ExaminationApiActions({ examination, detail }: Examinati
         {registerOpen && (
           <ApiResultRegisterForm
             examinationId={examination.examinationId}
+            loginSession={renderedLoginSession}
             onCancel={() => setRegisterOpen(false)}
             onRegistered={(result) => {
               setOutcome(result);
               setRegisterOpen(false);
             }}
+            onSessionChanged={() => setSessionChanged(true)}
           />
         )}
       </Modal>
@@ -237,12 +248,18 @@ const controlClass =
  */
 function ApiResultRegisterForm({
   examinationId,
+  loginSession,
   onCancel,
   onRegistered,
+  onSessionChanged,
 }: {
   examinationId: string;
+  /** 화면이 렌더링된 로그인 세션 (결과 등록 요청에 함께 보낸다) */
+  loginSession: string | null | undefined;
   onCancel: () => void;
   onRegistered: (result: ExaminationActionResult) => void;
+  /** 다른 탭에서 계정이 바뀌어 등록하지 않았다 (상위가 다른 변경 버튼도 잠근다) */
+  onSessionChanged: () => void;
 }) {
   const errorId = useId();
   const [summary, setSummary] = useState("");
@@ -250,6 +267,8 @@ function ApiResultRegisterForm({
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /** SESSION_CHANGED 뒤: 등록을 다시 보내지 않는다 (submittingRef도 풀지 않는다) */
+  const [sessionLocked, setSessionLocked] = useState(false);
   const submittingRef = useRef(false);
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -264,12 +283,19 @@ function ApiResultRegisterForm({
     submittingRef.current = true;
     setIsSubmitting(true);
     try {
-      const result = await registerExaminationResultAction(examinationId, { summary, notes });
+      const result = await registerExaminationResultAction(examinationId, { summary, notes }, loginSession);
       if (result.ok) {
         onRegistered(result);
         return;
       }
       setSubmitError(result.message);
+      if (result.reason === "SESSION_CHANGED") {
+        // 이 폼에서는 다시 보내지 않는다 (입력·등록 버튼 잠금, 취소로 닫기만)
+        setSessionLocked(true);
+        onSessionChanged();
+        setIsSubmitting(false);
+        return;
+      }
     } catch {
       setSubmitError(NETWORK_ERROR_MESSAGE);
     }
@@ -286,7 +312,7 @@ function ApiResultRegisterForm({
         </div>
       )}
 
-      <fieldset disabled={isSubmitting} className="flex flex-col gap-5">
+      <fieldset disabled={isSubmitting || sessionLocked} className="flex flex-col gap-5">
         <div>
           <label htmlFor="api-result-summary" className={fieldLabelClass}>
             결과 요약 <span className="text-red-600">*</span>
@@ -338,7 +364,7 @@ function ApiResultRegisterForm({
         </button>
         <button
           type="submit"
-          disabled={isSubmitting}
+          disabled={isSubmitting || sessionLocked}
           className="h-12 rounded-lg bg-primary px-6 text-[15px] font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
         >
           {isSubmitting ? "등록 중" : "결과 등록"}
