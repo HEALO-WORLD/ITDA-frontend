@@ -97,11 +97,14 @@ export function NotificationRow({
   meta,
   onMarkAsRead,
   pending,
+  locked,
 }: {
   item: Pick<NotificationItem, "title" | "message" | "occurredAt" | "isRead">;
   meta: NotificationTypeMeta;
   onMarkAsRead: () => void;
   pending?: boolean;
+  /** 읽음 처리를 잠근다 (API 모드: 다른 탭에서 로그인 계정이 바뀜). 처리 중과 달리 '처리 중'으로 보이지 않는다. Mock은 넘기지 않는다 */
+  locked?: boolean;
 }) {
   const { label, icon: Icon, className } = meta;
   const unread = !item.isRead;
@@ -128,9 +131,11 @@ export function NotificationRow({
           <button
             type="button"
             onClick={onMarkAsRead}
-            disabled={pending}
+            disabled={pending || locked}
             aria-busy={pending}
-            className="-mx-1.5 -my-1 block min-w-0 cursor-pointer rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary disabled:cursor-wait"
+            className={`-mx-1.5 -my-1 block min-w-0 cursor-pointer rounded-lg px-1.5 py-1 text-left transition-colors hover:bg-primary-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary ${
+              locked ? "disabled:cursor-not-allowed disabled:hover:bg-transparent" : "disabled:cursor-wait"
+            }`}
           >
             {content}
             <span className="sr-only"> (선택하면 읽음 처리)</span>
@@ -156,7 +161,7 @@ export function NotificationRow({
             <button
               type="button"
               onClick={onMarkAsRead}
-              disabled={pending}
+              disabled={pending || locked}
               aria-busy={pending}
               aria-label={`'${item.title}' 알림 읽음으로 표시`}
               className="-my-1.5 ml-auto inline-flex h-8 shrink-0 items-center gap-1 whitespace-nowrap rounded-md px-2 text-[13px] font-semibold text-primary underline-offset-2 transition-colors hover:bg-primary-soft hover:underline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary disabled:cursor-not-allowed disabled:text-gray-400 disabled:no-underline disabled:hover:bg-transparent sm:-mr-2 sm:ml-0"

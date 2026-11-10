@@ -75,8 +75,14 @@ export interface NotificationFailure {
 /** 읽지 않은 알림 수 조회 결과 (레이아웃이 Promise로 넘겨 헤더·목록이 함께 쓴다) */
 export type UnreadNotificationCountResult = { ok: true; unreadCount: number } | NotificationFailure;
 
-/** 읽음 처리 Server Function 결과 */
-export type NotificationReadActionResult = { ok: true; notificationId: string; readAt: string } | NotificationFailure;
+/**
+ * 읽음 처리 Server Function 결과.
+ * SESSION_CHANGED: 다른 탭에서 로그인 계정이 바뀌어 요청하지 않음 (FORBIDDEN과 구분, 읽음 처리에만 있다)
+ */
+export type NotificationReadActionResult =
+  | { ok: true; notificationId: string; readAt: string }
+  | NotificationFailure
+  | { ok: false; reason: "SESSION_CHANGED"; message: string };
 
 /** API 알림 목록의 읽지 않음 필터 화면 주소 값 (`?filter=unread`) */
 export const NOTIFICATION_UNREAD_FILTER = "unread";

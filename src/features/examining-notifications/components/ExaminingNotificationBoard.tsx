@@ -306,12 +306,15 @@ export function NotificationRow({
   link,
   onMarkAsRead,
   pending,
+  locked,
 }: {
   item: Pick<ExaminingNotification, "id" | "title" | "message" | "occurredAt" | "isRead">;
   meta: NotificationTypeMeta;
   link: { href: string; label: string } | null;
   onMarkAsRead: () => void;
   pending?: boolean;
+  /** 읽음 처리를 잠근다 (API 모드: 다른 탭에서 로그인 계정이 바뀜). 처리 중과 달리 '처리 중'으로 보이지 않는다. Mock은 넘기지 않는다 */
+  locked?: boolean;
 }) {
   const { label, icon: Icon, iconClass, badgeClass } = meta;
 
@@ -348,7 +351,7 @@ export function NotificationRow({
               <button
                 type="button"
                 onClick={onMarkAsRead}
-                disabled={pending}
+                disabled={pending || locked}
                 aria-busy={pending}
                 aria-label={`'${item.title}' 읽음 처리`}
                 className={`h-9 whitespace-nowrap rounded-md px-2.5 text-sm font-medium text-gray-600 hover:bg-gray-100${
