@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, useTransition, type FormEvent } from "react";
 
 import type { LoginResult } from "@/features/auth/types";
 import { getApiMode } from "@/lib/api/config";
@@ -53,7 +53,14 @@ const inputClass =
 export default function LoginForm() {
   const [values, setValues] = useState<LoginFormValues>({ loginId: "", password: "" });
   const [errors, setErrors] = useState<LoginFormErrors>({});
+  /** 로그인 API 요청 중 */
   const [isSubmitting, setIsSubmitting] = useState(false);
+  /**
+   * 로그인 성공 후 화면 이동 중. 이동이 끝나면 React가 풀어 준다.
+   * cacheComponents에서는 이 화면이 언마운트되지 않고 숨겨져 상태가 남으므로, 이동 중 표시를 useState로 고정하지 않는다
+   */
+  const [isNavigating, startNavigation] = useTransition();
+  const isPending = isSubmitting || isNavigating;
   const [formMessage, setFormMessage] = useState<string | null>(null);
   /** 로그인됐지만 이동할 화면이 없는 경우(ADMIN)의 안내 */
   const [loggedInNotice, setLoggedInNotice] = useState<string | null>(null);
@@ -63,7 +70,7 @@ export default function LoginForm() {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (submittingRef.current) return;
+    if (submittingRef.current || isNavigating) return;
     setFormMessage(null);
 
     const nextErrors = validate(values);
@@ -108,10 +115,11 @@ export default function LoginForm() {
     if (result.ok) {
       setValues({ loginId: "", password: "" });
       if (result.redirectTo) {
-        // 이동 중 다시 제출하지 못하게 막아 둔다 (이동이 끝나면 이 화면은 사라진다)
-        submittingRef.current = true;
-        setIsSubmitting(true);
-        router.replace(result.redirectTo);
+        const redirectTo = result.redirectTo;
+        // 이동 중에는 isNavigating으로 다시 제출하지 못하게 막는다
+        startNavigation(() => {
+          router.replace(redirectTo);
+        });
         return;
       }
       setLoggedInNotice(result.message ?? "로그인했습니다. 이동할 화면이 없습니다.");
@@ -193,11 +201,11 @@ export default function LoginForm() {
 
       <button
         type="submit"
-        disabled={isSubmitting}
-        aria-busy={isSubmitting}
+        disabled={isPending}
+        aria-busy={isPending}
         className="mt-6 h-12 rounded-lg bg-primary text-base font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isSubmitting ? "로그인 중" : "로그인"}
+        {isPending ? "로그인 중" : "로그인"}
       </button>
     </form>
   );
