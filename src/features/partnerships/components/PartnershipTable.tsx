@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 
 import Modal from "@/components/ui/Modal";
 import StatusBadge, { type StatusTone } from "@/components/ui/StatusBadge";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { emptyStateClass, primaryButtonClass, rowClass, secondaryButtonClass, tableClass, tableWrapClass, tdClass, theadClass, thClass } from "@/components/ui/styles";
 import { formatDateTime } from "@/lib/format/date";
 
@@ -16,6 +17,7 @@ import {
   terminateReferringPartnershipAction,
 } from "../actions";
 import type { MyPartnershipItemDto } from "../remote";
+import { markPartnershipSessionChanged, usePartnershipSessionChanged } from "../sessionChangeLock";
 import { PARTNERSHIP_STATUS_LABELS, type PartnershipActionResult, type PartnershipFilter, type PartnershipScreenRole, type PartnershipStatus } from "../types";
 
 import PartnershipRequestDialog from "./PartnershipRequestDialog";
@@ -57,6 +59,9 @@ export default function PartnershipTable({ role, partnerships, filter, totalCoun
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const isReferring = role === "REFERRING";
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 협약 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = usePartnershipSessionChanged();
 
   const open = (kind: ConfirmKind, item: MyPartnershipItemDto) => {
     setOutcome(null);
@@ -65,7 +70,7 @@ export default function PartnershipTable({ role, partnerships, filter, totalCoun
   };
 
   const run = async () => {
-    if (!target || pendingRef.current) return;
+    if (!target || pendingRef.current || sessionChanged) return;
     pendingRef.current = true;
     setPending(true);
     setConfirmError(null);
@@ -73,19 +78,21 @@ export default function PartnershipTable({ role, partnerships, filter, totalCoun
     try {
       const result =
         kind === "approve"
-          ? await approvePartnershipAction(item.partnershipId)
+          ? await approvePartnershipAction(item.partnershipId, renderedLoginSession)
           : kind === "reject"
-            ? await rejectPartnershipAction(item.partnershipId)
+            ? await rejectPartnershipAction(item.partnershipId, renderedLoginSession)
             : kind === "rerequest"
-              ? await requestPartnershipAction(item.partnerInstitutionId)
+              ? await requestPartnershipAction(item.partnerInstitutionId, renderedLoginSession)
               : isReferring
-                ? await terminateReferringPartnershipAction(item.partnershipId)
-                : await terminateExaminingPartnershipAction(item.partnershipId);
+                ? await terminateReferringPartnershipAction(item.partnershipId, renderedLoginSession)
+                : await terminateExaminingPartnershipAction(item.partnershipId, renderedLoginSession);
       // 성공·상태 변경(409)·없음(404)·결과 확인 불가는 서버가 목록을 다시 그렸으므로 창을 닫고 목록 위에 알린다
       if (result.ok || result.reason === "CONFLICT" || result.reason === "NOT_FOUND" || result.reason === "ERROR") {
         setOutcome(result);
         setTarget(null);
       } else {
+        // 다른 탭에서 계정이 바뀌었으면 창을 그대로 두고 이 화면의 협약 변경 버튼을 모두 잠근다 (다시 시도·목록 갱신 없음)
+        if (result.reason === "SESSION_CHANGED") markPartnershipSessionChanged();
         setConfirmError(result.message);
       }
     } catch {
@@ -200,7 +207,7 @@ export default function PartnershipTable({ role, partnerships, filter, totalCoun
                 type="button"
                 data-autofocus
                 onClick={run}
-                disabled={pending}
+                disabled={pending || sessionChanged}
                 aria-busy={pending}
                 className={CONFIRM[target.kind].danger ? dangerButtonClass : primaryButtonClass}
               >

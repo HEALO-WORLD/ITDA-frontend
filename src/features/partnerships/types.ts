@@ -34,4 +34,9 @@ export type PartnershipLoadFailure = {
 
 export type PartnershipActionResult =
   | { ok: true; message: string }
-  | { ok: false; reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "NETWORK" | "ERROR"; message: string };
+  | {
+      ok: false;
+      /** SESSION_CHANGED: 다른 탭에서 로그인 계정이 바뀌어 요청하지 않음 (FORBIDDEN과 구분) */
+      reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "SESSION_CHANGED" | "NETWORK" | "ERROR";
+      message: string;
+    };

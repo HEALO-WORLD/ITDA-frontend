@@ -6,9 +6,11 @@ import { useMemo, useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { controlClass, primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { NETWORK_FAILURE, useDetailResult } from "@/features/admin/components/AdminDetailParts";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 
 import { loadPartnershipTargetsAction, requestPartnershipAction } from "../actions";
 import type { PartnershipTargetsResult } from "../server";
+import { markPartnershipSessionChanged, usePartnershipSessionChanged } from "../sessionChangeLock";
 import { IN_PROGRESS_STATUSES, PARTNERSHIP_STATUS_LABELS, type PartnershipActionResult } from "../types";
 
 const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워크 상태를 확인해 주세요.";
@@ -26,6 +28,9 @@ export default function PartnershipRequestDialog({ onClose, onDone }: { onClose:
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 협약 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = usePartnershipSessionChanged();
 
   const targets = useMemo(() => {
     if (!loaded?.ok) return [];
@@ -35,7 +40,7 @@ export default function PartnershipRequestDialog({ onClose, onDone }: { onClose:
   const selected = loaded?.ok ? (loaded.targets.find((item) => item.id === selectedId) ?? null) : null;
 
   const submit = async () => {
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     if (!selected || (selected.status && IN_PROGRESS_STATUSES.includes(selected.status))) {
       setError("협약을 요청할 검사기관을 선택해 주세요.");
       return;
@@ -44,11 +49,12 @@ export default function PartnershipRequestDialog({ onClose, onDone }: { onClose:
     setPending(true);
     setError(null);
     try {
-      const result = await requestPartnershipAction(selected.id);
+      const result = await requestPartnershipAction(selected.id, renderedLoginSession);
       if (result.ok || result.reason === "CONFLICT") {
         onDone(result);
         return;
       }
+      if (result.reason === "SESSION_CHANGED") markPartnershipSessionChanged();
       setError(result.message);
     } catch {
       setError(NETWORK_ERROR_MESSAGE);
@@ -157,7 +163,7 @@ export default function PartnershipRequestDialog({ onClose, onDone }: { onClose:
             취소
           </button>
           {loaded?.ok && loaded.targets.length > 0 && (
-            <button type="button" onClick={submit} disabled={pending || !selected} aria-busy={pending} className={primaryButtonClass}>
+            <button type="button" onClick={submit} disabled={pending || !selected || sessionChanged} aria-busy={pending} className={primaryButtonClass}>
               {pending ? "요청 중…" : selected?.status ? "다시 요청" : "협약 요청"}
             </button>
           )}
