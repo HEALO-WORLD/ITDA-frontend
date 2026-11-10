@@ -2,7 +2,9 @@
 
 import {
   AlertTriangle,
+  ArrowRightLeft,
   Bell,
+  CalendarCheck,
   CalendarClock,
   Check,
   ChevronDown,
@@ -15,6 +17,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import { ROUTES } from "@/constants/navigation";
+import { isNotificationId, type ExaminingReservationNotificationType } from "@/features/notifications/remote";
 import { formatDateTime, formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import type { ExaminingNotification, ExaminingNotificationType } from "../types";
@@ -62,13 +65,45 @@ const TYPE_META: Record<ExaminingNotificationType, NotificationTypeMeta> = {
   },
 };
 
-/** API 알림 표시. 백엔드 알림 유형 값 목록이 확정되지 않아 유형별 아이콘·문구를 붙이지 않는다 */
+/** API 알림 기본 표시 (아래 유형 목록에 없는 값). 모르는 유형은 이름을 추측하지 않고 '알림'으로 보인다 */
 export const API_NOTIFICATION_META: NotificationTypeMeta = {
   label: "알림",
   icon: Bell,
   iconClass: "bg-primary-soft text-primary",
   badgeClass: "bg-primary-soft text-primary",
 };
+
+/**
+ * 검사기관 공통 예약 알림 유형별 배지·아이콘 (백엔드 InstitutionNotificationService 유형 값).
+ * 제목·본문은 백엔드 title·message를 그대로 쓰고, 여기서는 유형 배지 이름만 붙인다
+ */
+const API_TYPE_META: Record<ExaminingReservationNotificationType, NotificationTypeMeta> = {
+  RESERVATION_CONFIRMED: { ...TYPE_META.RESERVATION_RECEIVED, label: "예약 확정", icon: CalendarCheck },
+  RESERVATION_CANCELED: TYPE_META.RESERVATION_CANCELLED,
+  RESERVATION_RESCHEDULED: { ...TYPE_META.RESERVATION_CHANGED, label: "일정 변경" },
+  RESERVATION_REASSIGNED: { ...TYPE_META.RESERVATION_CHANGED, label: "기관 변경", icon: ArrowRightLeft },
+};
+
+export function getApiNotificationMeta(type: string): NotificationTypeMeta {
+  return Object.hasOwn(API_TYPE_META, type) ? API_TYPE_META[type as ExaminingReservationNotificationType] : API_NOTIFICATION_META;
+}
+
+/**
+ * API 알림의 관련 화면 이동. 예약 ID가 있을 때만 확정 예약 관리의 예약 상세(`?reservationId=`, 예약 단건 API)로 연다.
+ * - 검사기관은 의뢰 단건 API 권한이 없어 referralId로는 이동하지 않는다
+ * - RESERVATION_REASSIGNED는 백엔드가 이 기관의 이전 예약 ID를 넣는다 (그 예약은 이 기관이 조회할 수 있다)
+ * - 예약 ID가 없거나 예약 화면이 API 모드가 아니면(Mock 목록은 이 주소를 읽지 않는다) 이동 버튼을 두지 않는다
+ */
+export function getApiNotificationLink(
+  item: { reservationId: string | null },
+  reservationDetailAvailable: boolean,
+): { href: string; label: string } | null {
+  if (!reservationDetailAvailable || !item.reservationId || !isNotificationId(item.reservationId)) return null;
+  return {
+    href: `${ROUTES.examining.reservations}?reservationId=${encodeURIComponent(item.reservationId)}`,
+    label: "예약 상세 보기",
+  };
+}
 
 const TYPE_OPTIONS =Object.entries(TYPE_META) as [ExaminingNotificationType, (typeof TYPE_META)[ExaminingNotificationType]][];
 
