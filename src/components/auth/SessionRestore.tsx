@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
 import { ROUTES } from "@/constants/navigation";
-import { getSessionRestorer, type SessionRestoreOutcome } from "@/features/auth/sessionRestore";
+import { getSessionRestorer, type RestoreReason, type SessionRestoreOutcome } from "@/features/auth/sessionRestore";
 
 /**
  * 로그인 상태 자동 복구 화면 (API 모드 보호 화면, ApiRoleGate가 현재 주소 그대로 보여 준다).
@@ -15,6 +15,8 @@ import { getSessionRestorer, type SessionRestoreOutcome } from "@/features/auth/
  * - 네트워크·시간 초과·5xx → 자동으로 다시 보내지 않고 안내 + [다시 시도]
  * - 복구했는데도 이 화면이 그대로면(인증 재확인 실패) 반복하지 않고 안내한다
  *   (onRefreshed가 있으면 SessionGuard 안: 게이트가 확인을 통과해 감싼 화면이 다시 그려졌다는 뜻이므로 원래 화면으로 돌린다)
+ * - reason: 복구를 시작한 이유 (게이트: Access 없음/401, SessionGuard: Access 없음). 다른 탭이 이미 복구해 재발급을 건너뛰면
+ *   문서 전체를 다시 불러온다 (다른 탭이 바꾼 쿠키로 화면·클라이언트 상태를 새로 시작한다)
  * 일반 API·POST 요청은 다시 실행하지 않는다 (화면만 다시 그린다).
  */
 
@@ -29,12 +31,17 @@ const STUCK_MESSAGE = "로그인 상태를 복구하지 못했습니다. 다시 
 const buttonClass =
   "inline-flex h-11 items-center justify-center rounded-lg border border-line bg-white px-5 text-[15px] font-semibold text-gray-800 hover:bg-gray-50 disabled:cursor-not-allowed disabled:text-gray-400";
 
-export default function SessionRestore({ onRefreshed }: { onRefreshed?: () => void } = {}) {
+export default function SessionRestore({ reason, onRefreshed }: { reason: RestoreReason; onRefreshed?: () => void }) {
   const router = useRouter();
   const [phase, setPhase] = useState<Phase>({ kind: "restoring" });
   const [isRefreshing, startRefresh] = useTransition();
 
   const handle = (outcome: SessionRestoreOutcome) => {
+    if (outcome.ok && "reusedFromOtherTab" in outcome) {
+      // 이 탭은 재발급하지 않았다: 다른 탭의 복구 결과로 문서를 새로 불러온다
+      window.location.reload();
+      return;
+    }
     if (outcome.ok) {
       setPhase({ kind: "refreshing" });
       startRefresh(() => router.refresh());
@@ -49,7 +56,7 @@ export default function SessionRestore({ onRefreshed }: { onRefreshed?: () => vo
 
   useEffect(() => {
     let active = true;
-    const started = getSessionRestorer().startAuto();
+    const started = getSessionRestorer().startAuto(reason);
     if (!started) {
       // 최근에 자동 복구를 이미 했다: 반복하지 않는다 (렌더 뒤 비동기로 바꿔 effect 안의 동기 setState를 피한다)
       void Promise.resolve().then(() => active && setPhase({ kind: "error", message: STUCK_MESSAGE, canRetry: true }));
@@ -65,7 +72,7 @@ export default function SessionRestore({ onRefreshed }: { onRefreshed?: () => vo
 
   const retry = () => {
     setPhase({ kind: "restoring" });
-    void getSessionRestorer().restore().then(handle);
+    void getSessionRestorer().restore(reason).then(handle);
   };
 
   const refreshed = phase.kind === "refreshing" && !isRefreshing;

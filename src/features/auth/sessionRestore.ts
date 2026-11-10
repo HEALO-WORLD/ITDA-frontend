@@ -13,6 +13,9 @@ import type { ReissueFailureReason, ReissueResult } from "./types";
  *   다시 부르지 않고 성공으로 본다 → 쿠키는 탭끼리 공유되므로 화면만 다시 확인하면 된다.
  *   브라우저 저장소에 성공 기록을 남기지 않는다: 이전 로그인 세션(다른 계정 포함)의 기록이 새 세션의 복구를 막지 않는다
  * - 세션 태그를 확인하지 못하면 건너뛰지 않고 재발급한다 (잠금 안이므로 다른 탭이 회전시킨 새 쿠키로 보내 재사용으로 걸리지 않는다)
+ * - 복구 시작 이유(RestoreReason)가 "access-missing"(렌더링 때 Access 쿠키 없음)이면, 잠금 전·잠금 안에서 Access 쿠키가 생겼을 때
+ *   (다른 탭이 이미 복구) 재발급을 건너뛴다. 두 번째 탭이 다른 탭의 회전이 끝난 뒤 늦게 시작해도 다시 회전하지 않는다.
+ *   "access-rejected"(Access 쿠키는 있는데 401)는 쿠키가 있다는 이유만으로 건너뛰지 않는다 (태그가 바뀐 경우만)
  * - Web Locks가 없으면 탭 안 중복 방지만 한다 (탭 사이 동시 호출은 백엔드 유예 10초에 기댄다)
  * 자동 시도는 한 번만: 최근 자동 시도가 있으면 다시 자동으로 부르지 않는다 (복구 뒤에도 인증이 안 될 때의 루프 방지)
  */
@@ -22,6 +25,9 @@ export const REISSUE_LOCK_NAME = "itda:session-reissue";
 export const AUTO_RESTORE_COOLDOWN_MS = 60_000;
 /** 재발급 요청 제한 시간 (서버의 백엔드 요청 제한 10초보다 길게) */
 const REISSUE_TIMEOUT_MS = 15_000;
+
+/** 복구를 시작한 이유: 렌더링 때 Access 쿠키가 없었는지(access-missing), 있었지만 401이었는지(access-rejected) */
+export type RestoreReason = "access-missing" | "access-rejected";
 
 /** 재발급 결과 + 다른 탭의 재발급을 그대로 쓴 경우 표시 */
 export type SessionRestoreOutcome = ReissueResult | { ok: true; reusedFromOtherTab: true };
@@ -107,16 +113,21 @@ export function createSessionRestorer(deps: SessionRestoreDeps) {
   let inFlight: Promise<SessionRestoreOutcome> | null = null;
   let lastAutoAt: number | null = null;
 
-  const runExclusive = async (): Promise<SessionRestoreOutcome> => {
+  const runExclusive = async (reason: RestoreReason): Promise<SessionRestoreOutcome> => {
     // Web Locks가 없으면 다른 탭과 순서를 맞출 수 없어 확인 없이 바로 보낸다 (기존 동작)
     if (!deps.locks) return postReissue(deps);
+    const skip = { ok: true, reusedFromOtherTab: true } as const;
     // 잠금을 기다리기 전의 세션: 이 시도가 복구하려는 세션
     const before = await readSession(deps);
+    // Access 쿠키가 없어서 시작했는데 이미 생겼다: 다른 탭이 이 탭의 첫 확인 전에 복구를 끝냈다
+    if (reason === "access-missing" && before?.status === "active") return skip;
     const task = async (): Promise<SessionRestoreOutcome> => {
-      // 잠금을 기다리는 동안 다른 탭이 이 세션을 회전시켰으면(태그가 바뀌고 Access 쿠키가 생김) 다시 부르지 않는다.
-      // 태그가 같거나 확인하지 못하면 이전 기록과 관계없이 재발급한다
-      const current = before?.tag ? await readSession(deps) : null;
-      if (current?.status === "active" && current.tag !== null && current.tag !== before?.tag) return { ok: true, reusedFromOtherTab: true };
+      // 잠금을 기다리는 동안 다른 탭이 이 세션을 회전시켰으면 다시 부르지 않는다.
+      // access-missing: Access 쿠키가 생겼으면 건너뛴다 / 공통: 태그가 바뀌고 Access 쿠키가 생겼으면 건너뛴다.
+      // 그 밖(태그가 같음·확인 실패)은 이전 기록과 관계없이 재발급한다
+      const current = before?.tag || reason === "access-missing" ? await readSession(deps) : null;
+      if (reason === "access-missing" && current?.status === "active") return skip;
+      if (current?.status === "active" && current.tag !== null && current.tag !== before?.tag) return skip;
       return postReissue(deps);
     };
     try {
@@ -126,9 +137,9 @@ export function createSessionRestorer(deps: SessionRestoreDeps) {
     }
   };
 
-  /** 재발급 (이미 진행 중이면 그 결과를 함께 기다린다) */
-  const restore = (): Promise<SessionRestoreOutcome> => {
-    inFlight ??= runExclusive().finally(() => {
+  /** 재발급 (이미 진행 중이면 그 결과를 함께 기다린다). 이유를 모르면 보수적으로 access-rejected(쿠키 존재만으로 건너뛰지 않음) */
+  const restore = (reason: RestoreReason = "access-rejected"): Promise<SessionRestoreOutcome> => {
+    inFlight ??= runExclusive(reason).finally(() => {
       inFlight = null;
     });
     return inFlight;
@@ -140,11 +151,11 @@ export function createSessionRestorer(deps: SessionRestoreDeps) {
      * 자동 복구 시작. 진행 중이면 그 요청을 같이 기다리고(Strict Mode 재실행), 최근에 자동 시도를 했으면 null
      * (복구했는데도 인증되지 않아 복구 화면이 다시 나온 경우 → 자동으로 반복하지 않는다)
      */
-    startAuto(): Promise<SessionRestoreOutcome> | null {
+    startAuto(reason: RestoreReason = "access-rejected"): Promise<SessionRestoreOutcome> | null {
       if (inFlight) return inFlight;
       if (lastAutoAt !== null && deps.now() - lastAutoAt < AUTO_RESTORE_COOLDOWN_MS) return null;
       lastAutoAt = deps.now();
-      return restore();
+      return restore(reason);
     },
   };
 }

@@ -71,7 +71,13 @@ function createBrowser(options: { locks?: boolean } = {}) {
     return Response.json(reply.body, { status: reply.status });
   };
   const openTab = () => restoreModule.createSessionRestorer({ fetch, locks: options.locks === false ? null : locks, now: shared.now });
-  return { shared, openTab };
+  /** 다른 탭이 잠금을 쥐고 있는 상태를 만든다 (release 전까지 이 탭들의 잠금 안 작업이 기다린다) */
+  const holdLock = () => {
+    let release!: () => void;
+    void locks.request("hold", () => new Promise<void>((resolve) => (release = resolve)));
+    return () => release();
+  };
+  return { shared, openTab, holdLock };
 }
 
 const failureBody = (reason: string, retryable: boolean, reloginRequired: boolean) => ({ ok: false, reason, message: `${reason} 안내`, retryable, reloginRequired });
@@ -230,6 +236,89 @@ describe("여러 탭 동시 복구 (Web Locks + 잠금 전후 세션 태그 비�
     release();
     await Promise.all([a, b]);
     assert.equal(shared.calls, 2);
+    assert.equal(shared.sessionReads, 0);
+  });
+});
+
+describe("복구 시작 이유별 다른 탭 복구 감지 (T8 중복 재발급 경합)", () => {
+  /** 비동기 작업이 몇 단계 진행되도록 기다린다 */
+  const flush = async (n = 10) => {
+    for (let i = 0; i < n; i++) await new Promise((r) => setImmediate(r));
+  };
+
+  it("access-missing + 잠금 전 이미 active(다른 탭이 먼저 복구) → 재발급 0회, 다른 탭 결과 사용", async () => {
+    const { shared, openTab } = createBrowser();
+    shared.cookies.access = true; // 렌더링 땐 없었지만 첫 확인 전에 다른 탭이 복구함
+    assert.deepEqual(await openTab().startAuto("access-missing"), { ok: true, reusedFromOtherTab: true });
+    assert.equal(shared.calls, 0);
+  });
+
+  it("access-missing + 잠금 기다리는 중 active로 바뀜(태그는 같음) → 재발급 0회", async () => {
+    const { shared, openTab, holdLock } = createBrowser();
+    shared.cookies.access = false;
+    const release = holdLock();
+    const pending = openTab().startAuto("access-missing");
+    await flush(); // 잠금 전 확인(restorable)까지 진행
+    assert.equal(shared.sessionReads, 1);
+    shared.cookies.access = true; // Refresh 태그는 그대로 Access만 생김
+    release();
+    assert.deepEqual(await pending, { ok: true, reusedFromOtherTab: true });
+    assert.equal(shared.calls, 0);
+  });
+
+  it("access-missing + 계속 restorable → 재발급 1회", async () => {
+    const { shared, openTab } = createBrowser();
+    shared.cookies.access = false;
+    assert.deepEqual(await openTab().startAuto("access-missing"), { ok: true });
+    assert.equal(shared.calls, 1);
+  });
+
+  it("access-rejected + active·같은 태그 → 쿠키 존재만으로 건너뛰지 않고 재발급 1회 (401 복구 유지)", async () => {
+    const { shared, openTab, holdLock } = createBrowser();
+    shared.cookies.access = true; // Access 쿠키는 있지만 백엔드가 401
+    const release = holdLock();
+    const pending = openTab().startAuto("access-rejected");
+    await flush();
+    release();
+    assert.deepEqual(await pending, { ok: true });
+    assert.equal(shared.calls, 1);
+  });
+
+  it("access-rejected + 잠금 중 다른 탭이 회전(태그 변경) → 기존대로 건너뜀", async () => {
+    const { shared, openTab, holdLock } = createBrowser();
+    shared.cookies.access = true;
+    const release = holdLock();
+    const pending = openTab().startAuto("access-rejected");
+    await flush();
+    shared.cookies = { access: true, refresh: "rotated-by-other-tab" };
+    release();
+    assert.deepEqual(await pending, { ok: true, reusedFromOtherTab: true });
+    assert.equal(shared.calls, 0);
+  });
+
+  it("T8 순서 재현: 탭 1 회전 완료 → 탭 2가 늦게 첫 확인(access-missing) → 전체 재발급 정확히 1회", async () => {
+    const { shared, openTab } = createBrowser();
+    shared.cookies.access = false;
+    const tab1 = openTab();
+    const tab2 = openTab();
+    assert.deepEqual(await tab1.startAuto("access-missing"), { ok: true });
+    // 탭 2의 첫 상태 조회는 탭 1 회전 완료 뒤 (before가 active + 새 태그)
+    assert.deepEqual(await tab2.startAuto("access-missing"), { ok: true, reusedFromOtherTab: true });
+    assert.equal(shared.calls, 1);
+  });
+
+  it("이유를 넘기지 않으면 보수적으로 access-rejected (쿠키 존재만으로 건너뛰지 않음)", async () => {
+    const { shared, openTab } = createBrowser();
+    shared.cookies.access = true;
+    assert.deepEqual(await openTab().startAuto(), { ok: true });
+    assert.equal(shared.calls, 1);
+  });
+
+  it("Web Locks가 없으면 이유와 관계없이 기존 동작 (세션 확인 없이 재발급)", async () => {
+    const { shared, openTab } = createBrowser({ locks: false });
+    shared.cookies.access = true;
+    assert.deepEqual(await openTab().startAuto("access-missing"), { ok: true });
+    assert.equal(shared.calls, 1);
     assert.equal(shared.sessionReads, 0);
   });
 });

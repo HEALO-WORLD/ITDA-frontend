@@ -12,6 +12,8 @@ import { getAuthState, readLoginSessionTag, readRefreshToken, type AuthFailureRe
 import type { OrganizationRole, SessionUser } from "@/types/auth";
 
 import SessionGuard from "./SessionGuard";
+import type { RestoreReason } from "@/features/auth/sessionRestore";
+
 import SessionRestore from "./SessionRestore";
 
 /**
@@ -46,12 +48,12 @@ const ROLE_LABELS: Record<OrganizationRole, string> = {
 export default async function ApiRoleGate({ role, children }: { role: OrganizationRole | "ADMIN"; children: ReactNode }) {
   const state = await getAuthState();
   if (state.status === "signed-out") {
-    if (await readRefreshToken()) return <SessionRestoreScreen />;
+    if (await readRefreshToken()) return <SessionRestoreScreen reason="access-missing" />;
     redirect(ROUTES.login);
   }
   if (state.status === "unverified") {
     if (state.reason === "UNAUTHORIZED") {
-      if (await readRefreshToken()) return <SessionRestoreScreen />;
+      if (await readRefreshToken()) return <SessionRestoreScreen reason="access-rejected" />;
       redirect(`${ROUTES.login}?reason=expired`);
     }
     return <AuthProblem reason={state.reason} message={state.message} />;
@@ -101,12 +103,13 @@ export function AuthChecking() {
 }
 
 /** 로그인 상태 자동 복구 (Access Token 만료, Refresh 쿠키 있음). 주소는 그대로 두고 화면만 바꾼다 */
-function SessionRestoreScreen() {
+/** reason: Access 쿠키 없음(access-missing) / Access 쿠키는 있지만 users/me 401(access-rejected) */
+function SessionRestoreScreen({ reason }: { reason: RestoreReason }) {
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader subtitle="의료기관 검사 의뢰·예약 플랫폼" />
       <main className="flex flex-1 items-center justify-center px-4 py-16">
-        <SessionRestore />
+        <SessionRestore reason={reason} />
       </main>
     </div>
   );

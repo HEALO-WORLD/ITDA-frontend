@@ -86,7 +86,8 @@ export default function SessionGuard({ children, loginSession }: { children: Rea
   if (restoringPath === pathname) {
     return (
       <div className="flex min-h-[320px] items-center justify-center px-4 py-16">
-        <SessionRestore onRefreshed={() => setRestoringPath(null)} />
+        {/* restorable = Access 쿠키 없음 */}
+        <SessionRestore reason="access-missing" onRefreshed={() => setRestoringPath(null)} />
       </div>
     );
   }
