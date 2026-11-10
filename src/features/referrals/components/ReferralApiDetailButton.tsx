@@ -9,11 +9,13 @@ import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
 import { loadReferralDetailAction } from "../actions";
 import { abbreviateReferralId } from "../referralId";
+import { classifyCancelRecheck, type ReservationCancelTarget } from "../reservationCancel";
 import type { DetailCell, ReferralDetail, ReferralDetailLoadResult } from "../server";
 
 import { DetailError, DetailLoading, Empty, FailureReasonNotice, HistoryTimeline, Info, Section, SectionNote } from "./ReferralDetailParts";
 import ReferralIdCopyButton from "./ReferralIdCopyButton";
 import ReferralStatusBadge from "./ReferralStatusBadge";
+import ReservationCancelControl, { CANCEL_UNKNOWN_RESULT_NOTICE, getCancelRecheckNotice, type ReservationCancelNotice } from "./ReservationCancelControl";
 import ReservationStatusBadge from "./ReservationStatusBadge";
 
 interface ReferralApiDetailButtonProps {
@@ -46,21 +48,55 @@ const cell = (value: DetailCell) => (value.state === "ok" ? value.value : <Empty
 export default function ReferralApiDetailButton({ referralId, examTypeLabel, badgeStatus }: ReferralApiDetailButtonProps) {
   const [open, setOpen] = useState(false);
   const [result, setResult] = useState<ReferralDetailLoadResult | null>(null);
+  /** 상세를 불러온 브라우저 시각 (예약 취소 마감 판단용. 렌더링 중에 현재 시각을 읽지 않는다) */
+  const [loadedAtMs, setLoadedAtMs] = useState<number | null>(null);
+  /** 예약 취소 결과 안내 (상세를 다시 불러와도 남긴다. 대화상자를 새로 열면 지운다) */
+  const [notice, setNotice] = useState<ReservationCancelNotice | null>(null);
+  /** 예약 취소 요청 중: 상세 대화상자도 닫지 못하게 한다 */
+  const [cancelPending, setCancelPending] = useState(false);
   const loadingRef = useRef(false);
+  /** 대화상자를 열 때마다 바뀐다: 닫았다 다시 연 뒤 이전 상태 확인 결과가 안내를 덮지 않게 한다 */
+  const openCountRef = useRef(0);
 
-  const show = async () => {
-    setOpen(true);
-    if (loadingRef.current) return;
+  /** 상세를 다시 불러온다. 이미 불러오는 중이면 요청하지 않고 null */
+  const load = async (): Promise<ReferralDetailLoadResult | null> => {
+    if (loadingRef.current) return null;
     loadingRef.current = true;
     setResult(null);
+    let loaded: ReferralDetailLoadResult;
     try {
-      setResult(await loadReferralDetailAction(referralId));
+      loaded = await loadReferralDetailAction(referralId);
+      setLoadedAtMs(Date.now());
     } catch {
-      setResult({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE, code: null });
+      loaded = { ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE, code: null };
     } finally {
       loadingRef.current = false;
     }
+    setResult(loaded);
+    return loaded;
   };
+
+  /**
+   * 예약 취소 결과 불명(5xx·네트워크·타임아웃) 뒤: 상세를 서버에서 다시 불러와(no-store) 확인한 예약과 비교해 안내한다.
+   * 취소 요청은 다시 보내지 않는다. 다시 불러오는 동안은 상세가 비어 취소 버튼이 보이지 않는다
+   */
+  const recheck = async (target: ReservationCancelTarget) => {
+    const openCount = openCountRef.current;
+    setNotice({ tone: "info", message: CANCEL_UNKNOWN_RESULT_NOTICE });
+    const loaded = await load();
+    if (!loaded || openCount !== openCountRef.current) return;
+    setNotice(getCancelRecheckNotice(classifyCancelRecheck(target, loaded.ok ? loaded.detail : null), target));
+  };
+
+  const show = async () => {
+    openCountRef.current += 1;
+    setOpen(true);
+    setNotice(null);
+    await load();
+  };
+
+  const detail = result?.ok ? result.detail : null;
+  const currentReservation = detail?.reservation.state === "ok" ? detail.reservation : null;
 
   return (
     <>
@@ -80,16 +116,56 @@ export default function ReferralApiDetailButton({ referralId, examTypeLabel, bad
           </>
         }
         onClose={() => setOpen(false)}
+        preventClose={cancelPending}
         footer={
-          <button type="button" onClick={() => setOpen(false)} className={closeButtonClass}>
-            닫기
-          </button>
+          <>
+            {/* 예약 취소: 확정 예약·취소 마감 전일 때만 (목록에는 두지 않는다) */}
+            {detail && currentReservation && loadedAtMs !== null && (
+              <ReservationCancelControl
+                key={`${currentReservation.attemptNo}-${loadedAtMs}`}
+                referralId={referralId}
+                referralStatus={detail.referralStatus}
+                reservation={currentReservation}
+                checkedAtMs={loadedAtMs}
+                onPendingChange={setCancelPending}
+                onSettled={(next, unknownResultTarget) => {
+                  setNotice(next);
+                  // 상세는 클라이언트 상태라 목록 refresh()로 바뀌지 않는다: 직접 다시 불러온다 (결과 불명이면 다시 불러온 상태로 결과를 판단)
+                  void (unknownResultTarget ? recheck(unknownResultTarget) : load());
+                }}
+              />
+            )}
+            <button type="button" onClick={() => setOpen(false)} disabled={cancelPending} className={closeButtonClass}>
+              닫기
+            </button>
+          </>
         }
       >
+        {notice && (
+          <div
+            role={notice.tone === "error" ? "alert" : "status"}
+            className={`mb-4 rounded-lg px-4 py-3 text-sm ${notice.tone === "success" ? "bg-emerald-50 text-emerald-800" : notice.tone === "info" ? "bg-info-soft text-info" : "bg-red-50 text-red-700"}`}
+          >
+            {notice.message}
+            {notice.recheckTarget && (
+              <div className="mt-2">
+                <button
+                  type="button"
+                  onClick={() => notice.recheckTarget && void recheck(notice.recheckTarget)}
+                  disabled={!result}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <RefreshCw className="size-3.5" aria-hidden="true" />
+                  상태 다시 확인
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         {!result ? (
           <DetailLoading />
         ) : !result.ok ? (
-          <DetailError message={result.message} onRetry={show} />
+          <DetailError message={result.message} onRetry={() => void (notice?.recheckTarget ? recheck(notice.recheckTarget) : load())} />
         ) : (
           <ReferralDetailContent detail={result.detail} examTypeLabel={examTypeLabel} />
         )}
