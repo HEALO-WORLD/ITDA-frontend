@@ -4,9 +4,11 @@ import { Plus } from "lucide-react";
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import Modal from "@/components/ui/Modal";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 
 import { createExamTypeAction, updateExamTypeAction } from "../actions";
 import { EXAM_TYPE_MODALITIES, EXAM_TYPE_NAME_MAX_LENGTH, validateExamTypeName, type AdminExamTypeDto, type AdminExamTypeModality } from "../remote";
+import { markAdminSessionChanged, useAdminSessionChanged } from "../sessionChangeLock";
 import type { AdminActionResult } from "../types";
 
 import { IdText } from "./AdminDataParts";
@@ -142,10 +144,13 @@ function ExamTypeFormDialog({
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 관리자 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useAdminSessionChanged();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     const nextErrors: FieldErrors = {
       name: validateExamTypeName(name) ?? (editing && name.trim() === editing.name ? "바뀐 내용이 없습니다. 새 검사명을 입력해 주세요." : null),
       ...(editing ? {} : { modality: modality ? null : "검사 종류(CT·MRI)를 선택해 주세요." }),
@@ -156,9 +161,12 @@ function ExamTypeFormDialog({
     pendingRef.current = true;
     setPending(true);
     try {
-      const result = editing ? await updateExamTypeAction(editing.id, { name }) : await createExamTypeAction({ name, modality });
+      const result = editing
+        ? await updateExamTypeAction(editing.id, { name }, renderedLoginSession)
+        : await createExamTypeAction({ name, modality }, renderedLoginSession);
       // 성공·없음(404)·충돌(409)은 서버가 목록을 다시 그렸으므로 창을 닫고 목록 위에 알린다
       if (result.ok || result.reason === "NOT_FOUND" || result.reason === "CONFLICT") return onDone(result);
+      if (result.reason === "SESSION_CHANGED") markAdminSessionChanged();
       if (result.fieldErrors) setErrors(result.fieldErrors);
       setFormError(result.message);
     } catch {
@@ -255,7 +263,7 @@ function ExamTypeFormDialog({
           <button type="button" onClick={onClose} disabled={pending} className={secondaryButton}>
             취소
           </button>
-          <button type="submit" disabled={pending} className={primaryButton}>
+          <button type="submit" disabled={pending || sessionChanged} className={primaryButton}>
             {pending ? "처리 중…" : editing ? "저장" : "등록"}
           </button>
         </div>

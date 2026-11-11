@@ -29,8 +29,13 @@ const SUNDAY = nextWeekday(0);
 
 type Access = { ok: true; headers: HeadersInit; user: { institutionId: string } } | { ok: false; reason: string; message: string };
 
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
+
 const gateway = {
   access: null as unknown as Access,
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
   calls: [] as { method: string; path: string; body?: unknown }[],
   hours: [] as unknown[],
   durationMinutes: 30 as number | null,
@@ -53,6 +58,7 @@ const slotsFor = (body: { equipmentId: string; examTypeId: string; date: string 
   }));
 
 function resetGateway() {
+  gateway.loginSession = LOGIN;
   gateway.access = { ok: true, headers: { Authorization: "Bearer test" }, user: { institutionId: OWN_INSTITUTION } };
   gateway.calls = [];
   gateway.hours = [1, 2, 3, 4, 5].map((week, index) => ({ id: `70000000-0000-0000-0000-00000000000${index}`, equipmentId: EQUIPMENT, week, startTime: "09:00", endTime: "12:00" }));
@@ -105,6 +111,14 @@ before(async () => {
       requireRoleAccess: async (role: string) => {
         gateway.calls.push({ method: "GET", path: `users/me:${role}` });
         return gateway.access;
+      },
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        gateway.calls.push({ method: "GET", path: `users/me:${role}` });
+        if (!gateway.access.ok) return gateway.access;
+        return expected === gateway.loginSession ? gateway.access : changed;
       },
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({
         reason: access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : access.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN",
@@ -183,7 +197,7 @@ describe("통신 계층 (slots/remote)", () => {
 
 describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
   it("정상: 소속·검사 유형·운영 요일을 확인한 뒤 POST 1회, 서버가 준 슬롯 ID·시각만 돌려준다", async () => {
-    const result = await server.submitSlotGeneration(input());
+    const result = await server.submitSlotGeneration(input(), LOGIN);
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.slots.length, 3);
@@ -200,59 +214,59 @@ describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
     for (const reason of ["FORBIDDEN_ROLE", "UNVERIFIED"]) {
       gateway.calls = [];
       gateway.access = { ok: false, reason, message: "권한 없음" };
-      const result = await server.submitSlotGeneration(input());
+      const result = await server.submitSlotGeneration(input(), LOGIN);
       assert.equal(!result.ok && result.reason, "FORBIDDEN");
       assert.deepEqual(gatewayDataCalls(), []);
     }
     gateway.calls = [];
     gateway.access = { ok: false, reason: "SIGNED_OUT", message: "로그인" };
-    const signedOut = await server.submitSlotGeneration(input());
+    const signedOut = await server.submitSlotGeneration(input(), LOGIN);
     assert.equal(!signedOut.ok && signedOut.reason, "SIGNED_OUT");
     assert.deepEqual(gatewayDataCalls(), []);
   });
 
   it("다른 기관 장비는 POST하지 않고 FORBIDDEN", async () => {
-    const result = await server.submitSlotGeneration(input({ equipmentId: OTHER_EQUIPMENT }));
+    const result = await server.submitSlotGeneration(input({ equipmentId: OTHER_EQUIPMENT }), LOGIN);
     assert.equal(!result.ok && result.reason, "FORBIDDEN");
     assert.equal(posts().length, 0);
   });
 
   it("장비·검사 유형 미선택은 Gateway 요청 없이 INVALID", async () => {
-    const noEquipment = await server.submitSlotGeneration(input({ equipmentId: "" }));
+    const noEquipment = await server.submitSlotGeneration(input({ equipmentId: "" }), LOGIN);
     assert.equal(!noEquipment.ok && noEquipment.field, "equipmentId");
-    const noExamType = await server.submitSlotGeneration(input({ examTypeId: undefined }));
+    const noExamType = await server.submitSlotGeneration(input({ examTypeId: undefined }), LOGIN);
     assert.equal(!noExamType.ok && noExamType.field, "examTypeId");
     assert.deepEqual(gatewayDataCalls(), []);
   });
 
   it("장비에 연결되지 않은 검사 유형·소요 시간 미설정은 POST하지 않는다", async () => {
-    const unlinked = await server.submitSlotGeneration(input({ examTypeId: UNLINKED_EXAM_TYPE }));
+    const unlinked = await server.submitSlotGeneration(input({ examTypeId: UNLINKED_EXAM_TYPE }), LOGIN);
     assert.equal(!unlinked.ok && unlinked.field, "examTypeId");
     gateway.durationMinutes = null;
-    const noDuration = await server.submitSlotGeneration(input());
+    const noDuration = await server.submitSlotGeneration(input(), LOGIN);
     assert.match(!noDuration.ok ? noDuration.message : "", /소요 시간/);
     assert.equal(posts().length, 0);
   });
 
   it("운영시간 미설정·운영하지 않는 요일은 POST하지 않는다", async () => {
-    const closedDay = await server.submitSlotGeneration(input({ date: SUNDAY }));
+    const closedDay = await server.submitSlotGeneration(input({ date: SUNDAY }), LOGIN);
     assert.equal(!closedDay.ok && closedDay.field, "date");
     assert.match(!closedDay.ok ? closedDay.message : "", /운영하지 않는 요일/);
     gateway.hours = [];
-    const unset = await server.submitSlotGeneration(input());
+    const unset = await server.submitSlotGeneration(input(), LOGIN);
     assert.match(!unset.ok ? unset.message : "", /운영시간이 설정되지 않았습니다/);
     assert.equal(posts().length, 0);
   });
 
   it("지난 날짜는 Gateway 데이터 요청 없이 INVALID", async () => {
-    const result = await server.submitSlotGeneration(input({ date: addDays(today, -1) }));
+    const result = await server.submitSlotGeneration(input({ date: addDays(today, -1) }), LOGIN);
     assert.equal(!result.ok && result.field, "date");
     assert.deepEqual(gatewayDataCalls(), []);
   });
 
   it("점검·장애 장비는 POST하지 않는다", async () => {
     gateway.equipmentStatus = "MAINTENANCE";
-    const result = await server.submitSlotGeneration(input());
+    const result = await server.submitSlotGeneration(input(), LOGIN);
     assert.equal(!result.ok && result.reason, "CONFLICT");
     assert.equal(posts().length, 0);
   });
@@ -261,7 +275,7 @@ describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
     gateway.generate = () => {
       throw new ApiError("HTTP", "x", { status: 409, code: "SLOT_TIME_OVERLAP" } as never);
     };
-    const result = await server.submitSlotGeneration(input());
+    const result = await server.submitSlotGeneration(input(), LOGIN);
     assert.equal(!result.ok && result.reason, "CONFLICT");
     assert.match(!result.ok ? result.message : "", /겹치는 슬롯/);
   });
@@ -275,7 +289,7 @@ describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
     ];
     for (const [generate, reason] of cases) {
       gateway.generate = generate as never;
-      const result = await server.submitSlotGeneration(input());
+      const result = await server.submitSlotGeneration(input(), LOGIN);
       assert.equal(!result.ok && result.reason, reason);
     }
   });
@@ -283,7 +297,7 @@ describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
   it("Mock 모드면 아무 요청 없이 NOT_AVAILABLE (Mock 생성으로 대신하지 않는다)", async () => {
     process.env.NEXT_PUBLIC_API_MODE = "mock";
     try {
-      const result = await server.submitSlotGeneration(input());
+      const result = await server.submitSlotGeneration(input(), LOGIN);
       assert.equal(!result.ok && result.reason, "NOT_AVAILABLE");
       assert.deepEqual(gateway.calls, []);
     } finally {
@@ -336,38 +350,38 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
   const statuses = (result: Awaited<ReturnType<typeof server.submitSlotRangeGeneration>>) => (result.ok ? result.days.map((day) => day.status) : []);
 
   it("1. 하루만 선택하면 POST 1회", async () => {
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY), LOGIN);
     assert.deepEqual(statuses(result), ["SUCCESS"]);
     assert.deepEqual(postedDates(), [MONDAY]);
     assert.equal(result.ok && result.summary.createdSlots, 3);
   });
 
   it("2. 월~금 5일: 날짜별로 순서대로 5회", async () => {
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 4)));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 4)), LOGIN);
     assert.deepEqual(postedDates(), [0, 1, 2, 3, 4].map((n) => addDays(MONDAY, n)));
     assert.equal(result.ok && result.summary.success, 5);
     assert.equal(result.ok && result.summary.createdSlots, 15);
   });
 
   it("3. 주말 포함 7일: 휴무일은 요청하지 않고 SKIPPED", async () => {
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 6)));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 6)), LOGIN);
     assert.deepEqual(statuses(result), ["SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS", "SUCCESS", "SKIPPED", "SKIPPED"]);
     assert.equal(posts().length, 5);
     assert.equal(result.ok && result.summary.skipped, 2);
   });
 
   it("4·5. 14일은 허용(운영일 10회), 15일은 요청 없이 차단", async () => {
-    const ok = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 13)));
+    const ok = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 13)), LOGIN);
     assert.equal(ok.ok && ok.days.length, 14);
     assert.equal(posts().length, 10);
     gateway.calls = [];
-    const tooLong = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 14), addDays(MONDAY, 28)));
+    const tooLong = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 14), addDays(MONDAY, 28)), LOGIN);
     assert.equal(!tooLong.ok && tooLong.field, "endDate");
     assert.deepEqual(gatewayDataCalls(), []);
   });
 
   it("6. 시작일이 종료일보다 늦으면 요청 없이 오류", async () => {
-    const result = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 2), MONDAY));
+    const result = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 2), MONDAY), LOGIN);
     assert.equal(!result.ok && result.field, "endDate");
     assert.deepEqual(gatewayDataCalls(), []);
   });
@@ -378,7 +392,7 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
       if (body.date === addDays(MONDAY, 3)) throw new ApiError("HTTP", "x", { status: 400, code: "SLOT_GENERATION_EMPTY" } as never);
       return slotsFor(body);
     };
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 6)));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 6)), LOGIN);
     assert.deepEqual(statuses(result), ["SUCCESS", "SUCCESS", "CONFLICT", "FAILED", "SUCCESS", "SKIPPED", "SKIPPED"]);
     assert.ok(result.ok);
     assert.deepEqual(
@@ -391,7 +405,7 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
   it("부분 성공 뒤 같은 기간 재요청: 이미 슬롯이 있는 날짜는 서버 조회로 걸러 POST하지 않는다", async () => {
     gateway.slotDates.add(MONDAY);
     gateway.slotDates.add(addDays(MONDAY, 1));
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)), LOGIN);
     assert.deepEqual(statuses(result), ["CONFLICT", "CONFLICT", "SUCCESS"]);
     assert.deepEqual(postedDates(), [addDays(MONDAY, 2)]);
   });
@@ -403,7 +417,7 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
         if (body.date === addDays(MONDAY, 1)) throw new ApiError("HTTP", "x", { status, code: status === 403 ? "FORBIDDEN" : undefined } as never);
         return slotsFor(body);
       };
-      const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 4)));
+      const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 4)), LOGIN);
       assert.deepEqual(statuses(result), ["SUCCESS", "FAILED", "NOT_PROCESSED", "NOT_PROCESSED", "NOT_PROCESSED"]);
       assert.equal(posts().length, 2);
       assert.ok(result.ok && result.stoppedReason);
@@ -417,7 +431,7 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
         if (body.date === MONDAY) throw new ApiError(kind, "x");
         return slotsFor(body);
       };
-      const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)));
+      const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)), LOGIN);
       assert.deepEqual(statuses(result), ["UNKNOWN", "NOT_PROCESSED", "NOT_PROCESSED"]);
       assert.equal(posts().length, 1);
       assert.equal(result.ok && result.summary.unknown, 1);
@@ -426,40 +440,81 @@ describe("기간 생성 (generateServer.submitSlotRangeGeneration)", () => {
 
   it("기존 슬롯 확인에 실패하면 아무 날짜도 POST하지 않는다", async () => {
     gateway.searchFails = true;
-    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)));
+    const result = await server.submitSlotRangeGeneration(rangeInput(MONDAY, addDays(MONDAY, 2)), LOGIN);
     assert.equal(result.ok, false);
     assert.equal(posts().length, 0);
   });
 
   it("12·13·14. 잘못된 ID·다른 기관 장비·운영시간/소요 시간 미설정은 POST하지 않는다", async () => {
-    const badId = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { equipmentId: "not-uuid" }));
+    const badId = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { equipmentId: "not-uuid" }), LOGIN);
     assert.equal(!badId.ok && badId.field, "equipmentId");
-    const badExam = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { examTypeId: "x" }));
+    const badExam = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { examTypeId: "x" }), LOGIN);
     assert.equal(!badExam.ok && badExam.field, "examTypeId");
-    const other = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { equipmentId: OTHER_EQUIPMENT }));
+    const other = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY, { equipmentId: OTHER_EQUIPMENT }), LOGIN);
     assert.equal(!other.ok && other.reason, "FORBIDDEN");
     gateway.hours = [];
-    const noHours = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY));
+    const noHours = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY), LOGIN);
     assert.match(!noHours.ok ? noHours.message : "", /운영시간/);
     resetGateway();
     gateway.durationMinutes = null;
-    const noDuration = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY));
+    const noDuration = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY), LOGIN);
     assert.match(!noDuration.ok ? noDuration.message : "", /소요 시간/);
     assert.equal(posts().length, 0);
   });
 
   it("검사기관이 아닌 계정·장애 장비·운영일 없는 기간은 POST하지 않는다", async () => {
     gateway.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "x" };
-    const forbidden = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY));
+    const forbidden = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY), LOGIN);
     assert.equal(!forbidden.ok && forbidden.reason, "FORBIDDEN");
     assert.deepEqual(gatewayDataCalls(), []);
     resetGateway();
     gateway.equipmentStatus = "FAILED";
-    const failedEquipment = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY));
+    const failedEquipment = await server.submitSlotRangeGeneration(rangeInput(MONDAY, MONDAY), LOGIN);
     assert.equal(!failedEquipment.ok && failedEquipment.reason, "CONFLICT");
     resetGateway();
-    const weekendOnly = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 5), addDays(MONDAY, 6)));
+    const weekendOnly = await server.submitSlotRangeGeneration(rangeInput(addDays(MONDAY, 5), addDays(MONDAY, 6)), LOGIN);
     assert.match(!weekendOnly.ok ? weekendOnly.message : "", /운영하는 날이 없습니다/);
+    assert.equal(posts().length, 0);
+  });
+});
+
+describe("슬롯 생성: 로그인 세션 정합성 (STEP 3-2-2B-5)", () => {
+  const SESSION_CHANGED = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+  const range = { equipmentId: EQUIPMENT, examTypeId: EXAM_TYPE, startDate: MONDAY, endDate: addDays(MONDAY, 4) };
+
+  it("하루 생성: 다른 탭에서 계정이 바뀌면 SESSION_CHANGED, 장비·검사 유형·운영시간 확인과 생성 POST 0회", async () => {
+    gateway.loginSession = "loginSessionTagB";
+    assert.deepEqual(await server.submitSlotGeneration(input(), LOGIN), SESSION_CHANGED);
+    assert.deepEqual(gatewayDataCalls(), [], "사전 조회도 하지 않음");
+    assert.equal(posts().length, 0);
+  });
+
+  it("기간 생성: 다른 탭에서 계정이 바뀌면 SESSION_CHANGED, 사전 조회(장비·운영시간·기존 슬롯)와 날짜별 POST 0회", async () => {
+    gateway.loginSession = "loginSessionTagB";
+    assert.deepEqual(await server.submitSlotRangeGeneration(range, LOGIN), SESSION_CHANGED);
+    assert.deepEqual(gatewayDataCalls(), []);
+    assert.equal(posts().length, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 두 경로 모두 거부한다", async () => {
+    assert.equal(((await server.submitSlotGeneration(input())) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(((await server.submitSlotRangeGeneration(range)) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(posts().length, 0);
+  });
+
+  it("세션이 같으면 기존 흐름 그대로 (기간 생성: 운영일 5일 POST 5회)", async () => {
+    const result = await server.submitSlotRangeGeneration(range, LOGIN);
+    assert.equal(result.ok, true);
+    assert.equal(posts().length, 5);
+  });
+
+  it("기존 인증·권한 실패는 그대로 구분 (SESSION_CHANGED로 덮지 않음)", async () => {
+    gateway.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "권한 없음" };
+    assert.equal(((await server.submitSlotRangeGeneration(range, LOGIN)) as { reason: string }).reason, "FORBIDDEN");
+    gateway.access = { ok: false, reason: "UNAUTHORIZED", message: "만료" };
+    assert.equal(((await server.submitSlotGeneration(input(), LOGIN)) as { reason: string }).reason, "UNAUTHORIZED");
+    gateway.access = { ok: false, reason: "SIGNED_OUT", message: "로그인" };
+    assert.equal(((await server.submitSlotGeneration(input(), LOGIN)) as { reason: string }).reason, "SIGNED_OUT");
     assert.equal(posts().length, 0);
   });
 });

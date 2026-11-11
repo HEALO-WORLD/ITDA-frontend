@@ -8,6 +8,7 @@ import { controlClass, fieldLabelClass, SelectInput, TextInput } from "@/compone
 import Modal from "@/components/ui/Modal";
 import { primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { NETWORK_FAILURE, useDetailResult } from "@/features/admin/components/AdminDetailParts";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import type { ExamTypeDto } from "@/features/referrals/remote";
 import { addDays, getDaysInMonth, parseDateKey, toDateKey, type DateKey } from "@/lib/date/seoulDate";
 import { useSeoulNow } from "@/lib/date/useSeoulNow";
@@ -30,6 +31,7 @@ import { formatOperatingHoursSummary } from "../operatingHours";
 import { EQUIPMENT_MODALITIES, EQUIPMENT_NAME_MAX_LENGTH, validateEquipmentName, type EquipmentDto, type EquipmentModalityDto, type EquipmentStatusDto } from "../remote";
 import { hasOpenDay, type OperatingDayInput } from "../rules";
 import type { EquipmentOperatingHoursResult, ExamTypeOptionsResult, SupportedExamTypesResult } from "../server";
+import { markEquipmentSessionChanged, useEquipmentSessionChanged } from "../sessionChangeLock";
 import type { DailyOperatingHours } from "../types";
 
 import DaySlotList from "./DaySlotList";
@@ -381,6 +383,9 @@ const BREAK_NOT_SUPPORTED = "휴게 시간은 서버에 저장하는 기능이 �
  * 운영시간 저장만 실패하면 창을 닫지 않고 '장비는 등록됨'을 알린 뒤 그 장비에 운영시간만 다시 저장할 수 있게 한다.
  */
 function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDone: (notice: WorkspaceNotice) => void }) {
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 장비 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useEquipmentSessionChanged();
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [modality, setModality] = useState<EquipmentModalityDto | "">("");
@@ -425,28 +430,33 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
       return;
     }
     setShowHoursErrors(true);
-    if (pendingRef.current || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
+    if (pendingRef.current || sessionChanged || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
     pendingRef.current = true;
     setPending(true);
     setSubmitError(null);
     const operatingHours = toOperatingDaysPayload(days);
     try {
       if (created) {
-        const result = await saveEquipmentOperatingHoursAction(created.equipmentId, operatingHours);
+        const result = await saveEquipmentOperatingHoursAction(created.equipmentId, operatingHours, renderedLoginSession);
         if (result.ok) {
           onDone({ tone: created.linkFailed > 0 ? "warning" : "success", message: `장비를 등록하고 운영 시간을 저장했습니다.${linkNote(created.linkFailed)}` });
           return;
         }
+        if (result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
         setSubmitError(result.message);
         return;
       }
-      const result = await createEquipmentWithExamTypesAction({
-        name,
-        modality,
-        examTypes: selected.map((item) => ({ examTypeId: item.examTypeId, durationMinutes: readDuration(item.minutes).value })),
-        operatingHours,
-      });
+      const result = await createEquipmentWithExamTypesAction(
+        {
+          name,
+          modality,
+          examTypes: selected.map((item) => ({ examTypeId: item.examTypeId, durationMinutes: readDuration(item.minutes).value })),
+          operatingHours,
+        },
+        renderedLoginSession,
+      );
       if (!result.ok) {
+        if (result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
         setSubmitError(result.message);
         const fields = result.fieldErrors ?? {};
         if (fields.name || fields.modality || fields.examTypeId || fields.durationMinutes) setStep(1);
@@ -499,7 +509,7 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
               <ArrowRight className="size-4" aria-hidden="true" />
             </button>
           ) : (
-            <button type="submit" form={formId} disabled={pending} className={primaryButtonClass}>
+            <button type="submit" form={formId} disabled={pending || sessionChanged} className={primaryButtonClass}>
               {pending ? (created ? "저장 중" : "등록 중") : created ? "운영 시간 다시 저장" : "장비 등록"}
             </button>
           )}
@@ -837,23 +847,27 @@ function HoursEditForm({
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const noOpenDay = showErrors && !hasOpenDay(days);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 장비 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useEquipmentSessionChanged();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setShowErrors(true);
-    if (pendingRef.current || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
+    if (pendingRef.current || sessionChanged || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
     pendingRef.current = true;
     setPending(true);
     onBusyChange(true);
     setSubmitError(null);
     let done = false;
     try {
-      const result = await saveEquipmentOperatingHoursAction(equipmentId, toOperatingDaysPayload(days));
+      const result = await saveEquipmentOperatingHoursAction(equipmentId, toOperatingDaysPayload(days), renderedLoginSession);
       if (result.ok) {
         done = true;
         onSaved(result.message);
         return;
       }
+      if (result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
       setSubmitError(result.message);
       if (result.reason === "NOT_FOUND" || result.reason === "CONFLICT") onStale();
     } catch {
@@ -893,7 +907,7 @@ function HoursEditForm({
         <button type="button" onClick={onCancel} disabled={pending} className={secondaryButtonClass}>
           닫기
         </button>
-        <button type="submit" disabled={pending} className={primaryButtonClass}>
+        <button type="submit" disabled={pending || sessionChanged} className={primaryButtonClass}>
           {pending ? "저장 중" : "운영 시간 저장"}
         </button>
       </div>

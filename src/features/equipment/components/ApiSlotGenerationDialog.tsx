@@ -8,6 +8,7 @@ import { SelectInput } from "@/components/ui/FormControls";
 import Modal from "@/components/ui/Modal";
 import { primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
 import { useDetailResult } from "@/features/admin/components/AdminDetailParts";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { generateSlotRangeAction, loadGeneratedSlotsAction, loadSlotGenerationContextAction } from "@/features/slots/generateActions";
 import type {
   GenerationDayResult,
@@ -76,6 +77,13 @@ export default function ApiSlotGenerationDialog({ equipments, initialId, onClose
   const [result, setResult] = useState<Extract<SlotRangeGenerationResult, { ok: true }> | null>(null);
   /** 모든 운영일이 성공한 요청 조건 (같은 조건은 다시 보내지 않는다) */
   const [doneKeys, setDoneKeys] = useState<ReadonlySet<string>>(() => new Set());
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공). 슬롯 생성 요청에 함께 보낸다 */
+  const renderedLoginSession = useRenderedLoginSession();
+  /**
+   * 다른 탭에서 계정이 바뀌어 서버가 만들지 않았을 때의 안내. 있으면 이 창에서는 다시 보내지 않는다
+   * (입력·선택값은 그대로 두고, 장비·검사 유형을 바꿔도 안내와 잠금은 남는다)
+   */
+  const [sessionChangedMessage, setSessionChangedMessage] = useState<string | null>(null);
 
   const equipment = equipments.find((item) => item.id === equipmentId) ?? null;
   const { value: context, retry: reloadContext } = useDetailResult<SlotGenerationContextResult>(
@@ -107,7 +115,7 @@ export default function ApiSlotGenerationDialog({ equipments, initialId, onClose
 
   const requestKey = `${equipmentId}|${examTypeId}|${startDate}|${endDate}`.toLowerCase();
   const alreadyDone = doneKeys.has(requestKey);
-  const canSubmit = Boolean(loaded && link && targets.length > 0) && blockers.length === 0 && !rangeError && !pending && !alreadyDone;
+  const canSubmit = Boolean(loaded && link && targets.length > 0) && blockers.length === 0 && !rangeError && !pending && !alreadyDone && !sessionChangedMessage;
 
   const changeEquipment = (next: string) => {
     setEquipmentId(next);
@@ -117,14 +125,20 @@ export default function ApiSlotGenerationDialog({ equipments, initialId, onClose
   };
 
   const submit = () => {
-    if (lock.running || !canSubmit) return;
+    if (lock.running || !canSubmit || sessionChangedMessage) return;
     const key = requestKey;
     void lock.run(async () => {
       setPending(true);
       setError(null);
       try {
-        const next = await generateSlotRangeAction({ equipmentId, examTypeId, startDate, endDate });
+        // 렌더링 시점 로그인 세션을 함께 보낸다 (다른 탭에서 계정이 바뀌었으면 서버가 만들지 않는다)
+        const next = await generateSlotRangeAction({ equipmentId, examTypeId, startDate, endDate }, renderedLoginSession);
         if (!next.ok) {
+          // 계정 변경: 목록·장비 정보를 다시 불러오지 않고 안내만 남긴다 (자동 재시도 없음)
+          if (next.reason === "SESSION_CHANGED") {
+            setSessionChangedMessage(next.message);
+            return;
+          }
           setError(next.message);
           if (next.reason === "NOT_FOUND") reloadContext();
           return;
@@ -300,10 +314,10 @@ export default function ApiSlotGenerationDialog({ equipments, initialId, onClose
           </ul>
         )}
 
-        {error && (
+        {(sessionChangedMessage ?? error) && (
           <div role="alert" className="flex items-start gap-2 rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-700">
             <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-            <p>{error}</p>
+            <p>{sessionChangedMessage ?? error}</p>
           </div>
         )}
 

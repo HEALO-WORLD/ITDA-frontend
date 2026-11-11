@@ -21,7 +21,14 @@ const TOKEN_HEADERS = { Authorization: "Bearer secret-test-token" };
 
 type Call = { path: string; method?: string; body?: unknown; headers?: HeadersInit };
 
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
+const OK_ACCESS = { ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } };
+
 const state = {
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
+  access: OK_ACCESS as { ok: boolean; reason?: string; message?: string },
   calls: [] as Call[],
   response: null as unknown,
   error: null as unknown,
@@ -42,7 +49,14 @@ const originalConsoleError = console.error;
 before(async () => {
   mock.module("@/lib/auth/session", {
     namedExports: {
-      requireRoleAccess: async () => ({ ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } }),
+      requireRoleAccess: async () => OK_ACCESS,
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (_role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        if (!state.access.ok) return state.access;
+        return expected === state.loginSession ? state.access : changed;
+      },
     },
   });
   mock.module("@/lib/auth/csrf", { namedExports: { isSameOriginHeaders: () => true } });
@@ -62,6 +76,8 @@ before(async () => {
 });
 
 beforeEach(() => {
+  state.loginSession = LOGIN;
+  state.access = OK_ACCESS;
   state.calls = [];
   state.response = statusResponse("IN_PROGRESS", "COMPLETED");
   state.error = null;
@@ -144,7 +160,8 @@ describe("화면: 확인 흐름을 정하는 코드 연결", () => {
     assert.match(modal, /preventClose=\{pending\}/);
     assert.match(modal, /closeOnBackdrop=\{false\}/);
     assert.match(modal, /disabled=\{pending\} className=\{secondaryClass\}/);
-    assert.match(modal, /disabled=\{pending \|\| confirmError\?\.reason === "CONFLICT"\}/);
+    // STEP 3-2-2B-3: 다른 탭 계정 변경(SESSION_CHANGED) 뒤에도 다시 확정하지 못한다
+    assert.match(modal, /disabled=\{pending \|\| sessionChanged \|\| confirmError\?\.reason === "CONFLICT"\}/);
   });
 
   it("창에 목록 값으로 의뢰 번호·검사 유형·장비·예정 일시·현재/변경 상태를 보여 준다 (추가 조회 없음)", () => {
@@ -155,7 +172,7 @@ describe("화면: 확인 흐름을 정하는 코드 연결", () => {
 
 describe("Server Function: 검사 완료 확정 요청", () => {
   it("PATCH /api/v1/examinations/{id}/status { status: COMPLETED }를 정확히 1회 보내고, 성공하면 목록을 서버 값으로 다시 불러온다", async () => {
-    const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED");
+    const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN);
     assert.deepEqual(result, { ok: true, message: "검사를 완료 처리했습니다." });
     assert.deepEqual(state.calls, [{ path: `/api/v1/examinations/${EXAM}/status`, method: "PATCH", body: { status: "COMPLETED" }, headers: TOKEN_HEADERS }]);
     assert.equal(state.refreshCount, 1);
@@ -163,7 +180,7 @@ describe("Server Function: 검사 완료 확정 요청", () => {
 
   it("409(다른 화면에서 먼저 처리 등)는 CONFLICT + 서버 재조회(refresh) — 기존 정책 그대로", async () => {
     state.error = new ApiError("HTTP", "x", { status: 409, code: "INVALID_EXAMINATION_STATUS_TRANSITION" });
-    const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED");
+    const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN);
     assert.equal(result.ok, false);
     assert.equal(!result.ok && result.reason, "CONFLICT");
     assert.equal(state.refreshCount, 1);
@@ -173,7 +190,7 @@ describe("Server Function: 검사 완료 확정 요청", () => {
     for (const error of [new ApiError("HTTP", "x", { status: 500 }), new ApiError("NETWORK", "x")]) {
       state.error = error;
       state.refreshCount = 0;
-      const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED");
+      const result = await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN);
       assert.equal(result.ok, false);
       assert.equal(state.refreshCount, 0);
     }
@@ -181,14 +198,14 @@ describe("Server Function: 검사 완료 확정 요청", () => {
 
   it("검사 시작(IN_PROGRESS) 요청은 그대로 동작한다", async () => {
     state.response = statusResponse("SCHEDULED", "IN_PROGRESS");
-    const result = await actions.changeExaminationStatusAction(EXAM, "IN_PROGRESS");
+    const result = await actions.changeExaminationStatusAction(EXAM, "IN_PROGRESS", LOGIN);
     assert.deepEqual(result, { ok: true, message: "검사를 시작했습니다." });
     assert.deepEqual(state.calls[0].body, { status: "IN_PROGRESS" });
   });
 
   it("결과 등록 Server Function은 그대로 동작한다", async () => {
     state.response = { resultId: "f0000000-0000-4000-8000-000000000001", examinationId: EXAM, registeredAt: "2026-11-09T11:00:00" };
-    const result = await actions.registerExaminationResultAction(EXAM, { summary: "정상", notes: "" });
+    const result = await actions.registerExaminationResultAction(EXAM, { summary: "정상", notes: "" }, LOGIN);
     assert.equal(result.ok, true);
     assert.equal(state.calls[0].method, "POST");
     assert.equal(state.calls[0].path, `/api/v1/examinations/${EXAM}/results`);
@@ -202,5 +219,61 @@ describe("Mock 화면 회귀", () => {
       assert.equal(source.includes("ExaminationApiActions"), false, file);
       assert.equal(source.includes("changeExaminationStatusAction"), false, file);
     }
+  });
+});
+
+describe("Server Function: 로그인 세션 정합성 (STEP 3-2-2B-3)", () => {
+  const SESSION_CHANGED = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+  const RESULT = { summary: "정상", notes: "" };
+
+  it("다른 탭에서 계정이 바뀌면 상태 변경(시작·완료)·결과 등록 모두 SESSION_CHANGED, 백엔드 요청 0회, 목록 다시 그리지 않음", async () => {
+    state.loginSession = "loginSessionTagB";
+    assert.deepEqual(await actions.changeExaminationStatusAction(EXAM, "IN_PROGRESS", LOGIN), SESSION_CHANGED);
+    assert.deepEqual(await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN), SESSION_CHANGED);
+    assert.deepEqual(await actions.registerExaminationResultAction(EXAM, RESULT, LOGIN), SESSION_CHANGED);
+    assert.equal(state.calls.length, 0, "PATCH .../status·POST .../results 모두 0회");
+    assert.equal(state.refreshCount, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 두 Action 모두 거부한다", async () => {
+    assert.equal(((await actions.changeExaminationStatusAction(EXAM, "COMPLETED")) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(((await actions.registerExaminationResultAction(EXAM, RESULT)) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(state.calls.length, 0);
+  });
+
+  it("기존 입력 검증·인증·권한 실패는 그대로 구분 (SESSION_CHANGED로 덮지 않음)", async () => {
+    assert.equal(((await actions.changeExaminationStatusAction(EXAM, "WAITING", LOGIN)) as { reason: string }).reason, "INVALID", "상태 전이 대상 검증");
+    assert.equal(((await actions.registerExaminationResultAction(EXAM, { summary: " " }, LOGIN)) as { reason: string }).reason, "INVALID", "결과 요약 검증");
+    state.access = { ok: false, reason: "UNAUTHORIZED", message: "만료" };
+    assert.equal(((await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN)) as { reason: string }).reason, "UNAUTHORIZED");
+    state.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "권한 없음" };
+    assert.equal(((await actions.registerExaminationResultAction(EXAM, RESULT, LOGIN)) as { reason: string }).reason, "FORBIDDEN");
+    state.access = { ok: false, reason: "SIGNED_OUT", message: "로그인 필요" };
+    assert.equal(((await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN)) as { reason: string }).reason, "SIGNED_OUT");
+    assert.equal(state.calls.length, 0);
+  });
+
+  it("같은 세션의 백엔드 오류 처리 유지: 400·401·403·404·409·5xx", async () => {
+    const cases: [number, string][] = [[400, "INVALID"], [401, "UNAUTHORIZED"], [403, "FORBIDDEN"], [404, "NOT_FOUND"], [409, "CONFLICT"], [500, "ERROR"]];
+    for (const [status, reason] of cases) {
+      state.error = new ApiError("HTTP", "x", { status });
+      const change = await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN);
+      const register = await actions.registerExaminationResultAction(EXAM, RESULT, LOGIN);
+      assert.equal((change as { reason: string }).reason, reason, `상태 변경 ${status}`);
+      assert.equal((register as { reason: string }).reason, reason, `결과 등록 ${status}`);
+    }
+  });
+
+  it("화면은 렌더링 시점 로그인 세션을 세 변경 경로(시작·완료 확정·결과 등록)에 보내고, SESSION_CHANGED면 변경 버튼을 잠근다", () => {
+    const source = readFileSync(new URL("../../src/features/examinations/components/ExaminationApiActions.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /const renderedLoginSession = useRenderedLoginSession\(\);/);
+    assert.match(source, /changeExaminationStatusAction\(examination\.examinationId, "COMPLETED", renderedLoginSession\)/);
+    assert.match(source, /changeExaminationStatusAction\(examination\.examinationId, next, renderedLoginSession\)/);
+    assert.match(source, /registerExaminationResultAction\(examinationId, \{ summary, notes \}, loginSession\)/);
+    assert.match(source, /loginSession=\{renderedLoginSession\}/);
+    assert.match(source, /disabled=\{pending \|\| startBlocked \|\| sessionChanged\}/);
+    assert.match(source, /disabled=\{sessionChanged\}/);
+    assert.match(source, /disabled=\{isSubmitting \|\| sessionLocked\}/);
+    assert.doesNotMatch(source, /\/auth\/session/);
   });
 });

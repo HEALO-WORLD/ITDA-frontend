@@ -62,6 +62,8 @@ const slotDto = (overrides: Record<string, unknown> = {}) => ({
 const equipmentDto = (id: string, overrides: Record<string, unknown> = {}) => ({ id, institutionId: EXAM_ORG, name: id === EQUIPMENT ? "CT-2" : "CT-1", modality: "CT", status: "OPERATIONAL", ...overrides });
 
 type Call = { path: string; method: string; body?: unknown; query?: unknown };
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
 
 const state = {
   access: okAccess as Access,
@@ -75,10 +77,13 @@ const state = {
   order: [] as string[],
   refreshCount: 0,
   sameOrigin: true,
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
 };
 
 function reset() {
   state.access = okAccess;
+  state.loginSession = LOGIN;
   state.referral = referralDto();
   state.reservations = { [OLD_RESERVATION]: reservationDto() };
   state.slot = slotDto();
@@ -131,6 +136,14 @@ before(async () => {
       requireRoleAccess: async (role: string) => {
         state.order.push(`users/me:${role}`);
         return state.access;
+      },
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        state.order.push(`mutation users/me:${role}`);
+        if (!state.access.ok) return state.access;
+        return expected === state.loginSession ? state.access : changed;
       },
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({
         reason: access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : access.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN",
@@ -289,7 +302,7 @@ describe("후보 확인·재예약 요청 (requestRescheduleAction)", () => {
     assert.equal(check.ok, true);
     assert.equal(posts().length, 0, "후보 확인은 조회만");
     reset();
-    const result = await actions.requestRescheduleAction(REFERRAL, SLOT);
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
     assert.equal(result.ok, true);
     assert.deepEqual(posts()[0].body, {
       slotId: SLOT,
@@ -320,7 +333,7 @@ describe("후보 확인·재예약 요청 (requestRescheduleAction)", () => {
       const check = await actions.checkRescheduleCandidateAction(REFERRAL, SLOT);
       assert.equal(check.ok, false);
       if (!check.ok) assert.ok(check.failures?.includes(failure as never), `${check.failures}`);
-      const result = await actions.requestRescheduleAction(REFERRAL, SLOT);
+      const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, "CANDIDATE_REJECTED");
       assert.equal(posts().length, 0);
@@ -331,9 +344,9 @@ describe("후보 확인·재예약 요청 (requestRescheduleAction)", () => {
     let release: () => void = () => {};
     const respond = state.post as (body: Record<string, unknown>) => unknown;
     state.post = (body) => new Promise((resolve) => (release = () => resolve(respond(body))));
-    const first = actions.requestRescheduleAction(REFERRAL, SLOT);
+    const first = actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const second = await actions.requestRescheduleAction(REFERRAL.toUpperCase(), SLOT);
+    const second = await actions.requestRescheduleAction(REFERRAL.toUpperCase(), SLOT, LOGIN);
     assert.equal(second.ok, false);
     if (!second.ok) assert.equal(second.reason, "DUPLICATE_REQUEST");
     release();
@@ -351,7 +364,7 @@ describe("후보 확인·재예약 요청 (requestRescheduleAction)", () => {
   for (const [label, error, cause] of postFailures) {
     it(`POST ${label} → ${cause} (자동 재시도 없음)`, async () => {
       state.post = error as Error;
-      const result = await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT));
+      const result = await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN));
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(result.reason, "REQUEST_FAILED");
@@ -363,14 +376,14 @@ describe("후보 확인·재예약 요청 (requestRescheduleAction)", () => {
 
   it("POST 401 → UNAUTHORIZED", async () => {
     state.post = httpError(401);
-    const result = await actions.requestRescheduleAction(REFERRAL, SLOT);
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, "UNAUTHORIZED");
   });
 
   it("검사기관·관리자 계정은 조회·POST 없이 차단 (REQUESTER만)", async () => {
     state.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "x" };
-    const result = await actions.requestRescheduleAction(REFERRAL, SLOT);
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, "FORBIDDEN_ROLE");
     assert.equal(state.calls.length, 0);
@@ -434,5 +447,52 @@ describe("loadRescheduleProgressAction (접수 뒤 확정 재조회)", () => {
     const mismatched = await progressActions.loadRescheduleProgressAction(REFERRAL);
     assert.equal(mismatched.ok, true);
     if (mismatched.ok) assert.equal(mismatched.reservation, null);
+  });
+});
+
+describe("requestRescheduleAction: 로그인 세션 정합성 (STEP 3-2-2B-1)", () => {
+  it("화면을 그린 뒤 다른 탭에서 계정이 바뀌면 SESSION_CHANGED: 조회·재예약 POST 0회, 목록 다시 그리지 않음", async () => {
+    state.loginSession = "loginSessionTagB";
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
+    assert.deepEqual(result, { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." });
+    assert.equal(posts().length, 0);
+    assert.equal(state.calls.length, 0, "의뢰·슬롯·장비 조회도 하지 않음");
+    assert.equal(state.refreshCount, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 거부한다", async () => {
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT);
+    assert.equal(!result.ok && result.reason, "SESSION_CHANGED");
+    assert.equal(posts().length, 0);
+  });
+
+  it("세션이 같으면 기존 흐름 그대로 POST 1회, 확인 단계(checkRescheduleCandidateAction)는 기존 역할 확인만", async () => {
+    const check = await actions.checkRescheduleCandidateAction(REFERRAL, SLOT);
+    assert.equal(check.ok, true);
+    assert.equal(state.order[0], "users/me:REFERRING", "확인 단계는 세션 비교 없이 기존 역할 확인");
+    reset();
+    const result = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
+    assert.equal(result.ok, true);
+    assert.equal(state.order[0], "mutation users/me:REFERRING");
+    assert.equal(posts().length, 1);
+  });
+
+  it("기존 인증·권한 실패는 그대로 구분 (SESSION_CHANGED로 덮지 않음)", async () => {
+    state.access = { ok: false, reason: "UNAUTHORIZED", message: "만료" };
+    const unauthorized = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
+    assert.equal(!unauthorized.ok && unauthorized.reason, "UNAUTHORIZED");
+    reset();
+    state.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "권한 없음" };
+    const forbidden = await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
+    assert.equal(!forbidden.ok && forbidden.reason, "FORBIDDEN_ROLE");
+    assert.equal(posts().length, 0);
+  });
+
+  it("SESSION_CHANGED 뒤 처리 중 표시가 남지 않는다 (같은 세션에서는 다시 요청 가능)", async () => {
+    state.loginSession = "loginSessionTagB";
+    await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN);
+    state.loginSession = LOGIN;
+    assert.equal((await actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN)).ok, true);
+    assert.equal(posts().length, 1);
   });
 });

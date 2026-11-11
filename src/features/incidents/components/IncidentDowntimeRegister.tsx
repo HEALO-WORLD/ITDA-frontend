@@ -8,6 +8,7 @@ import DatePicker from "@/components/ui/DatePicker";
 import { controlClass, fieldLabelClass, iconClass, SelectInput } from "@/components/ui/FormControls";
 import Modal from "@/components/ui/Modal";
 import { primaryButtonClass, secondaryButtonClass } from "@/components/ui/styles";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { getSeoulNow, type DateKey } from "@/lib/date/seoulDate";
 
 import { checkRegisteredIncidentAction, registerEquipmentDowntimeAction } from "../downtimeActions";
@@ -57,6 +58,10 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
   const [notice, setNotice] = useState<Notice | null>(null);
   const runningRef = useRef(false);
   const openRef = useRef(false);
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공). 장애 등록 요청에 함께 보낸다 */
+  const renderedLoginSession = useRenderedLoginSession();
+  /** 다른 탭에서 계정이 바뀌어 서버가 등록하지 않았다: 이 화면에서는 다시 보내지 않는다 (창을 닫았다 다시 열어도) */
+  const [sessionChanged, setSessionChanged] = useState(false);
 
   const setDialogOpen = (next: boolean) => {
     openRef.current = next;
@@ -64,13 +69,13 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
   };
 
   const submit = async (input: DowntimeFormInput) => {
-    if (runningRef.current) return; // 연속 클릭·Enter 중복 제출 방지
+    if (runningRef.current || sessionChanged) return; // 연속 클릭·Enter 중복 제출 방지 · 계정 변경 뒤 재요청 금지
     runningRef.current = true;
     setPending(true);
     setFailure(null);
     let result: DowntimeActionResult;
     try {
-      result = await registerEquipmentDowntimeAction(input);
+      result = await registerEquipmentDowntimeAction(input, renderedLoginSession);
     } catch {
       result = NETWORK_FAILURE;
     } finally {
@@ -82,6 +87,7 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
       setNotice({ kind: "success", result, tracking: result.match ? "CHECKING" : "MANUAL" });
       return;
     }
+    if (result.reason === "SESSION_CHANGED") setSessionChanged(true);
     if (!openRef.current) {
       // 등록 중 대화상자를 닫았다면 결과를 목록 위에 남긴다
       setNotice({ kind: "warning", message: result.uncertain ? result.message : `장애를 등록하지 못했습니다. ${result.message}` });
@@ -131,8 +137,8 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
           setFailure(null);
           setDialogOpen(true);
         }}
-        disabled={pending || unavailable !== null}
-        title={unavailable ?? (pending ? "장애 등록을 처리하고 있습니다." : undefined)}
+        disabled={pending || unavailable !== null || sessionChanged}
+        title={unavailable ?? (pending ? "장애 등록을 처리하고 있습니다." : sessionChanged ? "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침해 주세요." : undefined)}
         aria-haspopup="dialog"
         className={primaryButtonClass}
       >
@@ -225,10 +231,10 @@ export const DOWNTIME_FORM_ID = "downtime-register-form";
 
 /**
  * 등록 대화상자 하단 버튼 줄 (Modal footer). 폼 밖에 있어 form 속성으로 제출한다.
- * 잠금 조건(요청 중·결과 불확실)은 폼과 같다
+ * 잠금 조건(요청 중·결과 불확실·다른 탭 계정 변경)은 폼과 같다
  */
 export function DowntimeRegisterActions({ pending, failure, onCancel }: { pending: boolean; failure: Failure | null; onCancel: () => void }) {
-  const locked = pending || Boolean(failure?.uncertain);
+  const locked = pending || Boolean(failure?.uncertain) || failure?.reason === "SESSION_CHANGED";
   return (
     <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
       {pending && <p className="text-center text-sm text-gray-500 sm:mr-auto sm:text-left">창을 닫아도 등록 요청은 계속 처리되며, 결과는 목록 위에 표시됩니다.</p>}
@@ -280,7 +286,8 @@ export function DowntimeRegisterForm({
   // 시각 형식이 틀리면 날짜·구간 안내 대신 형식 안내를 보여 준다
   if (startTime.trim() && !start) errors.startedAt = TIME_FORMAT_ERROR;
   if (endTime.trim() && !end) errors.endedAt = TIME_FORMAT_ERROR;
-  const locked = pending || Boolean(failure?.uncertain);
+  // 다른 탭 계정 변경(SESSION_CHANGED) 뒤에도 잠근다 (입력값은 그대로 둔다)
+  const locked = pending || Boolean(failure?.uncertain) || failure?.reason === "SESSION_CHANGED";
   const touch = (field: DowntimeField) => setTouched((prev) => new Set(prev).add(field));
   const errorOf = (field: DowntimeField) => (touched.has(field) ? errors[field] : undefined) ?? failure?.fieldErrors?.[field];
 

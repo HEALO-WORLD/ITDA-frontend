@@ -6,6 +6,8 @@ import { useRef, useState } from "react";
 import Modal from "@/components/ui/Modal";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
+
 import { getReservationCancelAvailability, type CancelRecheckOutcome, type ReservationCancelTarget } from "../reservationCancel";
 import { cancelReservationAction, type ReservationCancelActionResult } from "../reservationCancelActions";
 import type { ReferralDetail } from "../server";
@@ -61,7 +63,7 @@ const NETWORK_ERROR_MESSAGE = "서버에 연결할 수 없습니다. 네트워�
 /** 이 결과 뒤에는 서버 상태가 확인 창과 다를 수 있다: 확인 창을 닫고 최신 상세를 다시 불러온다 (같은 확인으로 다시 보내지 않는다) */
 const REFETCH_REASONS: ReadonlySet<Failure["reason"]> = new Set(["STALE", "CONFLICT", "NOT_FOUND"]);
 /** 다시 시도해도 해결되지 않는다: 확인 창에 안내만 하고 확정 버튼을 막는다 */
-const BLOCKING_REASONS: ReadonlySet<Failure["reason"]> = new Set(["SIGNED_OUT", "UNAUTHORIZED", "FORBIDDEN", "FORBIDDEN_ORIGIN", "NOT_AVAILABLE", "INVALID_INPUT"]);
+const BLOCKING_REASONS: ReadonlySet<Failure["reason"]> = new Set(["SIGNED_OUT", "UNAUTHORIZED", "FORBIDDEN", "FORBIDDEN_ORIGIN", "NOT_AVAILABLE", "INVALID_INPUT", "SESSION_CHANGED"]);
 
 const dangerButtonClass =
   "inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg border border-red-200 bg-white px-4 text-sm font-semibold text-red-600 transition-colors hover:border-red-300 hover:bg-red-50 disabled:cursor-not-allowed disabled:border-line disabled:text-gray-400";
@@ -78,6 +80,8 @@ const secondaryClass =
  * - 요청 중에는 확정·닫기·Esc를 막고 ref로 연속 클릭을 막는다
  */
 export default function ReservationCancelControl({ referralId, referralStatus, reservation, checkedAtMs, onPendingChange, onSettled }: ReservationCancelControlProps) {
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공). 취소 요청에 함께 보낸다 */
+  const renderedLoginSession = useRenderedLoginSession();
   const pendingRef = useRef(false);
   const [pending, setPending] = useState(false);
   /** 열 때 고정한 확인 대상 (확인 창이 보여 주는 예약 = 서버로 보내는 표식) */
@@ -122,7 +126,8 @@ export default function ReservationCancelControl({ referralId, referralStatus, r
     let result: ReservationCancelActionResult;
     try {
       const { attemptNo, startTime, endTime } = confirmTarget;
-      result = await cancelReservationAction(referralId, { attemptNo, startTime, endTime });
+      // 렌더링 시점 로그인 세션을 함께 보낸다 (다른 탭에서 계정이 바뀌었으면 서버가 취소하지 않는다)
+      result = await cancelReservationAction(referralId, { attemptNo, startTime, endTime }, renderedLoginSession);
     } catch {
       result = { ok: false, reason: "UNKNOWN_RESULT", message: NETWORK_ERROR_MESSAGE, code: null };
     }

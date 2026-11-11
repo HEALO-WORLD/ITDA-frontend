@@ -9,7 +9,7 @@ import { fetchSlotDetail, getSlotDetailErrorMessage, isSlotApiId, type SlotDetai
 import { isApiFeature } from "@/lib/api/config";
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess } from "@/lib/auth/session";
+import { requireRoleAccess, requireRoleMutationAccess } from "@/lib/auth/session";
 
 import {
   fetchReferral,
@@ -82,6 +82,8 @@ type RescheduleCandidateActionResult =
         | "UNAUTHORIZED"
         /** users/me로 확인한 역할이 의뢰기관이 아니거나(ADMIN·EXAMINER) 사용자 확인 실패 (요청하지 않음) */
         | "FORBIDDEN_ROLE"
+        /** 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (조회·재예약 요청 모두 하지 않음. requestRescheduleAction만) */
+        | "SESSION_CHANGED"
         /** 같은 의뢰의 재예약 요청을 이 서버가 이미 처리하고 있음 (요청하지 않음) */
         | "DUPLICATE_REQUEST"
         /** 의뢰·슬롯·장비 조회 실패 (lookup에 대상과 원인) */
@@ -174,8 +176,9 @@ export async function checkRescheduleCandidateAction(referralId: unknown, slotId
  * - 백엔드는 예약을 REQUESTED로 접수하고 슬롯 확보(HOLD)는 비동기로 처리한다 → 성공은 '접수'이지 '확정'이 아니다
  * - 같은 의뢰를 다시 요청하면 백엔드가 409를 돌려준다. 이 서버 안의 동시 요청은 inFlightReferrals로 먼저 막는다
  * 접수·409·결과 불명(네트워크·응답 형식) 뒤에는 화면을 다시 불러와(refresh) 서버 상태로 맞춘다. 실패해도 화면에서 상태를 바꾸지 않는다.
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (LoginSessionContext). 지금 쿠키 값과 다르면 조회·POST 없이 SESSION_CHANGED
  */
-export async function requestRescheduleAction(referralId: unknown, slotId: unknown): Promise<RescheduleRequestActionResult> {
+export async function requestRescheduleAction(referralId: unknown, slotId: unknown, expectedLoginSession?: unknown): Promise<RescheduleRequestActionResult> {
   // 확인 조회(GET 3회)부터 POST까지 한 덩어리로 막는다: 연속 클릭의 두 번째 요청은 조회도 하지 않는다
   const key = isReferralApiId(referralId) ? referralId.toLowerCase() : null;
   if (key && inFlightReferrals.has(key)) {
@@ -183,14 +186,15 @@ export async function requestRescheduleAction(referralId: unknown, slotId: unkno
   }
   if (key) inFlightReferrals.add(key);
   try {
-    return await submitReschedule(referralId, slotId);
+    return await submitReschedule(referralId, slotId, expectedLoginSession);
   } finally {
     if (key) inFlightReferrals.delete(key);
   }
 }
 
-async function submitReschedule(referralId: unknown, slotId: unknown): Promise<RescheduleRequestActionResult> {
-  const prepared = await prepareReschedule(referralId, slotId);
+async function submitReschedule(referralId: unknown, slotId: unknown, expectedLoginSession: unknown): Promise<RescheduleRequestActionResult> {
+  // 변경 요청: 역할 확인에 로그인 세션 정합성 확인을 더한다 (확인 단계 checkRescheduleCandidateAction은 조회만이라 기존 그대로)
+  const prepared = await prepareReschedule(referralId, slotId, { expectedLoginSession });
   if (!prepared.ok) return prepared;
   const { candidate, authorization } = prepared;
 
@@ -230,10 +234,14 @@ async function submitReschedule(referralId: unknown, slotId: unknown): Promise<R
   };
 }
 
-/** 확인 단계 공통: 같은 출처·기능·역할·입력 확인 → 의뢰·슬롯·장비 재조회 → 후보 확인 → 서울 시각 변환 */
+/**
+ * 확인 단계 공통: 같은 출처·기능·역할·입력 확인 → 의뢰·슬롯·장비 재조회 → 후보 확인 → 서울 시각 변환
+ * mutation: 재예약 요청(변경)일 때만. requireRoleMutationAccess로 렌더링 세션과 지금 쿠키 세션도 비교한다
+ */
 async function prepareReschedule(
   referralId: unknown,
   slotId: unknown,
+  mutation: { expectedLoginSession: unknown } | null = null,
 ): Promise<Failure | { ok: true; candidate: Extract<RescheduleCandidateActionResult, { ok: true }>["candidate"]; authorization: HeadersInit }> {
   if (!isSameOriginHeaders(await headers())) {
     return { ok: false, reason: "FORBIDDEN_ORIGIN", message: "허용되지 않은 요청입니다. 화면을 새로고침해 주세요." };
@@ -243,8 +251,10 @@ async function prepareReschedule(
     return { ok: false, reason: "NOT_AVAILABLE", message: "재예약 기능은 준비 중입니다." };
   }
   // 의뢰기관(REQUESTER) 역할을 users/me로 확인한 뒤에만 조회·재예약 요청을 보낸다 (ADMIN·EXAMINER는 요청 전 차단)
-  const access = await requireRoleAccess("REFERRING");
+  const access = mutation ? await requireRoleMutationAccess("REFERRING", mutation.expectedLoginSession) : await requireRoleAccess("REFERRING");
   if (!access.ok) {
+    // 다른 계정 쿠키로 바뀐 화면: 목록을 다시 그리지 않고(새 계정 데이터를 섞지 않음) 새로고침 안내만 한다
+    if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
     if (access.reason === "SIGNED_OUT") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다. 다시 로그인해 주세요." };
     if (access.reason === "UNAUTHORIZED") return { ok: false, reason: "UNAUTHORIZED", message: UNAUTHORIZED_MESSAGE };
     return { ok: false, reason: "FORBIDDEN_ROLE", message: access.message };

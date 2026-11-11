@@ -1,5 +1,7 @@
 import "server-only";
 
+import { createHash, randomUUID } from "node:crypto";
+
 import { cookies } from "next/headers";
 import { unstable_rethrow } from "next/navigation";
 import { cache } from "react";
@@ -12,7 +14,7 @@ import type { OrganizationRole } from "@/types/auth";
 /**
  * 로그인 세션 (서버 전용).
  *
- * 백엔드가 발급한 액세스 토큰(JWT)을 HttpOnly 쿠키에만 보관한다.
+ * 백엔드가 발급한 액세스 토큰(JWT)과 Refresh Token을 각각 HttpOnly 쿠키에만 보관한다.
  * - 브라우저 스크립트는 토큰을 읽을 수 없다 (localStorage·sessionStorage·NEXT_PUBLIC_ 환경변수에 두지 않는다)
  * - 프론트는 토큰을 해석하거나 그 안의 역할·기관 값을 믿지 않는다. 검증은 Gateway가 하고,
  *   X-User-Id·X-Institution-Id·X-Role 헤더도 Gateway가 토큰에서 만든다 (프론트는 만들지 않는다)
@@ -22,31 +24,81 @@ import type { OrganizationRole } from "@/types/auth";
  */
 
 const ACCESS_TOKEN_COOKIE = "itda_access_token";
+const REFRESH_TOKEN_COOKIE = "itda_refresh_token";
+/**
+ * 로그인 세션 식별 쿠키 (무작위 값. 토큰·개인정보가 아니고 인증에 쓰지 않는다).
+ * 로그인할 때마다 새 값(같은 계정 재로그인 포함), 토큰 재발급(회전) 때는 그대로 → 다른 탭의 계정 전환·로그아웃을 회전과 구분한다
+ */
+const LOGIN_SESSION_COOKIE = "itda_login_session";
 
 /**
- * 토큰 쿠키 저장 (로그인 Route Handler에서 호출).
+ * 두 토큰 쿠키의 공통 속성.
  * - Secure: HTTPS에서만 전송 (localhost는 브라우저가 안전한 출처로 보아 http에서도 동작한다. Safari는 예외일 수 있다)
  * - SameSite=Lax: 다른 사이트에서 보낸 POST·fetch에는 쿠키가 실리지 않는다. 변경 요청은 Origin 검사도 함께 한다
- * - maxAge: 백엔드 expiresIn과 같게 맞춰 토큰이 만료되면 쿠키도 사라지게 한다
+ */
+const TOKEN_COOKIE_OPTIONS = { httpOnly: true, secure: true, sameSite: "lax", path: "/" } as const;
+
+/**
+ * 액세스 토큰 쿠키 저장 (로그인 Route Handler에서 호출).
+ * maxAge: 백엔드 expiresIn과 같게 맞춰 토큰이 만료되면 쿠키도 사라지게 한다
  */
 export async function setAccessTokenCookie(accessToken: string, expiresInSeconds: number): Promise<void> {
-  (await cookies()).set(ACCESS_TOKEN_COOKIE, accessToken, {
-    httpOnly: true,
-    secure: true,
-    sameSite: "lax",
-    path: "/",
-    maxAge: expiresInSeconds,
-  });
+  (await cookies()).set(ACCESS_TOKEN_COOKIE, accessToken, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
 }
 
-/** 토큰 쿠키 삭제 (로그아웃 Route Handler에서 호출) */
-export async function clearAccessTokenCookie(): Promise<void> {
-  (await cookies()).delete(ACCESS_TOKEN_COOKIE);
+/**
+ * Refresh Token 쿠키 저장 (로그인 Route Handler에서 호출). 액세스 토큰과 같은 보안 속성, maxAge는 백엔드 refreshExpiresIn.
+ * 재발급·로그아웃 요청 본문에만 쓰고 Gateway 보호 API의 Authorization에는 쓰지 않는다
+ */
+export async function setRefreshTokenCookie(refreshToken: string, expiresInSeconds: number): Promise<void> {
+  (await cookies()).set(REFRESH_TOKEN_COOKIE, refreshToken, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** Refresh Token 읽기 (로그아웃 Route Handler). 없으면 null (RTR 이전에 로그인한 세션 등) */
+export async function readRefreshToken(): Promise<string | null> {
+  const value = (await cookies()).get(REFRESH_TOKEN_COOKIE)?.value;
+  return value ? value : null;
+}
+
+/** 로그인 세션 식별 쿠키를 새 값으로 저장 (로그인 Route Handler). maxAge는 Refresh Token과 같게 */
+export async function startLoginSession(expiresInSeconds: number): Promise<void> {
+  (await cookies()).set(LOGIN_SESSION_COOKIE, randomUUID(), { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** 토큰 재발급 뒤 로그인 세션 식별 쿠키의 수명만 Refresh Token에 맞춰 늘린다 (값은 그대로. 없으면 만들지 않는다) */
+export async function extendLoginSession(expiresInSeconds: number): Promise<void> {
+  const store = await cookies();
+  const value = store.get(LOGIN_SESSION_COOKIE)?.value;
+  if (value) store.set(LOGIN_SESSION_COOKIE, value, { ...TOKEN_COOKIE_OPTIONS, maxAge: expiresInSeconds });
+}
+
+/** 쿠키 값을 화면에 넘길 구분 값으로 바꾼다 (SHA-256 앞 16자. 원래 값으로 되돌릴 수 없다) */
+export function toSessionTag(value: string): string {
+  return createHash("sha256").update(value).digest("base64url").slice(0, 16);
+}
+
+/** 현재 로그인 세션 구분 값 (보호 화면 렌더링 시점과 지금을 비교하는 데 쓴다). 쿠키가 없으면 null (STEP 3-2 이전 로그인 포함) */
+export async function readLoginSessionTag(): Promise<string | null> {
+  const value = (await cookies()).get(LOGIN_SESSION_COOKIE)?.value;
+  return value ? toSessionTag(value) : null;
+}
+
+/** 두 토큰 쿠키와 로그인 세션 식별 쿠키 삭제 (로그아웃 Route Handler에서 호출). 저장할 때와 같은 path·보안 속성으로 지운다 */
+export async function clearSessionCookies(): Promise<void> {
+  const store = await cookies();
+  store.delete({ name: ACCESS_TOKEN_COOKIE, ...TOKEN_COOKIE_OPTIONS });
+  store.delete({ name: REFRESH_TOKEN_COOKIE, ...TOKEN_COOKIE_OPTIONS });
+  store.delete({ name: LOGIN_SESSION_COOKIE, ...TOKEN_COOKIE_OPTIONS });
 }
 
 async function readAccessToken(): Promise<string | null> {
   const value = (await cookies()).get(ACCESS_TOKEN_COOKIE)?.value;
   return value ? value : null;
+}
+
+/** Access 쿠키가 있는지만 (세션 상태 확인 Route Handler용. 값은 돌려주지 않는다) */
+export async function readAccessTokenPresence(): Promise<boolean> {
+  return (await readAccessToken()) !== null;
 }
 
 /** 서버에서 확인한 사용자 역할 (백엔드 Role enum) */
@@ -168,7 +220,11 @@ export type RoleAccess =
  * - 확인에 실패하면 헤더를 주지 않는다 → 호출한 쪽은 요청을 보내지 않는다
  */
 export async function requireRoleAccess(role: OrganizationRole | "ADMIN"): Promise<RoleAccess> {
-  const state = await getAuthState();
+  return toRoleAccess(await getAuthState(), role);
+}
+
+/** 확인한 인증 상태 → 역할 접근 결과 (requireRoleAccess와 인증 복구 뒤 다시 확인할 때 공용) */
+function toRoleAccess(state: AuthState, role: OrganizationRole | "ADMIN"): RoleAccess {
   if (state.status === "signed-out") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." };
   if (state.status === "unverified") {
     return { ok: false, reason: state.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "UNVERIFIED", message: state.message };
@@ -179,6 +235,76 @@ export async function requireRoleAccess(role: OrganizationRole | "ADMIN"): Promi
     return { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." };
   }
   return { ok: true, headers: toAuthorizationHeaders(state), user: state.user };
+}
+
+export const SESSION_CHANGED_MESSAGE = "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요.";
+
+/** 변경 요청 접근 확인 결과: 기존 RoleAccess + 로그인 세션 불일치(SESSION_CHANGED, 권한 부족과 구분한다) */
+export type RoleMutationAccess = RoleAccess | { ok: false; reason: "SESSION_CHANGED"; message: string };
+
+/** 로그인 세션 구분 값 형식 (readLoginSessionTag: SHA-256 base64url 앞 16자) */
+const LOGIN_SESSION_TAG = /^[A-Za-z0-9_-]{16}$/;
+
+/**
+ * 변경 요청용 접근 확인 (Server Action에서 백엔드 변경 API를 부르기 전에). requireRoleAccess를 대체하지 않고 그 위에 더한다.
+ *
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (클라이언트가 보낸 값. 인증·인가 근거가 아니라 사전 조건으로만 쓴다)
+ * 1. 형식 확인: undefined·문자열/null이 아님·형식 오류 → 거부 (fail-closed)
+ * 2. 현재 HttpOnly 쿠키의 구분 값과 먼저 비교: 다르면 users/me·재발급 없이 SESSION_CHANGED (다른 탭의 계정 전환·같은 계정 재로그인.
+ *    전환한 계정의 역할이 달라도 권한 부족이 아니라 세션 변경으로 안내한다). 읽기 실패도 거부.
+ *    단, 토큰·구분 값 쿠키가 모두 없으면(다른 탭 로그아웃) 기존과 같이 SIGNED_OUT
+ *    토큰 재발급(회전)은 구분 값을 바꾸지 않으므로 통과한다. 명시적인 null/null(구분 값 쿠키가 없던 기존 세션)은 허용한다
+ * 3. 같은 로그인 세션이면 기존 requireRoleAccess(role): 로그인·토큰·역할 확인 결과(UNAUTHORIZED·FORBIDDEN_ROLE 등)를 그대로 돌려준다
+ * 거부하면 헤더를 주지 않는다 → 호출한 쪽은 백엔드 변경 요청을 보내지 않는다. 권한 판단은 그대로 백엔드가 한다.
+ *
+ * 인증 복구 (같은 화면에 머무는 동안 Access가 만료된 경우): 3에서 Access 쿠키가 없거나(SIGNED_OUT) users/me가 401(UNAUTHORIZED)이고
+ * Refresh 쿠키가 있으면, 기존 재발급 처리(rotateSessionTokens, `/auth/reissue`와 같은 함수)로 두 쿠키를 교체한 뒤
+ * 새 토큰으로 users/me·역할 확인을 다시 한다 (권한 확인을 건너뛰지 않는다). 2를 통과한 같은 세션에서만 하므로 다른 계정 토큰은 회전·삭제하지 않는다.
+ * - Refresh 만료·재사용으로 복구할 수 없으면 쿠키를 정리하고 `/login?reason=expired`로 보낸다 (Server Function 리다이렉트, 변경 요청 0회)
+ * - 일시 장애(네트워크·5xx)는 쿠키를 그대로 두고 거부한다 · 백엔드 변경 API의 401·403은 다시 시도하지 않는다 (이 함수는 변경 요청 전에만 실행된다)
+ * - 쿠키를 쓰므로 Server Function에서만 부른다
+ */
+export async function requireRoleMutationAccess(role: OrganizationRole | "ADMIN", expectedLoginSession: unknown): Promise<RoleMutationAccess> {
+  const sessionChanged = { ok: false, reason: "SESSION_CHANGED", message: SESSION_CHANGED_MESSAGE } as const;
+  if (expectedLoginSession !== null && (typeof expectedLoginSession !== "string" || !LOGIN_SESSION_TAG.test(expectedLoginSession))) {
+    return sessionChanged;
+  }
+  const sameLoginSession = async () => {
+    try {
+      return (await readLoginSessionTag()) === expectedLoginSession;
+    } catch (error) {
+      unstable_rethrow(error);
+      return false;
+    }
+  };
+  if (!(await sameLoginSession())) {
+    // 다른 탭에서 로그아웃해 쿠키가 모두 없어졌으면 계정 전환이 아니라 로그아웃 (기존 SIGNED_OUT 안내 그대로)
+    const signedOut = (await readLoginSessionTag().catch(() => "unreadable")) === null && !(await readAccessTokenPresence()) && (await readRefreshToken()) === null;
+    return signedOut ? { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." } : sessionChanged;
+  }
+  let access = await requireRoleAccess(role);
+  if (!access.ok && (access.reason === "SIGNED_OUT" || access.reason === "UNAUTHORIZED") && (await readRefreshToken()) !== null) {
+    access = await restoreRoleAccess(role);
+  }
+  if (!access.ok) return access;
+  // 확인하는 사이 다른 탭에서 로그인했을 수 있어 한 번 더 비교한다 (회전은 구분 값을 바꾸지 않는다)
+  return (await sameLoginSession()) ? access : sessionChanged;
+}
+
+/**
+ * Refresh 쿠키로 재발급(쿠키 교체)한 뒤 새 Access Token으로 사용자·역할을 다시 확인한다.
+ * 다시 로그인해야 하는 실패(만료·재사용: rotateSessionTokens가 쿠키를 지운다)는 로그인 화면의 만료 안내로 보낸다 (보호 화면의 기존 만료 처리와 같은 주소).
+ * 일시 장애는 재시도할 수 있도록 거부만 한다
+ */
+async function restoreRoleAccess(role: OrganizationRole | "ADMIN"): Promise<RoleAccess> {
+  // reissue.ts가 이 모듈을 쓰므로 순환 참조를 피해 실행할 때 불러온다
+  const { redirectToExpiredLogin, rotateSessionTokens } = await import("./reissue");
+  const restored = await rotateSessionTokens();
+  if (!restored.ok) {
+    if (restored.reloginRequired) redirectToExpiredLogin();
+    return { ok: false, reason: restored.retryable ? "UNVERIFIED" : "UNAUTHORIZED", message: restored.message };
+  }
+  return toRoleAccess(await verifyAccessToken(restored.accessToken), role);
 }
 
 /**

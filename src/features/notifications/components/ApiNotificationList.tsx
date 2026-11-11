@@ -29,7 +29,7 @@ interface ApiNotificationListProps {
  */
 export default function ApiNotificationList({ notifications, page, totalPages, unreadCount: pageUnreadCount }: ApiNotificationListProps) {
   const layoutUnreadCount = useApiNotificationUnread();
-  const { markAsRead, pendingIds, errorMessage, announcement } = useApiNotificationRead("notifications");
+  const { markAsRead, pendingIds, errorMessage, announcement, locked } = useApiNotificationRead("notifications");
 
   return (
     <section
@@ -72,6 +72,7 @@ export default function ApiNotificationList({ notifications, page, totalPages, u
               item={item}
               meta={API_NOTIFICATION_META}
               pending={pendingIds.has(item.id)}
+              locked={locked}
               onMarkAsRead={() => void markAsRead(item)}
             />
           ))}

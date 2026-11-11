@@ -15,7 +15,7 @@ import { toBackendWeek } from "@/features/equipment/operatingHours";
 import type { DailyOperatingHours } from "@/features/equipment/types";
 import { isApiFeature } from "@/lib/api/config";
 import { isApiError } from "@/lib/api/errors";
-import { requireRoleAccess, toRoleAccessFailure, type RoleAccess } from "@/lib/auth/session";
+import { requireRoleAccess, requireRoleMutationAccess, toRoleAccessFailure, type RoleAccess } from "@/lib/auth/session";
 import { addDays, getSeoulNow, getWeekday, type DateKey } from "@/lib/date/seoulDate";
 
 import { API_SEARCH_MAX_LOOKAHEAD_DAYS } from "./apiSearchClient";
@@ -52,7 +52,12 @@ import {
 
 const REQUIRED_FEATURES = ["slots", "equipment"] as const;
 
-export type SlotGenerationFailureReason = SlotGenerateFailureReason | "SIGNED_OUT" | "NOT_AVAILABLE";
+export type SlotGenerationFailureReason =
+  | SlotGenerateFailureReason
+  | "SIGNED_OUT"
+  | "NOT_AVAILABLE"
+  /** 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (장비·운영시간·기존 슬롯 확인과 생성 POST 모두 하지 않음. FORBIDDEN과 구분) */
+  | "SESSION_CHANGED";
 export type SlotGenerationFailure = { ok: false; reason: SlotGenerationFailureReason; message: string; field?: SlotGenerateField | GenerationRangeField };
 
 /** 화면에 보낼 생성 슬롯 (서버 원본 ID·시각 + 서울 표시 시각) */
@@ -90,6 +95,9 @@ function accessFailure(access: Extract<RoleAccess, { ok: false }>): SlotGenerati
     message: failure.reason === "SIGNED_OUT" ? "로그인이 필요합니다. 다시 로그인해 주세요." : failure.reason === "FORBIDDEN" ? "검사기관 계정만 슬롯을 만들 수 있습니다." : failure.message,
   };
 }
+
+/** 다른 탭에서 계정이 바뀌어 생성하지 않았다 (권한 부족 FORBIDDEN과 구분, 결과 불명 아님) */
+const sessionChanged = (message: string): SlotGenerationFailure => ({ ok: false, reason: "SESSION_CHANGED", message });
 
 function fromLoadFailure(error: unknown, action: string, fallback: string): SlotGenerationFailure {
   const failure = toFailure(error, action, fallback);
@@ -158,11 +166,15 @@ function seoulMinute(value: string): string {
   return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
 }
 
-/** 하루치 슬롯 생성. 요청 전 확인을 모두 통과해야 POST한다 (POST는 1회) */
-export async function submitSlotGeneration(input: unknown): Promise<SlotGenerationResult> {
+/**
+ * 하루치 슬롯 생성. 요청 전 확인을 모두 통과해야 POST한다 (POST는 1회).
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값. 역할 확인과 함께 지금 쿠키의 로그인 세션과 비교해,
+ * 다르면 장비·운영시간 확인과 POST 없이 SESSION_CHANGED
+ */
+export async function submitSlotGeneration(input: unknown, expectedLoginSession?: unknown): Promise<SlotGenerationResult> {
   if (!isAvailable()) return NOT_AVAILABLE;
-  const access = await requireRoleAccess("EXAMINING");
-  if (!access.ok) return accessFailure(access);
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
+  if (!access.ok) return access.reason === "SESSION_CHANGED" ? sessionChanged(access.message) : accessFailure(access);
 
   const validation = validateSlotGenerateRequest(input);
   if (!validation.ok) return { ok: false, reason: "INVALID", message: validation.message, field: validation.field };
@@ -290,10 +302,11 @@ async function findDatesWithSlots(
  * - 401·403·네트워크·타임아웃·응답 형식 오류가 나면 남은 날짜는 요청하지 않고 NOT_PROCESSED로 남긴다
  *   타임아웃·연결 끊김·응답 형식 오류 날짜는 UNKNOWN (같은 POST를 자동으로 다시 보내지 않는다)
  */
-export async function submitSlotRangeGeneration(input: unknown): Promise<SlotRangeGenerationResult> {
+/** expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값. 다르면 장비·운영시간·기존 슬롯 확인과 날짜별 POST를 하나도 하지 않는다 */
+export async function submitSlotRangeGeneration(input: unknown, expectedLoginSession?: unknown): Promise<SlotRangeGenerationResult> {
   if (!isAvailable()) return NOT_AVAILABLE;
-  const access = await requireRoleAccess("EXAMINING");
-  if (!access.ok) return accessFailure(access);
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
+  if (!access.ok) return access.reason === "SESSION_CHANGED" ? sessionChanged(access.message) : accessFailure(access);
 
   const data = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   // 장비·검사 유형 ID 확인은 하루 생성과 같은 검증을 쓴다 (날짜 자리에 시작일)

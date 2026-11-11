@@ -109,6 +109,7 @@ export type ExaminationActionResult =
   | { ok: true; message: string }
   | {
       ok: false;
-      reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "NOT_FOUND" | "CONFLICT" | "INVALID" | "NETWORK" | "ERROR";
+      /** SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분) */
+      reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "SESSION_CHANGED" | "NOT_FOUND" | "CONFLICT" | "INVALID" | "NETWORK" | "ERROR";
       message: string;
     };

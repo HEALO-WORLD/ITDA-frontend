@@ -31,10 +31,13 @@ export async function loadSlotGenerationContextAction(equipmentId: unknown): Pro
   return loadSlotGenerationContext(equipmentId);
 }
 
-/** 하루치 슬롯 생성 (POST 1회). 성공하면 화면을 서버 값으로 다시 그린다 */
-export async function generateSlotsAction(input: unknown): Promise<SlotGenerationResult> {
+/**
+ * 하루치 슬롯 생성 (POST 1회). 성공하면 화면을 서버 값으로 다시 그린다.
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값. 다른 탭에서 계정이 바뀌었으면 만들지 않는다 (SESSION_CHANGED)
+ */
+export async function generateSlotsAction(input: unknown, expectedLoginSession?: unknown): Promise<SlotGenerationResult> {
   if (!isSameOriginHeaders(await headers())) return FORBIDDEN_ORIGIN;
-  const result = await submitSlotGeneration(input);
+  const result = await submitSlotGeneration(input, expectedLoginSession);
   if (result.ok || result.reason === "CONFLICT" || result.reason === "NOT_FOUND") refresh();
   return result;
 }
@@ -43,9 +46,9 @@ export async function generateSlotsAction(input: unknown): Promise<SlotGeneratio
  * 기간 슬롯 생성 (운영일마다 하루 생성 POST를 차례로 1회씩). 날짜 하나라도 성공·중복이면 화면을 서버 값으로 다시 그린다.
  * 같은 기간을 다시 보내도 이미 슬롯이 있는 날짜는 서버 조회로 걸러 POST하지 않는다 (generateServer.submitSlotRangeGeneration)
  */
-export async function generateSlotRangeAction(input: unknown): Promise<SlotRangeGenerationResult> {
+export async function generateSlotRangeAction(input: unknown, expectedLoginSession?: unknown): Promise<SlotRangeGenerationResult> {
   if (!isSameOriginHeaders(await headers())) return FORBIDDEN_ORIGIN;
-  const result = await submitSlotRangeGeneration(input);
+  const result = await submitSlotRangeGeneration(input, expectedLoginSession);
   if (result.ok ? result.summary.success > 0 || result.summary.conflict > 0 || result.summary.unknown > 0 : result.reason === "NOT_FOUND") refresh();
   return result;
 }

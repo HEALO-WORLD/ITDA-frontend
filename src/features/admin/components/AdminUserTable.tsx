@@ -4,10 +4,12 @@ import { Search } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 
 import Modal from "@/components/ui/Modal";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { formatDateTime } from "@/lib/format/date";
 
 import { approveUserAction } from "../actions";
 import type { AdminUserDto, AdminUserRoleDto } from "../remote";
+import { markAdminSessionChanged, useAdminSessionChanged } from "../sessionChangeLock";
 import type { AdminActionResult } from "../types";
 
 interface AdminUserTableProps {
@@ -35,6 +37,9 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [outcome, setOutcome] = useState<AdminActionResult | null>(null);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 관리자 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useAdminSessionChanged();
 
   const filtered = useMemo(() => {
     const value = keyword.trim().toLowerCase();
@@ -43,12 +48,14 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
   }, [users, keyword]);
 
   const approve = async () => {
-    if (!target || pendingRef.current) return;
+    if (!target || pendingRef.current || sessionChanged) return;
     pendingRef.current = true;
     setPending(true);
     try {
-      const result = await approveUserAction(target.userId);
+      const result = await approveUserAction(target.userId, renderedLoginSession);
       setOutcome(result);
+      // 다른 탭에서 계정이 바뀌었으면 창을 그대로 두고 이 화면의 관리자 변경 버튼을 모두 잠근다 (다시 시도·목록 갱신 없음)
+      if (!result.ok && result.reason === "SESSION_CHANGED") markAdminSessionChanged();
       if (result.ok || result.reason === "CONFLICT" || result.reason === "NOT_FOUND") setTarget(null);
     } catch {
       setOutcome({ ok: false, reason: "NETWORK", message: NETWORK_ERROR_MESSAGE });
@@ -173,7 +180,7 @@ export default function AdminUserTable({ users, tab }: AdminUserTableProps) {
                 type="button"
                 data-autofocus
                 onClick={approve}
-                disabled={pending}
+                disabled={pending || sessionChanged}
                 className="inline-flex h-10 items-center justify-center gap-1.5 rounded-lg bg-primary px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {pending ? "승인 중…" : "승인"}

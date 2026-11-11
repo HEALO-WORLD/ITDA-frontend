@@ -43,8 +43,13 @@ const responseFor = (body: Record<string, unknown>, overrides: Record<string, un
   ...overrides,
 });
 
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
+
 const state = {
   access: okAccess as Access,
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
   equipments: [{ id: EQUIPMENT, institutionId: ORG, name: "MRI-1", modality: "MRI", status: "OPERATIONAL" }] as unknown[] | Error,
   post: ((body: Record<string, unknown>) => responseFor(body)) as ((body: Record<string, unknown>) => unknown) | Error,
   incidentPage: { contents: [], totalElements: 0, totalPages: 0, size: 10, number: 0 } as unknown,
@@ -56,6 +61,7 @@ const state = {
 
 function reset() {
   state.access = okAccess;
+  state.loginSession = LOGIN;
   state.equipments = [{ id: EQUIPMENT, institutionId: ORG, name: "MRI-1", modality: "MRI", status: "OPERATIONAL" }];
   state.post = (body) => responseFor(body);
   state.incidentPage = { contents: [], totalElements: 0, totalPages: 0, size: 10, number: 0 };
@@ -89,6 +95,14 @@ before(async () => {
       requireRoleAccess: async (role: string) => {
         state.order.push(`users/me:${role}`);
         return state.access;
+      },
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        state.order.push(`users/me:${role}`);
+        if (!state.access.ok) return state.access;
+        return expected === state.loginSession ? state.access : changed;
       },
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({
         reason: access.reason === "SIGNED_OUT" ? "SIGNED_OUT" : access.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "FORBIDDEN",
@@ -325,7 +339,7 @@ describe("getDowntimeCreateFailure", () => {
 
 describe("submitEquipmentDowntime", () => {
   it("성공: users/me → 장비 목록 → POST 1회, +09:00 본문, 기관·역할 헤더 없음", async () => {
-    const result = await server.submitEquipmentDowntime(form());
+    const result = await server.submitEquipmentDowntime(form(), LOGIN);
     assert.equal(result.ok, true);
     assert.deepEqual(state.order, ["users/me:EXAMINING", `equipments:${ORG}`, "POST /api/v1/equipment-downtimes"]);
     const [call] = posts();
@@ -351,7 +365,7 @@ describe("submitEquipmentDowntime", () => {
       if (value === undefined) delete process.env.NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION;
       else process.env.NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION = value;
       assert.equal(config.isDowntimeRegistrationEnabled(), false);
-      const result = await server.submitEquipmentDowntime(form());
+      const result = await server.submitEquipmentDowntime(form(), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, "NOT_AVAILABLE");
     }
@@ -365,7 +379,7 @@ describe("submitEquipmentDowntime", () => {
     for (const [reason, expected] of [["SIGNED_OUT", "SIGNED_OUT"], ["UNAUTHORIZED", "UNAUTHORIZED"], ["FORBIDDEN_ROLE", "FORBIDDEN"]] as const) {
       reset();
       state.access = { ok: false, reason, message: "x" };
-      const result = await server.submitEquipmentDowntime(form());
+      const result = await server.submitEquipmentDowntime(form(), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, expected);
       assert.deepEqual(state.order, ["users/me:EXAMINING"]);
@@ -374,7 +388,7 @@ describe("submitEquipmentDowntime", () => {
 
   it("장비 목록 조회 실패면 등록하지 않는다 (임의 장비 ID로 보내지 않음)", async () => {
     state.equipments = new ApiError("NETWORK", "x");
-    const result = await quiet(() => server.submitEquipmentDowntime(form()));
+    const result = await quiet(() => server.submitEquipmentDowntime(form(), LOGIN));
     assert.equal(result.ok, false);
     if (!result.ok) assert.equal(result.reason, "EQUIPMENT_LOOKUP_FAILED");
     assert.equal(posts().length, 0);
@@ -395,7 +409,7 @@ describe("submitEquipmentDowntime", () => {
       [{ reason: "a".repeat(501) }, "reason"],
     ];
     for (const [override, field] of cases) {
-      const result = await server.submitEquipmentDowntime(form(override));
+      const result = await server.submitEquipmentDowntime(form(override), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(result.reason, "INVALID_INPUT");
@@ -403,7 +417,7 @@ describe("submitEquipmentDowntime", () => {
       }
     }
     assert.equal(posts().length, 0);
-    assert.equal((await server.submitEquipmentDowntime(null)).ok, false);
+    assert.equal((await server.submitEquipmentDowntime(null, LOGIN)).ok, false);
     assert.equal(posts().length, 0);
   });
 
@@ -423,7 +437,7 @@ describe("submitEquipmentDowntime", () => {
   for (const [label, error, reason, uncertain] of postFailures) {
     it(`POST ${label} → ${reason}${uncertain ? " (결과 불명, 재전송 없음)" : ""}`, async () => {
       state.post = error as Error;
-      const result = await quiet(() => server.submitEquipmentDowntime(form()));
+      const result = await quiet(() => server.submitEquipmentDowntime(form(), LOGIN));
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(result.reason, reason);
@@ -436,9 +450,9 @@ describe("submitEquipmentDowntime", () => {
   it("같은 사용자·장비 요청이 처리 중이면 두 번째는 POST하지 않는다", async () => {
     let release: () => void = () => {};
     state.post = (body) => new Promise((resolve) => (release = () => resolve(responseFor(body))));
-    const first = server.submitEquipmentDowntime(form());
+    const first = server.submitEquipmentDowntime(form(), LOGIN);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const second = await server.submitEquipmentDowntime(form({ equipmentId: EQUIPMENT.toUpperCase() }));
+    const second = await server.submitEquipmentDowntime(form({ equipmentId: EQUIPMENT.toUpperCase() }), LOGIN);
     assert.equal(second.ok, false);
     if (!second.ok) {
       assert.equal(second.reason, "IN_PROGRESS");
@@ -448,7 +462,7 @@ describe("submitEquipmentDowntime", () => {
     assert.equal((await first).ok, true);
     assert.equal(posts().length, 1);
     state.post = (body) => responseFor(body);
-    assert.equal((await server.submitEquipmentDowntime(form())).ok, true);
+    assert.equal((await server.submitEquipmentDowntime(form(), LOGIN)).ok, true);
     assert.equal(posts().length, 2);
   });
 });
@@ -458,14 +472,14 @@ describe("submitEquipmentDowntime", () => {
 describe("registerEquipmentDowntimeAction", () => {
   it("다른 출처 요청은 아무것도 하지 않는다", async () => {
     state.sameOrigin = false;
-    const result = await actions.registerEquipmentDowntimeAction(form());
+    const result = await actions.registerEquipmentDowntimeAction(form(), LOGIN);
     assert.equal(result.ok, false);
     assert.deepEqual(state.order, []);
     assert.equal(state.refreshCount, 0);
   });
 
   it("성공·결과 불명·409 겹침이면 화면을 다시 불러오고, 입력 오류·403은 그대로 둔다", async () => {
-    assert.equal((await actions.registerEquipmentDowntimeAction(form())).ok, true);
+    assert.equal((await actions.registerEquipmentDowntimeAction(form(), LOGIN)).ok, true);
     assert.equal(state.refreshCount, 1);
     for (const [error, refreshed] of [
       [new ApiError("TIMEOUT", "x"), true],
@@ -474,16 +488,16 @@ describe("registerEquipmentDowntimeAction", () => {
     ] as const) {
       reset();
       state.post = error;
-      await quiet(() => actions.registerEquipmentDowntimeAction(form()));
+      await quiet(() => actions.registerEquipmentDowntimeAction(form(), LOGIN));
       assert.equal(state.refreshCount, refreshed ? 1 : 0, `${(error as ApiError).kind} ${(error as ApiError).code ?? ""}`);
     }
     reset();
-    await actions.registerEquipmentDowntimeAction(form({ reason: "" }));
+    await actions.registerEquipmentDowntimeAction(form({ reason: "" }), LOGIN);
     assert.equal(state.refreshCount, 0);
   });
 
   it("Kafka 후속 처리 전: 등록 성공 뒤 장애 목록이 비어 있어도 목록 조회는 그대로 동작한다 (임의로 채우지 않음)", async () => {
-    const created = await actions.registerEquipmentDowntimeAction(form());
+    const created = await actions.registerEquipmentDowntimeAction(form(), LOGIN);
     assert.equal(created.ok, true);
     const list = await incidentServer.loadIncidentPage(0);
     assert.equal(list.ok, true);
@@ -924,7 +938,7 @@ describe("startIncidentPoller (2초 간격·최대 30초)", () => {
 
 describe("findRegisteredIncident / checkRegisteredIncidentAction", () => {
   const matchFromSubmit = async () => {
-    const created = await server.submitEquipmentDowntime(form());
+    const created = await server.submitEquipmentDowntime(form(), LOGIN);
     assert.equal(created.ok, true);
     if (!created.ok || !created.match) throw new Error("no match");
     reset();
@@ -947,7 +961,7 @@ describe("findRegisteredIncident / checkRegisteredIncidentAction", () => {
   };
 
   it("등록 성공 결과에 응답 원본으로 만든 확인 값(서울 LocalDateTime)을 담는다", async () => {
-    const created = await server.submitEquipmentDowntime(form());
+    const created = await server.submitEquipmentDowntime(form(), LOGIN);
     assert.equal(created.ok, true);
     if (created.ok) {
       assert.equal(created.match?.equipmentId, EQUIPMENT);
@@ -1014,5 +1028,60 @@ describe("findRegisteredIncident / checkRegisteredIncidentAction", () => {
     const result = await actions.checkRegisteredIncidentAction(match);
     assert.equal(result.ok, false);
     assert.equal(state.calls.length, 0);
+  });
+});
+
+describe("장비 장애 등록: 로그인 세션 정합성 (STEP 3-2-2B-4)", () => {
+  const SESSION_CHANGED = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+
+  it("화면을 그린 뒤 다른 탭에서 계정이 바뀌면 SESSION_CHANGED: 우리 기관 장비 확인·등록 POST 0회, 목록 다시 그리지 않음", async () => {
+    state.loginSession = "loginSessionTagB";
+    assert.deepEqual(await server.submitEquipmentDowntime(form(), LOGIN), SESSION_CHANGED);
+    assert.deepEqual(state.order, ["users/me:EXAMINING"], "장비 목록 사전 조회도 하지 않음");
+    assert.equal(posts().length, 0);
+    assert.deepEqual(await actions.registerEquipmentDowntimeAction(form(), LOGIN), SESSION_CHANGED);
+    assert.equal(posts().length, 0);
+    assert.equal(state.refreshCount, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 거부한다", async () => {
+    assert.equal(((await server.submitEquipmentDowntime(form())) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(((await actions.registerEquipmentDowntimeAction(form())) as { reason: string }).reason, "SESSION_CHANGED");
+    assert.equal(posts().length, 0);
+  });
+
+  it("세션이 같으면 기존 순서 그대로 (users/me → 장비 목록 → POST 1회)", async () => {
+    const result = await server.submitEquipmentDowntime(form(), LOGIN);
+    assert.equal(result.ok, true);
+    assert.deepEqual(state.order, ["users/me:EXAMINING", `equipments:${ORG}`, "POST /api/v1/equipment-downtimes"]);
+  });
+
+  it("SESSION_CHANGED 뒤 처리 중 표시가 남지 않는다 (같은 세션에서는 다시 등록 가능)", async () => {
+    state.loginSession = "loginSessionTagB";
+    await server.submitEquipmentDowntime(form(), LOGIN);
+    state.loginSession = LOGIN;
+    assert.equal((await server.submitEquipmentDowntime(form(), LOGIN)).ok, true);
+    assert.equal(posts().length, 1);
+  });
+
+  it("화면: SESSION_CHANGED면 [장애 등록] 비활성·입력 잠금(값은 그대로)·전용 안내, 렌더링 세션을 Action에 보낸다", async () => {
+    const { DowntimeRegisterActions, DowntimeRegisterForm } = registerModule;
+    const failure = { ok: false as const, reason: "SESSION_CHANGED" as const, message: SESSION_CHANGED.message };
+    const actionsHtml = renderToStaticMarkup(DowntimeRegisterActions({ pending: false, failure, onCancel: () => {} }));
+    assert.match(actionsHtml, /<button type="submit"[^>]*disabled=""[^>]*>장애 등록<\/button>/);
+    assert.match(actionsHtml, />취소<\/button>/);
+    const formHtml = renderToStaticMarkup(
+      createElement(DowntimeRegisterForm, { equipments: [{ id: EQUIPMENT, name: "MRI-1", modality: "MRI" }], pending: false, failure, onSubmit: () => {} }),
+    );
+    assert.match(formHtml, /<fieldset disabled=""/);
+    assert.match(formHtml, /role="alert" class="[^"]*bg-red-50[^"]*"/, "결과 불명(노란색)이 아닌 실패 안내");
+    assert.ok(formHtml.includes(SESSION_CHANGED.message));
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync("src/features/incidents/components/IncidentDowntimeRegister.tsx", "utf8");
+    assert.match(source, /const renderedLoginSession = useRenderedLoginSession\(\);/);
+    assert.match(source, /registerEquipmentDowntimeAction\(input, renderedLoginSession\)/);
+    assert.match(source, /if \(runningRef\.current \|\| sessionChanged\) return;/);
+    assert.match(source, /disabled=\{pending \|\| unavailable !== null \|\| sessionChanged\}/);
+    assert.doesNotMatch(source, /\/auth\/session/);
   });
 });

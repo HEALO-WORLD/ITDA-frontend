@@ -7,7 +7,7 @@ import { unstable_rethrow } from "next/navigation";
 import { isApiFeature } from "@/lib/api/config";
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess } from "@/lib/auth/session";
+import { requireRoleMutationAccess } from "@/lib/auth/session";
 
 import {
   cancelReservation,
@@ -27,6 +27,7 @@ import { isReservationCancelTarget, isSameCancelTarget } from "./reservationCanc
  * 브라우저에서는 의뢰 ID와 "사용자가 확인한 예약의 표식"(시도 번호·검사 시작·종료 시각)만 받는다.
  * 예약 ID는 브라우저로 보내지 않는 기존 설계(server.ts: 내부 ID 비노출)를 유지하고, 서버가 의뢰를 다시 조회해 현재 예약을 찾는다.
  * 1. 같은 출처 확인 → referrals 기능이 API 대상인지 → users/me로 의뢰기관(REQUESTER) 역할 확인 (ADMIN·EXAMINER는 요청 전 차단)
+ *    → 화면이 렌더링된 로그인 세션과 지금 쿠키의 로그인 세션 비교 (다른 탭에서 계정이 바뀌었으면 SESSION_CHANGED, 요청하지 않음)
  * 2. 입력 형식 확인 → 의뢰 재조회 → 현재 예약 재조회
  * 3. 대상 동일성: 예약이 이 의뢰의 것이고, 의뢰·예약이 모두 CONFIRMED이고, 시도 번호·시각이 확인한 값과 같아야 한다.
  *    다르면(대화상자를 연 뒤 재조정·취소·상태 변경) 취소 API를 부르지 않고 STALE로 돌려준다 → 화면이 최신 상세를 다시 불러온다
@@ -51,6 +52,8 @@ export type ReservationCancelActionResult =
         | "UNAUTHORIZED"
         /** 의뢰기관 역할이 아니거나 사용자 확인 실패, 또는 Gateway 403 */
         | "FORBIDDEN"
+        /** 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함) 또는 렌더링 세션 값 누락·형식 오류 (요청하지 않음) */
+        | "SESSION_CHANGED"
         /** 의뢰 ID·대상 표식 형식 오류 (요청하지 않음) */
         | "INVALID_INPUT"
         /** 같은 의뢰의 취소를 이 서버가 이미 처리 중 (요청하지 않음) */
@@ -83,14 +86,17 @@ const STALE_MESSAGE = "예약 정보가 바뀌어 취소하지 않았습니다. 
  */
 const inFlightReferrals = new Set<string>();
 
-export async function cancelReservationAction(referralId: unknown, target: unknown): Promise<ReservationCancelActionResult> {
+/** expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (LoginSessionContext). 지금 쿠키 값과 다르면 취소하지 않는다 */
+export async function cancelReservationAction(referralId: unknown, target: unknown, expectedLoginSession?: unknown): Promise<ReservationCancelActionResult> {
   if (!isSameOriginHeaders(await headers())) {
     return { ok: false, reason: "FORBIDDEN_ORIGIN", message: "허용되지 않은 요청입니다. 화면을 새로고침해 주세요.", code: null };
   }
   // 기능 확인을 인증보다 먼저 한다: Mock 모드에서 '로그인 필요'가 아니라 '준비 중'으로 안내한다 (둘 다 요청 없음)
   if (!isApiFeature("referrals")) return { ok: false, reason: "NOT_AVAILABLE", message: "예약 취소 기능은 준비 중입니다.", code: null };
-  const access = await requireRoleAccess("REFERRING");
+  const access = await requireRoleMutationAccess("REFERRING", expectedLoginSession);
   if (!access.ok) {
+    // 다른 계정 쿠키로 바뀐 화면: 목록을 다시 그리지 않고(새 계정 데이터를 섞지 않음) 새로고침 안내만 한다
+    if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message, code: "SESSION_CHANGED" };
     if (access.reason === "SIGNED_OUT") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다. 다시 로그인해 주세요.", code: null };
     if (access.reason === "UNAUTHORIZED") return { ok: false, reason: "UNAUTHORIZED", message: UNAUTHORIZED_MESSAGE, code: null };
     return { ok: false, reason: "FORBIDDEN", message: access.message, code: null };

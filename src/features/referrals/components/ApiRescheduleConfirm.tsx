@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from "react";
 
 import Modal from "@/components/ui/Modal";
 import { ROUTES } from "@/constants/navigation";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import type { ApiExamSlot } from "@/features/slots/apiSlots";
 import type { PartnerOrganization } from "@/features/slots/types";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
@@ -43,6 +44,8 @@ const AUTO_CHECK_DELAYS_MS = [2_000, 5_000, 10_000];
 
 /** 요청 실패 → 화면 단계 (409·404·권한·만료는 확실한 실패, 네트워크·응답 형식·5xx·중복 처리 중은 결과 불명) */
 export function toRequestFailurePhase(result: RequestFailure): Extract<Phase, { kind: "FAILED" | "UNCERTAIN" }> {
+  // 다른 탭에서 계정이 바뀌어 서버가 요청하지 않았다 (확실한 실패): 전용 안내, 같은 화면에서 다시 요청하지 않는다
+  if (result.reason === "SESSION_CHANGED") return { kind: "FAILED", message: result.message, showList: false };
   if (result.reason === "DUPLICATE_REQUEST") return { kind: "UNCERTAIN", message: result.message };
   if (result.reason === "REQUEST_FAILED" && result.request && UNCERTAIN_CAUSES.has(result.request.cause)) {
     return { kind: "UNCERTAIN", message: UNCERTAIN_MESSAGE };
@@ -262,6 +265,8 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
   const [progress, setProgress] = useState<ProgressResult | null>(null);
   const [progressLoading, setProgressLoading] = useState(false);
   const submittingRef = useRef(false);
+  /** 이 화면이 렌더링된 로그인 세션 (SessionGuard 제공). 재조정 요청에 함께 보낸다 */
+  const renderedLoginSession = useRenderedLoginSession();
   const inlineHeadingRef = useRef<HTMLHeadingElement>(null);
   // inline: 3단계로 넘어오면 단계 제목으로 포커스 (모달 안에서 화면이 바뀐 것을 알린다)
   useEffect(() => {
@@ -322,7 +327,8 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
     onBusyChange(true);
     let result: RequestResult;
     try {
-      result = await requestRescheduleAction(target.referralId, slotId);
+      // 렌더링 시점 로그인 세션을 함께 보낸다 (다른 탭에서 계정이 바뀌었으면 서버가 요청하지 않는다)
+      result = await requestRescheduleAction(target.referralId, slotId, renderedLoginSession);
     } catch {
       result = { ok: false, reason: "REQUEST_FAILED", message: UNCERTAIN_MESSAGE, request: { cause: "NETWORK", status: null, code: null } };
     } finally {

@@ -39,7 +39,7 @@ export default function ExaminingApiNotificationBoard({
   const pathname = usePathname();
   const [isFilterPending, startFilterTransition] = useTransition();
   const unreadCount = useApiNotificationUnread();
-  const { markAsRead, pendingIds, errorMessage, announcement } = useApiNotificationRead("examining-notifications");
+  const { markAsRead, pendingIds, errorMessage, announcement, locked } = useApiNotificationRead("examining-notifications");
   const listTitleRef = useRef<HTMLHeadingElement>(null);
 
   const changeFilter = (nextUnreadOnly: boolean) => {
@@ -156,6 +156,7 @@ export default function ExaminingApiNotificationBoard({
                 meta={API_NOTIFICATION_META}
                 link={null}
                 pending={pendingIds.has(item.id)}
+                locked={locked}
                 onMarkAsRead={() => void handleMarkAsRead(item)}
               />
             ))}

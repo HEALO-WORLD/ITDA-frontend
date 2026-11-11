@@ -158,7 +158,21 @@ describe("의뢰 생성 ↔ 재조정 분리", () => {
   it("기존 재조정 Server Function(checkRescheduleCandidateAction·requestRescheduleAction)이 그대로 있다", () => {
     const source = readFileSync("src/features/referrals/rescheduleActions.ts", "utf8");
     assert.match(source, /export async function checkRescheduleCandidateAction\(referralId: unknown, slotId: unknown\)/);
-    assert.match(source, /export async function requestRescheduleAction\(referralId: unknown, slotId: unknown\)/);
+    // STEP 3-2-2B-1: 렌더링 시점 로그인 세션(expectedLoginSession)을 마지막 인자로 받는다
+    assert.match(source, /export async function requestRescheduleAction\(referralId: unknown, slotId: unknown, expectedLoginSession\?: unknown\)/);
     assert.match(source, /\/api\/v1\/referrals|requestReschedule\(/);
+  });
+
+  it("의뢰 생성은 렌더링 시점 로그인 세션을 함께 보내고, SESSION_CHANGED면 입력·요청을 잠근다 (STEP 3-2-2B-2)", () => {
+    const action = readFileSync("src/features/referrals/createActions.ts", "utf8");
+    assert.match(action, /export async function createReferralAction\(input: unknown, expectedLoginSession\?: unknown\)/);
+    assert.match(action, /submitCreateReferral\(input, expectedLoginSession\)/);
+    const form = readFileSync("src/features/referrals/components/ApiReferralCreateForm.tsx", "utf8");
+    assert.match(form, /const renderedLoginSession = useRenderedLoginSession\(\);/);
+    assert.match(form, /createReferralAction\(\{ \.\.\.content, idempotencyKey, confirmExisting: tracker\.isLocked \}, renderedLoginSession\)/);
+    assert.match(form, /const sessionChanged = failure\?\.reason === "SESSION_CHANGED";/);
+    assert.match(form, /if \(lock\.running \|\| created \|\| sessionChanged\) return;/);
+    assert.match(form, /type="submit"\s+disabled=\{pending \|\| sessionChanged\}/);
+    assert.doesNotMatch(form, /\/auth\/session/);
   });
 });

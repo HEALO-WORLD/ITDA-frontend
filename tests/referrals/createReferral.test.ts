@@ -65,8 +65,13 @@ const reservationDto = (overrides: Record<string, unknown> = {}) => ({
 
 type Call = { path: string; method: string; body?: unknown; headers?: HeadersInit };
 
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
+
 const state = {
   access: okAccess as Access,
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
   slot: baseSlot() as Record<string, unknown> | Error,
   equipment: { id: EQUIPMENT, institutionId: EXAM_ORG, status: "OPERATIONAL" } as Record<string, unknown> | Error,
   partnerships: [{ partnerInstitutionId: EXAM_ORG, partnerInstitutionType: "EXAM", status: "ACTIVE" }] as unknown[] | Error,
@@ -80,6 +85,7 @@ const state = {
 
 function reset() {
   state.access = okAccess;
+  state.loginSession = LOGIN;
   state.slot = baseSlot();
   state.equipment = { id: EQUIPMENT, institutionId: EXAM_ORG, status: "OPERATIONAL" };
   state.partnerships = [{ partnerInstitutionId: EXAM_ORG, partnerInstitutionType: "EXAM", status: "ACTIVE" }];
@@ -107,6 +113,14 @@ before(async () => {
       requireRoleAccess: async (role: string) => {
         state.order.push(`users/me:${role}`);
         return state.access;
+      },
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        state.order.push(`users/me:${role}`);
+        if (!state.access.ok) return state.access;
+        return expected === state.loginSession ? state.access : changed;
       },
     },
   });
@@ -306,7 +320,7 @@ describe("getCreateReferralFailure", () => {
 
 describe("submitCreateReferral", () => {
   it("성공: users/me → 슬롯 → 장비 → 협약 → POST 1회, 서버 값으로 본문을 만든다", async () => {
-    const result = await server.submitCreateReferral(validInput({ patientName: " 홍길동 " }));
+    const result = await server.submitCreateReferral(validInput({ patientName: " 홍길동 " }), LOGIN);
     assert.equal(result.ok, true);
     assert.deepEqual(state.order, [
       "users/me:REFERRING",
@@ -347,7 +361,7 @@ describe("submitCreateReferral", () => {
     ]) {
       reset();
       state.slot = { ...baseSlot(), startsAt, endsAt };
-      const result = await server.submitCreateReferral(validInput());
+      const result = await server.submitCreateReferral(validInput(), LOGIN);
       assert.equal(result.ok, true, startsAt);
       const body = posts()[0].body as { reservation: { startTime: string; endTime: string; examDate: string } };
       assert.equal(body.reservation.startTime, "2099-01-10T10:00:00");
@@ -360,7 +374,7 @@ describe("submitCreateReferral", () => {
     for (const [reason, expected] of [["SIGNED_OUT", "SIGNED_OUT"], ["UNAUTHORIZED", "UNAUTHORIZED"], ["FORBIDDEN", "FORBIDDEN"]] as const) {
       reset();
       state.access = { ok: false, reason, message: "x" };
-      const result = await server.submitCreateReferral(validInput());
+      const result = await server.submitCreateReferral(validInput(), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, expected);
       assert.deepEqual(state.order, ["users/me:REFERRING"]);
@@ -370,7 +384,7 @@ describe("submitCreateReferral", () => {
   it("입력 오류는 조회·POST 없이 거절한다", async () => {
     for (const input of [validInput({ slotId: "x" }), validInput({ examTypeId: 1 }), validInput({ patientName: "" }), validInput({ idempotencyKey: "k" }), null]) {
       reset();
-      const result = await server.submitCreateReferral(input);
+      const result = await server.submitCreateReferral(input, LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, "INVALID_INPUT");
       assert.deepEqual(state.order, ["users/me:REFERRING"]);
@@ -395,7 +409,7 @@ describe("submitCreateReferral", () => {
   for (const [label, arrange, reason] of rejectCases) {
     it(`${label} → ${reason}, POST 없음`, async () => {
       arrange();
-      const result = await server.submitCreateReferral(validInput());
+      const result = await server.submitCreateReferral(validInput(), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) {
         assert.equal(result.reason, reason);
@@ -424,7 +438,7 @@ describe("submitCreateReferral", () => {
       const originalError = console.error;
       console.error = () => {};
       try {
-        const result = await server.submitCreateReferral(validInput());
+        const result = await server.submitCreateReferral(validInput(), LOGIN);
         assert.equal(result.ok, false);
         if (!result.ok) {
           assert.equal(result.reason, reason);
@@ -440,9 +454,9 @@ describe("submitCreateReferral", () => {
   it("같은 멱등 키 요청이 처리 중이면 두 번째는 POST하지 않는다 (IN_PROGRESS, 결과 불명)", async () => {
     let release: (value: unknown) => void = () => {};
     state.post = (body) => new Promise((resolve) => (release = () => resolve(referralDto({ patientName: body.patientName }))));
-    const first = server.submitCreateReferral(validInput());
+    const first = server.submitCreateReferral(validInput(), LOGIN);
     await new Promise((resolve) => setTimeout(resolve, 0));
-    const second = await server.submitCreateReferral(validInput({ idempotencyKey: KEY.toUpperCase() }));
+    const second = await server.submitCreateReferral(validInput({ idempotencyKey: KEY.toUpperCase() }), LOGIN);
     assert.equal(second.ok, false);
     if (!second.ok) {
       assert.equal(second.reason, "IN_PROGRESS");
@@ -453,7 +467,7 @@ describe("submitCreateReferral", () => {
     assert.equal(posts().length, 1);
     state.post = (body) => referralDto({ patientName: body.patientName });
     // 처리가 끝나면 같은 키로 다시 보낼 수 있다
-    assert.equal((await server.submitCreateReferral(validInput())).ok, true);
+    assert.equal((await server.submitCreateReferral(validInput(), LOGIN)).ok, true);
     assert.equal(posts().length, 2);
   });
 
@@ -461,19 +475,19 @@ describe("submitCreateReferral", () => {
     for (const status of ["HELD", "BOOKED"]) {
       reset();
       state.slot = { ...baseSlot(), status };
-      const result = await server.submitCreateReferral(validInput({ confirmExisting: true }));
+      const result = await server.submitCreateReferral(validInput({ confirmExisting: true }), LOGIN);
       assert.equal(result.ok, true, status);
       assert.equal((posts()[0].body as { idempotencyKey: string }).idempotencyKey, KEY);
     }
     reset();
     state.slot = { ...baseSlot(), status: "UNAVAILABLE" };
-    const blocked = await server.submitCreateReferral(validInput({ confirmExisting: true }));
+    const blocked = await server.submitCreateReferral(validInput({ confirmExisting: true }), LOGIN);
     assert.equal(blocked.ok, false);
     assert.equal(posts().length, 0);
     // confirmExisting는 true일 때만 (문자열 등은 무시)
     reset();
     state.slot = { ...baseSlot(), status: "HELD" };
-    const notConfirm = await server.submitCreateReferral(validInput({ confirmExisting: "true" }));
+    const notConfirm = await server.submitCreateReferral(validInput({ confirmExisting: "true" }), LOGIN);
     assert.equal(notConfirm.ok, false);
     assert.equal(posts().length, 0);
   });
@@ -481,7 +495,7 @@ describe("submitCreateReferral", () => {
   it("referrals 기능이 API 대상이 아니면 아무 요청도 하지 않는다", async () => {
     process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment,partnerships";
     try {
-      const result = await server.submitCreateReferral(validInput());
+      const result = await server.submitCreateReferral(validInput(), LOGIN);
       assert.equal(result.ok, false);
       if (!result.ok) assert.equal(result.reason, "NOT_AVAILABLE");
       assert.deepEqual(state.order, []);
@@ -599,3 +613,53 @@ async function withReferralError(error: Error) {
     Object.defineProperty(state, "referral", descriptor);
   }
 }
+
+describe("submitCreateReferral: 로그인 세션 정합성 (STEP 3-2-2B-2)", () => {
+  it("화면을 그린 뒤 다른 탭에서 계정이 바뀌면 SESSION_CHANGED: 슬롯·장비·협약 재확인과 POST 0회", async () => {
+    state.loginSession = "loginSessionTagB";
+    const result = await server.submitCreateReferral(validInput(), LOGIN);
+    assert.deepEqual(result, { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." });
+    assert.equal(posts().length, 0);
+    assert.equal(state.calls.length, 0, "조회도 하지 않음");
+  });
+
+  it("결과 불명 뒤 같은 키 재확인(confirmExisting)도 계정이 바뀌었으면 보내지 않는다", async () => {
+    state.loginSession = "loginSessionTagB";
+    const result = await server.submitCreateReferral(validInput({ confirmExisting: true }), LOGIN);
+    assert.equal(!result.ok && result.reason, "SESSION_CHANGED");
+    assert.equal(!result.ok && result.uncertain, undefined, "결과 불명이 아니므로 같은 키 재확인을 유도하지 않음");
+    assert.equal(posts().length, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 거부한다", async () => {
+    const result = await server.submitCreateReferral(validInput());
+    assert.equal(!result.ok && result.reason, "SESSION_CHANGED");
+    assert.equal(posts().length, 0);
+  });
+
+  it("세션이 같으면 기존 흐름 그대로 POST 1회, 멱등 키는 그대로 전달", async () => {
+    const result = await server.submitCreateReferral(validInput(), LOGIN);
+    assert.equal(result.ok, true);
+    assert.equal(posts().length, 1);
+    assert.equal((posts()[0].body as { idempotencyKey: string }).idempotencyKey, KEY);
+  });
+
+  it("기존 인증·권한 실패는 그대로 구분 (SESSION_CHANGED로 덮지 않음)", async () => {
+    state.access = { ok: false, reason: "UNAUTHORIZED", message: "만료" };
+    const unauthorized = await server.submitCreateReferral(validInput(), LOGIN);
+    assert.equal(!unauthorized.ok && unauthorized.reason, "UNAUTHORIZED");
+    reset();
+    state.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "권한 없음" };
+    const forbidden = await server.submitCreateReferral(validInput(), LOGIN);
+    assert.equal(!forbidden.ok && forbidden.reason, "FORBIDDEN");
+    assert.equal(posts().length, 0);
+  });
+
+  it("SESSION_CHANGED 뒤 같은 키의 처리 중 표시가 남지 않는다 (같은 세션에서는 다시 요청 가능)", async () => {
+    state.loginSession = "loginSessionTagB";
+    await server.submitCreateReferral(validInput(), LOGIN);
+    state.loginSession = LOGIN;
+    assert.equal((await server.submitCreateReferral(validInput(), LOGIN)).ok, true);
+    assert.equal(posts().length, 1);
+  });
+});

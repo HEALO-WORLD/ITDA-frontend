@@ -136,3 +136,19 @@ describe("Mock 화면 회귀", () => {
     assert.equal(mockWorkspace.includes("ApiSlotGenerationDialog"), false);
   });
 });
+
+describe("슬롯 생성 화면: 로그인 세션 정합성 (STEP 3-2-2B-5)", () => {
+  it("렌더링 시점 로그인 세션을 기간 생성 Action에 보내고, SESSION_CHANGED면 안내를 남기고 생성 버튼을 잠근다 (입력값 유지·재조회 없음)", () => {
+    const source = readFileSync(new URL("../../src/features/equipment/components/ApiSlotGenerationDialog.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /const renderedLoginSession = useRenderedLoginSession\(\);/);
+    assert.match(source, /generateSlotRangeAction\(\{ equipmentId, examTypeId, startDate, endDate \}, renderedLoginSession\)/);
+    assert.match(source, /if \(next\.reason === "SESSION_CHANGED"\) \{\s*setSessionChangedMessage\(next\.message\);\s*return;\s*\}/, "목록·장비 정보를 다시 불러오지 않는다");
+    assert.match(source, /&& !sessionChangedMessage;/, "생성 버튼 잠금 (canSubmit)");
+    assert.match(source, /if \(lock\.running \|\| !canSubmit \|\| sessionChangedMessage\) return;/);
+    assert.match(source, /\{\(sessionChangedMessage \?\? error\) && \(/);
+    // 장비를 바꿔도 안내·잠금은 남는다 (changeEquipment는 error만 지운다)
+    const change = source.slice(source.indexOf("const changeEquipment"), source.indexOf("const submit"));
+    assert.equal(change.includes("setSessionChangedMessage"), false);
+    assert.doesNotMatch(source, /\/auth\/session/);
+  });
+});

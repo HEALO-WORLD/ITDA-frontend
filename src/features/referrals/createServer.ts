@@ -8,7 +8,7 @@ import { compareInstants, instantFromEpochMilli, parseOffsetDateTime } from "@/f
 import { fetchSlotDetail, isSlotApiId } from "@/features/slots/remote";
 import { isApiFeature } from "@/lib/api/config";
 import { isApiError } from "@/lib/api/errors";
-import { requireRoleAccess } from "@/lib/auth/session";
+import { requireRoleAccess, requireRoleMutationAccess } from "@/lib/auth/session";
 
 import {
   CREATE_REFERRAL_UNCERTAIN,
@@ -45,6 +45,8 @@ export type CreateReferralActionFailureReason =
   | "SIGNED_OUT"
   | "INVALID_INPUT"
   | "IN_PROGRESS"
+  /** 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (조회·POST 모두 하지 않음. 역할 거부 FORBIDDEN과 구분) */
+  | "SESSION_CHANGED"
   /** 슬롯이 AVAILABLE이 아님 (이미 선점·예약됨 또는 사용 불가) */
   | "SLOT_NOT_AVAILABLE"
   /** 슬롯 정보가 화면과 다름 (검사 유형 변경·지난 시각·장비 사용 불가) */
@@ -91,12 +93,18 @@ function lookupFailure(target: string, error: unknown, notFoundMessage: string):
   };
 }
 
-export async function submitCreateReferral(input: unknown): Promise<CreateReferralActionResult> {
+/**
+ * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (LoginSessionContext).
+ * 역할 확인과 함께 지금 쿠키의 로그인 세션과 비교해, 다르면 슬롯 재확인·POST 없이 SESSION_CHANGED를 돌려준다
+ */
+export async function submitCreateReferral(input: unknown, expectedLoginSession?: unknown): Promise<CreateReferralActionResult> {
   if (!REQUIRED_FEATURES.every((feature) => isApiFeature(feature))) {
     return { ok: false, reason: "NOT_AVAILABLE", message: "의뢰·예약 요청 기능이 아직 연결되지 않았습니다." };
   }
-  const access = await requireRoleAccess("REFERRING");
+  const access = await requireRoleMutationAccess("REFERRING", expectedLoginSession);
   if (!access.ok) {
+    // 다른 계정 쿠키로 바뀐 화면: 새로 만들지 않고 새로고침 안내만 한다 (결과 불명이 아니므로 같은 키 재확인도 유도하지 않는다)
+    if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
     if (access.reason === "SIGNED_OUT") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다. 다시 로그인해 주세요." };
     if (access.reason === "UNAUTHORIZED") return { ok: false, reason: "UNAUTHORIZED", message: "로그인 정보가 만료되었습니다. 다시 로그인해 주세요." };
     return { ok: false, reason: "FORBIDDEN", message: "의뢰기관 계정만 의뢰를 요청할 수 있습니다." };

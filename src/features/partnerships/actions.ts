@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
+import { requireRoleMutationAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import { changePartnershipStatus, fetchMyPartnershipList, isPartnershipEntityId, requestPartnership, type PartnershipTransition } from "./remote";
 import { loadPartnershipTargets, toPartnershipFailure, type PartnershipTargetsResult } from "./server";
@@ -17,6 +17,8 @@ import { IN_PROGRESS_STATUSES, type PartnershipActionResult, type PartnershipScr
  * 인자는 브라우저에서 오므로 믿지 않고 다시 검증한다.
  * - CSRF: Next가 Server Function의 Origin·Host를 비교하고, 여기서도 같은 출처인지 한 번 더 확인한다
  * - 역할: 함수마다 정해진 화면 역할을 users/me로 확인한 뒤에만 토큰을 넘긴다 (역할·기관 ID 인자는 받지 않는다)
+ * - 로그인 세션: 변경 함수는 화면이 렌더링된 로그인 세션(expectedLoginSession)이 지금 쿠키와 같을 때만 요청한다.
+ *   다르면(다른 탭의 계정 전환·재로그인) 사전 조회·변경 요청 없이 SESSION_CHANGED, 화면도 다시 불러오지 않는다
  *   요청 = 의뢰기관, 승인·거절 = 검사기관, 종료 = 각 화면 역할별 함수
  * - 기관: 요청 기관은 서버가 로그인 기관으로 정하고, 다른 기관 협약 ID는 서비스가 403으로 막는다
  * - 결과에는 토큰·서버 오류 본문을 담지 않는다 (알려진 오류 코드만 정해 둔 문구로 안내)
@@ -36,11 +38,11 @@ export async function loadPartnershipTargetsAction(): Promise<PartnershipTargets
  * 협약 요청 (의뢰기관). 보내기 전에 내 기관 협약을 조회해 같은 검사기관과 승인 대기·협약 중이면 요청하지 않는다
  * (서버도 409로 막는다). 거절·종료된 협약은 다시 요청할 수 있고, 서버가 기존 협약을 PENDING으로 바꾼다.
  */
-export async function requestPartnershipAction(examInstitutionId: unknown): Promise<PartnershipActionResult> {
+export async function requestPartnershipAction(examInstitutionId: unknown, expectedLoginSession?: unknown): Promise<PartnershipActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isPartnershipEntityId(examInstitutionId)) return { ok: false, reason: "INVALID", message: "협약을 요청할 검사기관을 선택해 주세요." };
-  const access = await requireRoleAccess("REFERRING");
+  const access = await requireRoleMutationAccess("REFERRING", expectedLoginSession);
   if (!access.ok) return toAccessFailure(access);
 
   let previous: string | null = null;
@@ -74,26 +76,27 @@ export async function requestPartnershipAction(examInstitutionId: unknown): Prom
 }
 
 /** 협약 승인 (검사기관, 승인 대기만) */
-export async function approvePartnershipAction(partnershipId: unknown): Promise<PartnershipActionResult> {
-  return transition("EXAMINING", partnershipId, "approve", "협약을 승인했습니다. 이제 이 의료기관이 검사를 의뢰할 수 있습니다.", "협약 승인에 실패했습니다.");
+export async function approvePartnershipAction(partnershipId: unknown, expectedLoginSession?: unknown): Promise<PartnershipActionResult> {
+  return transition(expectedLoginSession, "EXAMINING", partnershipId, "approve", "협약을 승인했습니다. 이제 이 의료기관이 검사를 의뢰할 수 있습니다.", "협약 승인에 실패했습니다.");
 }
 
 /** 협약 거절 (검사기관, 승인 대기만) */
-export async function rejectPartnershipAction(partnershipId: unknown): Promise<PartnershipActionResult> {
-  return transition("EXAMINING", partnershipId, "reject", "협약 요청을 거절했습니다.", "협약 거절에 실패했습니다.");
+export async function rejectPartnershipAction(partnershipId: unknown, expectedLoginSession?: unknown): Promise<PartnershipActionResult> {
+  return transition(expectedLoginSession, "EXAMINING", partnershipId, "reject", "협약 요청을 거절했습니다.", "협약 거절에 실패했습니다.");
 }
 
 /** 협약 종료 (의뢰기관 화면, 협약 중만) */
-export async function terminateReferringPartnershipAction(partnershipId: unknown): Promise<PartnershipActionResult> {
-  return transition("REFERRING", partnershipId, "terminate", "협약을 종료했습니다. 이 검사기관에는 더 이상 새 검사를 의뢰할 수 없습니다.", "협약 종료에 실패했습니다.");
+export async function terminateReferringPartnershipAction(partnershipId: unknown, expectedLoginSession?: unknown): Promise<PartnershipActionResult> {
+  return transition(expectedLoginSession, "REFERRING", partnershipId, "terminate", "협약을 종료했습니다. 이 검사기관에는 더 이상 새 검사를 의뢰할 수 없습니다.", "협약 종료에 실패했습니다.");
 }
 
 /** 협약 종료 (검사기관 화면, 협약 중만) */
-export async function terminateExaminingPartnershipAction(partnershipId: unknown): Promise<PartnershipActionResult> {
-  return transition("EXAMINING", partnershipId, "terminate", "협약을 종료했습니다. 이 의료기관은 더 이상 새 검사를 의뢰할 수 없습니다.", "협약 종료에 실패했습니다.");
+export async function terminateExaminingPartnershipAction(partnershipId: unknown, expectedLoginSession?: unknown): Promise<PartnershipActionResult> {
+  return transition(expectedLoginSession, "EXAMINING", partnershipId, "terminate", "협약을 종료했습니다. 이 의료기관은 더 이상 새 검사를 의뢰할 수 없습니다.", "협약 종료에 실패했습니다.");
 }
 
 async function transition(
+  expectedLoginSession: unknown,
   role: PartnershipScreenRole,
   partnershipId: unknown,
   kind: PartnershipTransition,
@@ -103,7 +106,7 @@ async function transition(
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isPartnershipEntityId(partnershipId)) return { ok: false, reason: "INVALID", message: INVALID_PARTNERSHIP };
-  const access = await requireRoleAccess(role);
+  const access = await requireRoleMutationAccess(role, expectedLoginSession);
   if (!access.ok) return toAccessFailure(access);
   try {
     await changePartnershipStatus(partnershipId, kind, { headers: access.headers });
@@ -119,7 +122,8 @@ async function checkOrigin(): Promise<PartnershipActionResult | null> {
   return null;
 }
 
-function toAccessFailure(access: Extract<Awaited<ReturnType<typeof requireRoleAccess>>, { ok: false }>): PartnershipActionResult {
+function toAccessFailure(access: Extract<Awaited<ReturnType<typeof requireRoleMutationAccess>>, { ok: false }>): PartnershipActionResult {
+  if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
   const failure = toRoleAccessFailure(access);
   return { ok: false, reason: failure.reason, message: failure.reason === "SIGNED_OUT" ? "로그인이 필요합니다. 다시 로그인해 주세요." : failure.message };
 }

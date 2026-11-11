@@ -13,11 +13,12 @@ import { findRegisteredIncident, submitEquipmentDowntime, type DowntimeActionRes
  * JWT는 서버에서 Gateway 요청에만 붙인다. X-User-Id·X-Institution-Id·X-Role은 만들지 않는다.
  * 성공·결과 불명·409(겹침)이면 화면을 다시 불러온다(refresh). 장애 목록 반영은 비동기라 바로 보이지 않을 수 있다.
  */
-export async function registerEquipmentDowntimeAction(input: unknown): Promise<DowntimeActionResult> {
+/** expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값. 다른 탭에서 계정이 바뀌었으면 등록하지 않는다 (SESSION_CHANGED) */
+export async function registerEquipmentDowntimeAction(input: unknown, expectedLoginSession?: unknown): Promise<DowntimeActionResult> {
   if (!isSameOriginHeaders(await headers())) {
     return { ok: false, reason: "FORBIDDEN", message: "허용되지 않은 요청입니다. 화면을 새로고침해 주세요." };
   }
-  const result = await submitEquipmentDowntime(input);
+  const result = await submitEquipmentDowntime(input, expectedLoginSession);
   if (result.ok || result.uncertain || result.reason === "OVERLAP") refresh();
   return result;
 }

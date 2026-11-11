@@ -15,6 +15,8 @@ import { ApiError } from "@/lib/api/errors";
 
 const NOTIFICATION = "aaaaaaaa-1111-4111-8111-111111111111";
 const TOKEN_HEADERS = { Authorization: "Bearer test" };
+/** 화면이 렌더링된 로그인 세션 구분 값 (세션 정합성 경우는 tests/notifications/mutationSession.test.ts) */
+const LOGIN = "loginSessionTagA";
 
 const state = {
   calls: [] as { path: string; method?: string; headers?: HeadersInit }[],
@@ -36,6 +38,12 @@ before(async () => {
         role === state.role
           ? { ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } }
           : { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." },
+      requireRoleMutationAccess: async (role: string, expected: unknown) =>
+        expected !== LOGIN
+          ? { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." }
+          : role === state.role
+            ? { ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } }
+            : { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." },
       toRoleAccessFailure: () => ({ reason: "FORBIDDEN", message: "x", code: null }),
     },
   });
@@ -132,7 +140,7 @@ describe("NotificationRow: 이미 읽은 알림", () => {
 
 describe("기존 Server Function 재사용 (markNotificationAsReadAction)", () => {
   it("PATCH /api/v1/notifications/{id}/read를 1회 보내고 성공하면 refresh로 목록·미읽음 수를 서버 값으로 다시 그린다", async () => {
-    const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION);
+    const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION, LOGIN);
     assert.deepEqual(result, { ok: true, notificationId: NOTIFICATION, readAt: "2026-11-09T21:00:00" });
     assert.deepEqual(state.calls, [{ path: `/api/v1/notifications/${NOTIFICATION}/read`, method: "PATCH", headers: TOKEN_HEADERS }]);
     assert.equal(state.refreshCount, 1);
@@ -142,7 +150,7 @@ describe("기존 Server Function 재사용 (markNotificationAsReadAction)", () =
     for (const error of [new ApiError("HTTP", "x", { status: 500 }), new ApiError("NETWORK", "x"), new ApiError("HTTP", "x", { status: 404 })]) {
       state.error = error;
       state.refreshCount = 0;
-      const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION);
+      const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION, LOGIN);
       assert.equal(result.ok, false);
       assert.equal(state.refreshCount, 0);
     }
@@ -150,7 +158,7 @@ describe("기존 Server Function 재사용 (markNotificationAsReadAction)", () =
 
   it("의뢰기관 알림 기능으로 검사기관 계정이 요청하면 서버에 보내지 않는다 (역할 구분 유지)", async () => {
     state.role = "EXAMINING";
-    const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION);
+    const result = await actions.markNotificationAsReadAction("notifications", NOTIFICATION, LOGIN);
     assert.equal(result.ok, false);
     assert.equal(state.calls.length, 0);
   });

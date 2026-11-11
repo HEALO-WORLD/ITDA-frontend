@@ -6,6 +6,7 @@ import { useMemo, useRef, useState, type FormEvent } from "react";
 import { controlClass as fieldControlClass, iconClass } from "@/components/ui/FormControls";
 import Modal from "@/components/ui/Modal";
 import { searchButtonClass } from "@/components/ui/styles";
+import { useRenderedLoginSession } from "@/features/auth/loginSessionContext";
 import { formatDateTime } from "@/lib/format/date";
 
 import { createInstitutionAction, deleteInstitutionAction, updateInstitutionAction } from "../actions";
@@ -18,6 +19,7 @@ import {
   type InstitutionDto,
   type InstitutionTypeDto,
 } from "../remote";
+import { markAdminSessionChanged, useAdminSessionChanged } from "../sessionChangeLock";
 import type { AdminActionResult } from "../types";
 
 interface AdminInstitutionManagerProps {
@@ -215,10 +217,13 @@ function InstitutionFormDialog({
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 관리자 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useAdminSessionChanged();
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     const nextErrors: FieldErrors = {
       name: validateInstitutionName(values.name),
       address: validateInstitutionAddress(values.address),
@@ -234,9 +239,10 @@ function InstitutionFormDialog({
     try {
       const result =
         mode === "create"
-          ? await createInstitutionAction(values)
-          : await updateInstitutionAction(institution!.id, { name: values.name, address: values.address });
+          ? await createInstitutionAction(values, renderedLoginSession)
+          : await updateInstitutionAction(institution!.id, { name: values.name, address: values.address }, renderedLoginSession);
       if (result.ok || result.reason === "NOT_FOUND") return onDone(result);
+      if (result.reason === "SESSION_CHANGED") markAdminSessionChanged();
       if (result.fieldErrors) setErrors(result.fieldErrors);
       setFormError(result.message);
     } catch {
@@ -316,7 +322,7 @@ function InstitutionFormDialog({
           <button type="button" onClick={onClose} disabled={pending} className={secondaryButton}>
             취소
           </button>
-          <button type="submit" disabled={pending} className={primaryButton}>
+          <button type="submit" disabled={pending || sessionChanged} className={primaryButton}>
             {pending ? "처리 중…" : mode === "create" ? "등록" : "저장"}
           </button>
         </div>
@@ -338,15 +344,19 @@ function InstitutionDeleteDialog({
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
+  /** 렌더링 시점 로그인 세션 (요청에 함께 보낸다) · 다른 탭 계정 변경 잠금 (이 화면의 관리자 변경 요청 공통) */
+  const renderedLoginSession = useRenderedLoginSession();
+  const sessionChanged = useAdminSessionChanged();
 
   const remove = async () => {
-    if (pendingRef.current) return;
+    if (pendingRef.current || sessionChanged) return;
     pendingRef.current = true;
     setPending(true);
     setError(null);
     try {
-      const result = await deleteInstitutionAction(institution.id);
+      const result = await deleteInstitutionAction(institution.id, renderedLoginSession);
       if (result.ok || result.reason === "NOT_FOUND") return onDone(result);
+      if (result.reason === "SESSION_CHANGED") markAdminSessionChanged();
       setError(result.message);
     } catch {
       setError(NETWORK_ERROR_MESSAGE);
@@ -376,7 +386,7 @@ function InstitutionDeleteDialog({
             type="button"
             data-autofocus
             onClick={remove}
-            disabled={pending}
+            disabled={pending || sessionChanged}
             className="inline-flex h-10 items-center justify-center rounded-lg bg-red-600 px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {pending ? "삭제 중…" : "삭제"}

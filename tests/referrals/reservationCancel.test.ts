@@ -51,6 +51,8 @@ const reservationDto = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 const TARGET = { attemptNo: 1, startTime: START, endTime: END };
+/** 화면이 렌더링된 로그인 세션 구분 값 (공통 함수 requireRoleMutationAccess의 실제 비교는 tests/auth/mutationAccess.test.ts) */
+const LOGIN = "loginSessionTagA";
 
 const state = {
   access: okAccess as Access,
@@ -63,10 +65,13 @@ const state = {
   order: [] as string[],
   refreshCount: 0,
   sameOrigin: true,
+  /** 지금 쿠키의 로그인 세션 구분 값 (다른 탭에서 계정이 바뀌면 달라진다) */
+  loginSession: LOGIN as string | null,
 };
 
 function reset() {
   state.access = okAccess;
+  state.loginSession = LOGIN;
   state.referral = referralDto();
   state.reservations = { [RESERVATION]: reservationDto() };
   state.cancel = null;
@@ -106,6 +111,14 @@ before(async () => {
       requireRoleAccess: async (role: string) => {
         state.order.push(`users/me:${role}`);
         return state.access;
+      },
+      // 실제 함수와 같은 순서: 형식 확인 → 역할 확인 → 쿠키의 로그인 세션 비교
+      requireRoleMutationAccess: async (role: string, expected: unknown) => {
+        const changed = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
+        if (expected !== null && typeof expected !== "string") return changed;
+        state.order.push(`users/me:${role}`);
+        if (!state.access.ok) return state.access;
+        return expected === state.loginSession ? state.access : changed;
       },
       toRoleAccessFailure: (access: { reason: string; message: string }) => ({ reason: "FORBIDDEN", message: access.message, code: null }),
     },
@@ -214,12 +227,12 @@ describe("예약 취소 API 함수와 오류 안내", () => {
 describe("cancelReservationAction: 인증·인가", () => {
   it("다른 출처·Mock 모드·로그아웃·다른 역할은 아무 요청도 보내지 않는다", async () => {
     state.sameOrigin = false;
-    assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET)).ok, false);
+    assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)).ok, false);
     assert.deepEqual(state.order, []);
 
     reset();
     process.env.NEXT_PUBLIC_API_MODE = "mock";
-    const mockMode = await actions.cancelReservationAction(REFERRAL, TARGET);
+    const mockMode = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.equal(!mockMode.ok && mockMode.reason, "NOT_AVAILABLE");
     assert.deepEqual(state.order, []);
 
@@ -231,7 +244,7 @@ describe("cancelReservationAction: 인증·인가", () => {
     ] as const) {
       reset();
       state.access = { ok: false, reason, message: "거부" };
-      const result = await actions.cancelReservationAction(REFERRAL, TARGET);
+      const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
       assert.equal(!result.ok && result.reason, expected, reason);
       assert.deepEqual(state.order, ["users/me:REFERRING"], reason);
     }
@@ -245,7 +258,7 @@ describe("cancelReservationAction: 인증·인가", () => {
       [REFERRAL, { ...TARGET, startTime: "2099-01-05T10:00:00Z" }],
     ] as const) {
       reset();
-      const result = await actions.cancelReservationAction(referralId, target);
+      const result = await actions.cancelReservationAction(referralId, target, LOGIN);
       assert.equal(!result.ok && result.reason, "INVALID_INPUT");
       assert.deepEqual(state.order, ["users/me:REFERRING"]);
     }
@@ -253,14 +266,14 @@ describe("cancelReservationAction: 인증·인가", () => {
 
   it("Gateway 403(다른 기관 의뢰 등)은 취소 요청 없이 거부 안내", async () => {
     state.referral = httpError(403, "ACCESS_DENIED");
-    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!result.ok && result.reason, "FORBIDDEN");
     assert.equal(patches().length, 0);
   });
 
   it("다른 기관 의뢰(404)는 취소 요청 없이 안내하고 목록을 다시 그린다", async () => {
     state.referral = httpError(404, "REFERRAL_NOT_FOUND");
-    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!result.ok && result.reason, "NOT_FOUND");
     assert.equal(patches().length, 0);
     assert.equal(state.refreshCount, 1);
@@ -269,7 +282,7 @@ describe("cancelReservationAction: 인증·인가", () => {
 
 describe("cancelReservationAction: 취소 대상 예약 동일성", () => {
   it("확인한 예약이 지금도 확정된 현재 예약이면 그 예약 ID로만 취소한다", async () => {
-    const result = await actions.cancelReservationAction(REFERRAL, TARGET);
+    const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.deepEqual(result, { ok: true, message: "예약을 취소했습니다." });
     assert.deepEqual(state.order, [
       "users/me:REFERRING",
@@ -281,7 +294,7 @@ describe("cancelReservationAction: 취소 대상 예약 동일성", () => {
   });
 
   it("초 생략 등 표기만 다른 같은 시각은 같은 예약으로 본다", async () => {
-    const result = await actions.cancelReservationAction(REFERRAL, { attemptNo: 1, startTime: "2099-01-05T10:00", endTime: "2099-01-05T10:30:00.000" });
+    const result = await actions.cancelReservationAction(REFERRAL, { attemptNo: 1, startTime: "2099-01-05T10:00", endTime: "2099-01-05T10:30:00.000" }, LOGIN);
     assert.equal(result.ok, true);
   });
 
@@ -316,7 +329,7 @@ describe("cancelReservationAction: 취소 대상 예약 동일성", () => {
   for (const [name, arrange] of staleCases) {
     it(`${name} → 취소 API를 부르지 않고 STALE (목록 다시 그림)`, async () => {
       arrange();
-      const result = await actions.cancelReservationAction(REFERRAL, TARGET);
+      const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
       assert.equal(!result.ok && result.reason, "STALE", name);
       assert.equal(patches().length, 0, name);
       assert.equal(state.refreshCount, 1, name);
@@ -325,7 +338,7 @@ describe("cancelReservationAction: 취소 대상 예약 동일성", () => {
 
   it("의뢰·예약 조회 실패(5xx·네트워크)는 취소하지 않고 조회 실패 안내", async () => {
     state.reservations[RESERVATION] = httpError(500);
-    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!result.ok && result.reason, "LOOKUP_FAILED");
     assert.equal(patches().length, 0);
   });
@@ -335,7 +348,7 @@ describe("cancelReservationAction: 409 등 취소 실패", () => {
   for (const code of ["EXAMINATION_CANCEL_NOT_ALLOWED", "RESERVATION_CANCEL_DEADLINE_PASSED", "INVALID_RESERVATION_STATUS", "INVALID_REFERRAL_STATUS"]) {
     it(`409 ${code} → 코드별 안내 + 목록 다시 그림`, async () => {
       state.cancel = httpError(409, code);
-      const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+      const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
       assert.equal(!result.ok && result.reason, "CONFLICT");
       assert.equal(!result.ok && result.code, code);
       assert.equal(!result.ok && result.message, remote.RESERVATION_CANCEL_ERROR_MESSAGES[code]);
@@ -345,13 +358,13 @@ describe("cancelReservationAction: 409 등 취소 실패", () => {
 
   it("401은 공통 로그인 안내, 네트워크 오류는 '결과 확인 불가' + 다시 그림", async () => {
     state.cancel = httpError(401, "TOKEN_EXPIRED");
-    let result = await actions.cancelReservationAction(REFERRAL, TARGET);
+    let result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.equal(!result.ok && result.reason, "UNAUTHORIZED");
     assert.match(!result.ok ? result.message : "", /다시 로그인/);
 
     reset();
     state.cancel = new ApiError("NETWORK", "연결 실패");
-    result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!result.ok && result.reason, "UNKNOWN_RESULT");
     assert.equal(state.refreshCount, 1);
   });
@@ -361,7 +374,7 @@ describe("cancelReservationAction: 409 등 취소 실패", () => {
     for (const error of unknown) {
       reset();
       state.cancel = error;
-      const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+      const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
       const label = `${error.kind} ${error.status ?? ""}`;
       assert.equal(!result.ok && result.reason, "UNKNOWN_RESULT", label);
       assert.match(!result.ok ? result.message : "", /결과를 확인하지 못했습니다/, label);
@@ -371,15 +384,15 @@ describe("cancelReservationAction: 409 등 취소 실패", () => {
     }
     reset();
     state.cancel = httpError(400);
-    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    const result = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!result.ok && result.reason, "ERROR");
   });
 
   it("결과에 예약 ID·토큰·환자 이름을 담지 않는다", async () => {
-    const results = [await actions.cancelReservationAction(REFERRAL, TARGET)];
+    const results = [await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)];
     reset();
     state.cancel = httpError(409, "INVALID_RESERVATION_STATUS");
-    results.push(await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET)));
+    results.push(await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)));
     for (const result of results) {
       const text = JSON.stringify(result);
       assert.doesNotMatch(text, new RegExp(`${RESERVATION}|Bearer|홍길동`));
@@ -391,9 +404,9 @@ describe("cancelReservationAction: 중복 제출 방지와 실패 후 복구", (
   it("같은 의뢰의 취소가 처리 중이면 두 번째 호출은 조회·취소하지 않는다", async () => {
     let release!: () => void;
     state.cancelGate = new Promise((resolve) => (release = resolve));
-    const first = actions.cancelReservationAction(REFERRAL, TARGET);
+    const first = actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     await new Promise((resolve) => setImmediate(resolve));
-    const second = await actions.cancelReservationAction(REFERRAL, TARGET);
+    const second = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.equal(!second.ok && second.reason, "DUPLICATE_REQUEST");
     release();
     assert.equal((await first).ok, true);
@@ -402,9 +415,9 @@ describe("cancelReservationAction: 중복 제출 방지와 실패 후 복구", (
 
   it("실패 뒤에는 처리 중 표시가 풀려 다시 시도할 수 있다", async () => {
     state.cancel = httpError(500);
-    assert.equal((await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET))).ok, false);
+    assert.equal((await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN))).ok, false);
     state.cancel = null;
-    assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET)).ok, true);
+    assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)).ok, true);
     assert.equal(patches().length, 2);
   });
 });
@@ -445,25 +458,71 @@ describe("5xx 결과 불명 뒤 최신 상세로 판단 (classifyCancelRecheck)"
 
   it("500 뒤 실제로는 취소됐는데 같은 확인으로 다시 보내도 PATCH를 보내지 않는다 (서버 재확인)", async () => {
     state.cancel = httpError(500);
-    const first = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    const first = await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     assert.equal(!first.ok && first.reason, "UNKNOWN_RESULT");
     // 백엔드는 커밋까지 끝났다
     state.referral = referralDto({ referralStatus: "CANCELED" });
     state.reservations[RESERVATION] = reservationDto({ reservationStatus: "CANCELED" });
     state.cancel = null;
-    const again = await actions.cancelReservationAction(REFERRAL, TARGET);
+    const again = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.equal(!again.ok && again.reason, "STALE");
     assert.equal(patches().length, 1);
   });
 
   it("500 뒤 재조정으로 예약 시도가 바뀌면 이전 확인으로는 새 예약을 취소하지 않는다", async () => {
     state.cancel = httpError(500);
-    await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET));
+    await quiet(() => actions.cancelReservationAction(REFERRAL, TARGET, LOGIN));
     state.referral = referralDto({ currentReservationId: NEW_RESERVATION });
     state.reservations[NEW_RESERVATION] = reservationDto({ id: NEW_RESERVATION, attemptNo: 2 });
     state.cancel = null;
-    const again = await actions.cancelReservationAction(REFERRAL, TARGET);
+    const again = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
     assert.equal(!again.ok && again.reason, "STALE");
     assert.deepEqual(patches().map((call) => call.path), [`/api/v1/referrals/reservations/${RESERVATION}/cancel`]);
+  });
+});
+
+describe("cancelReservationAction: 로그인 세션 정합성 (STEP 3-2-2A)", () => {
+  it("화면을 그린 뒤 다른 탭에서 계정이 바뀌면 SESSION_CHANGED: 조회·취소 요청 0회, 목록 다시 그리지 않음", async () => {
+    state.loginSession = "loginSessionTagB";
+    const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
+    assert.deepEqual(result, {
+      ok: false,
+      reason: "SESSION_CHANGED",
+      message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요.",
+      code: "SESSION_CHANGED",
+    });
+    assert.equal(state.calls.length, 0, "의뢰·예약 조회도 하지 않음");
+    assert.equal(patches().length, 0);
+    assert.equal(state.refreshCount, 0);
+  });
+
+  it("렌더링 세션 인자를 빠뜨리면(undefined) 거부한다", async () => {
+    const result = await actions.cancelReservationAction(REFERRAL, TARGET);
+    assert.equal(!result.ok && result.reason, "SESSION_CHANGED");
+    assert.equal(patches().length, 0);
+  });
+
+  it("세션이 같으면 기존 흐름 그대로 취소 (렌더링 세션 값을 그대로 공통 함수에 넘김)", async () => {
+    const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
+    assert.equal(result.ok, true);
+    assert.equal(patches().length, 1);
+  });
+
+  it("기존 인증 실패는 그대로 구분 (SESSION_CHANGED로 덮지 않음)", async () => {
+    state.access = { ok: false, reason: "UNAUTHORIZED", message: "만료" };
+    const result = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
+    assert.equal(!result.ok && result.reason, "UNAUTHORIZED");
+    reset();
+    state.access = { ok: false, reason: "FORBIDDEN_ROLE", message: "권한 없음" };
+    const forbidden = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
+    assert.equal(!forbidden.ok && forbidden.reason, "FORBIDDEN");
+  });
+
+  it("SESSION_CHANGED 뒤에도 처리 중 표시가 남지 않는다 (같은 세션에서는 다시 취소 가능)", async () => {
+    state.loginSession = "loginSessionTagB";
+    await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
+    state.loginSession = LOGIN;
+    assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)).ok, true);
+    assert.equal(patches().length, 1);
   });
 });

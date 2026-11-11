@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 
 import { isApiError } from "@/lib/api/errors";
 import { isSameOriginHeaders } from "@/lib/auth/csrf";
-import { requireRoleAccess, toRoleAccessFailure } from "@/lib/auth/session";
+import { requireRoleMutationAccess, toRoleAccessFailure } from "@/lib/auth/session";
 
 import {
   approveUser,
@@ -33,19 +33,21 @@ import type { AdminActionResult } from "./types";
  * - CSRF: Next가 Server Function의 Origin·Host를 비교하고, 여기서도 같은 출처인지 한 번 더 확인한다
  * - 인증: users/me로 ADMIN 역할을 확인한 뒤에만 토큰을 Gateway로 넘긴다 (requireRoleAccess("ADMIN")). 아니면 요청하지 않는다
  *   (Gateway도 ADMIN 그룹 규칙으로 다시 막는다)
+ * - 로그인 세션: 화면이 렌더링된 로그인 세션(expectedLoginSession)이 지금 쿠키와 같을 때만 요청한다 (requireRoleMutationAccess).
+ *   다르면(다른 탭의 계정 전환·재로그인) 요청 없이 SESSION_CHANGED, 화면도 다시 불러오지 않는다
  * - 결과에는 토큰·서버 오류 본문을 담지 않는다 (알려진 오류 코드만 정해 둔 문구로 안내)
  * 성공하면 화면을 다시 불러와(refresh) 목록·건수를 서버 값으로 맞춘다 (화면에서 먼저 바꾸지 않는다).
  * 409(이미 승인됨 등)도 서버 상태가 화면과 달라졌다는 뜻이라 다시 불러온다.
  */
 
-export async function approveUserAction(userId: unknown): Promise<AdminActionResult> {
+export async function approveUserAction(userId: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isAdminEntityId(userId)) return invalid("사용자 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
-  return run("approve", () => "가입을 승인했습니다.", (headers) => approveUser(userId, { headers }), "가입 승인에 실패했습니다.");
+  return run(expectedLoginSession, "approve", () => "가입을 승인했습니다.", (headers) => approveUser(userId, { headers }), "가입 승인에 실패했습니다.");
 }
 
-export async function createInstitutionAction(input: unknown): Promise<AdminActionResult> {
+export async function createInstitutionAction(input: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   const { name, type, address, careInstitutionCode } = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
@@ -57,6 +59,7 @@ export async function createInstitutionAction(input: unknown): Promise<AdminActi
   };
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
   return run(
+    expectedLoginSession,
     "create",
     () => "기관을 등록했습니다.",
     (headers) =>
@@ -68,7 +71,7 @@ export async function createInstitutionAction(input: unknown): Promise<AdminActi
   );
 }
 
-export async function updateInstitutionAction(institutionId: unknown, input: unknown): Promise<AdminActionResult> {
+export async function updateInstitutionAction(institutionId: unknown, input: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isAdminEntityId(institutionId)) return invalid("기관 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
@@ -77,6 +80,7 @@ export async function updateInstitutionAction(institutionId: unknown, input: unk
   const fieldErrors = { name: validateInstitutionName(name), address: validateInstitutionAddress(address) };
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
   return run(
+    expectedLoginSession,
     "update",
     () => "기관 정보를 수정했습니다.",
     (headers) => updateInstitution(institutionId, { name: name as string, address: address as string }, { headers }),
@@ -84,15 +88,15 @@ export async function updateInstitutionAction(institutionId: unknown, input: unk
   );
 }
 
-export async function deleteInstitutionAction(institutionId: unknown): Promise<AdminActionResult> {
+export async function deleteInstitutionAction(institutionId: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isAdminEntityId(institutionId)) return invalid("기관 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
-  return run("delete", () => "기관을 삭제했습니다.", (headers) => deleteInstitution(institutionId, { headers }), "기관 삭제에 실패했습니다.");
+  return run(expectedLoginSession, "delete", () => "기관을 삭제했습니다.", (headers) => deleteInstitution(institutionId, { headers }), "기관 삭제에 실패했습니다.");
 }
 
 /** 공통 검사 유형 등록 (검사명·종류. 소요 시간은 받지 않는다: 장비별 연결에서 정한다) */
-export async function createExamTypeAction(input: unknown): Promise<AdminActionResult> {
+export async function createExamTypeAction(input: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   const { name, modality } = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
@@ -100,6 +104,7 @@ export async function createExamTypeAction(input: unknown): Promise<AdminActionR
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
   return examTypeResult(
     await run(
+      expectedLoginSession,
       "exam-type-create",
       () => "검사 유형을 등록했습니다.",
       (headers) => createExamType({ name: name as string, modality: modality as "CT" | "MRI" }, { headers }),
@@ -109,7 +114,7 @@ export async function createExamTypeAction(input: unknown): Promise<AdminActionR
 }
 
 /** 공통 검사 유형 이름 수정 (이름만. 종류 변경·삭제 API는 없다) */
-export async function updateExamTypeAction(examTypeId: unknown, input: unknown): Promise<AdminActionResult> {
+export async function updateExamTypeAction(examTypeId: unknown, input: unknown, expectedLoginSession?: unknown): Promise<AdminActionResult> {
   const blocked = await checkOrigin();
   if (blocked) return blocked;
   if (!isAdminEntityId(examTypeId)) return invalid("검사 유형 정보가 올바르지 않습니다. 화면을 새로고침해 주세요.");
@@ -117,7 +122,7 @@ export async function updateExamTypeAction(examTypeId: unknown, input: unknown):
   const nameError = validateExamTypeName(name);
   if (nameError) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors: { name: nameError } };
   return examTypeResult(
-    await run("exam-type-update", () => "검사 유형 이름을 수정했습니다.", (headers) => updateExamTypeName(examTypeId, name as string, { headers }), "검사 유형 수정에 실패했습니다."),
+    await run(expectedLoginSession, "exam-type-update", () => "검사 유형 이름을 수정했습니다.", (headers) => updateExamTypeName(examTypeId, name as string, { headers }), "검사 유형 수정에 실패했습니다."),
   );
 }
 
@@ -139,15 +144,20 @@ async function checkOrigin(): Promise<AdminActionResult | null> {
 
 const invalid = (message: string): AdminActionResult => ({ ok: false, reason: "INVALID", message });
 
-/** 관리자 확인 → 요청 → 결과. 성공·409는 화면을 다시 불러온다 */
+/**
+ * 관리자·로그인 세션 확인 → 요청 → 결과. 성공·409는 화면을 다시 불러온다.
+ * 세션이 바뀌었으면(SESSION_CHANGED) 요청하지 않고 화면도 다시 불러오지 않는다
+ */
 async function run(
+  expectedLoginSession: unknown,
   action: string,
   successMessage: () => string,
   request: (headers: HeadersInit) => Promise<unknown>,
   fallback: string,
 ): Promise<AdminActionResult> {
-  const access = await requireRoleAccess("ADMIN");
+  const access = await requireRoleMutationAccess("ADMIN", expectedLoginSession);
   if (!access.ok) {
+    if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
     const failure = toRoleAccessFailure(access);
     return { ok: false, reason: failure.reason, message: failure.reason === "SIGNED_OUT" ? "로그인이 필요합니다. 다시 로그인해 주세요." : failure.message };
   }
