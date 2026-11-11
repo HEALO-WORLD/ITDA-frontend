@@ -1,5 +1,4 @@
 import { apiRequestData, type ApiRequestOptions } from "@/lib/api/client";
-import { getApiMode } from "@/lib/api/config";
 import { ApiError, isApiError } from "@/lib/api/errors";
 
 /**
@@ -14,7 +13,7 @@ import { ApiError, isApiError } from "@/lib/api/errors";
  *
  * 인증: Gateway가 `Authorization: Bearer <JWT>`를 검증하고 X-User-Id·X-Role을 붙인다. 프론트는 X- 헤더를 만들지 않는다.
  * 토큰은 서버 전용 모듈(server.ts·actions.ts)이 관리자 역할 확인(requireRoleAccess("ADMIN")) 뒤 `headers`로 넘긴다.
- * Mock 구현으로 대신하지 않는다: API 모드가 아니거나 입력이 계약과 다르면 요청 없이 CONFIG, 응답이 계약과 다르면 PARSE.
+ * 입력이 계약과 다르면 요청 없이 CONFIG, 응답이 계약과 다르면 PARSE.
  */
 
 type RequestOptions = Pick<ApiRequestOptions, "headers" | "signal">;
@@ -76,7 +75,6 @@ export const isAdminEntityId = (value: unknown): value is string => typeof value
 
 /** 사용자 목록 `GET /api/v1/users` (active: true 승인 완료, false 승인 대기, 없으면 전체). 최근 가입순 */
 export async function fetchAdminUsers(active: boolean | undefined, options: RequestOptions = {}): Promise<AdminUserDto[]> {
-  requireApiMode();
   const data = await apiRequestData<unknown>("/api/v1/users", { ...options, query: { active } });
   if (!Array.isArray(data) || !data.every(isAdminUser)) throw parseError(data);
   return data;
@@ -84,7 +82,6 @@ export async function fetchAdminUsers(active: boolean | undefined, options: Requ
 
 /** 가입 승인 `PATCH /api/v1/users/{userId}/approve`. 이미 승인된 사용자는 409 USER_ALREADY_APPROVED */
 export async function approveUser(userId: string, options: RequestOptions = {}): Promise<AdminUserDto> {
-  requireApiMode();
   assertId(userId, "사용자 ID");
   const data = await apiRequestData<unknown>(`/api/v1/users/${encodeURIComponent(userId)}/approve`, { ...options, method: "PATCH" });
   if (!isAdminUser(data) || data.userId.toLowerCase() !== userId.toLowerCase() || !data.active) throw parseError(data);
@@ -93,7 +90,6 @@ export async function approveUser(userId: string, options: RequestOptions = {}):
 
 /** 기관 목록 `GET /api/v1/institutions` (삭제되지 않은 기관 전체, 최근 등록순) */
 export async function fetchInstitutions(options: RequestOptions = {}): Promise<InstitutionDto[]> {
-  requireApiMode();
   const data = await apiRequestData<unknown>("/api/v1/institutions", options);
   if (!Array.isArray(data) || !data.every(isInstitution)) throw parseError(data);
   return data;
@@ -160,7 +156,6 @@ export async function fetchSlotStatusHistories(
   { page = 0, size = SLOT_HISTORY_PAGE_SIZE }: { page?: number; size?: number } = {},
   options: RequestOptions = {},
 ): Promise<SlotStatusHistoryPageDto> {
-  requireApiMode();
   if (!isAdminEntityId(slotId)) throw new ApiError("CONFIG", "슬롯 ID 형식이 올바르지 않습니다.");
   if (!Number.isSafeInteger(page) || page < 0 || !Number.isSafeInteger(size) || size < 1 || size > 100) {
     throw new ApiError("CONFIG", "페이지 조건이 올바르지 않습니다.");
@@ -222,7 +217,6 @@ export async function fetchAdminExamTypePage(
   { modality, page = 0, size = ADMIN_EXAM_TYPE_PAGE_SIZE }: { modality?: AdminExamTypeModality; page?: number; size?: number } = {},
   options: RequestOptions = {},
 ): Promise<AdminExamTypePageDto> {
-  requireApiMode();
   if (modality !== undefined && !isExamTypeModality(modality)) throw new ApiError("CONFIG", "검사 종류가 올바르지 않습니다.");
   if (!Number.isSafeInteger(page) || page < 0 || !Number.isSafeInteger(size) || size < 1 || size > 100) {
     throw new ApiError("CONFIG", "페이지 조건이 올바르지 않습니다.");
@@ -241,7 +235,6 @@ export async function fetchAdminExamTypePage(
 
 /** 검사 유형 등록 `POST /api/v1/exam-types` (ADMIN, 201). 응답이 보낸 이름·종류와 같아야 성공으로 본다 */
 export async function createExamType(input: { name: string; modality: AdminExamTypeModality }, options: RequestOptions = {}): Promise<AdminExamTypeDto> {
-  requireApiMode();
   const nameError = validateExamTypeName(input.name);
   if (nameError) throw new ApiError("CONFIG", nameError);
   if (!isExamTypeModality(input.modality)) throw new ApiError("CONFIG", "검사 종류가 올바르지 않습니다.");
@@ -253,7 +246,6 @@ export async function createExamType(input: { name: string; modality: AdminExamT
 
 /** 검사 유형 이름 수정 `PATCH /api/v1/exam-types/{examTypeId}` (ADMIN, 이름만. 종류는 바꿀 수 없다). 없으면 404 */
 export async function updateExamTypeName(examTypeId: string, name: string, options: RequestOptions = {}): Promise<AdminExamTypeDto> {
-  requireApiMode();
   if (!isAdminEntityId(examTypeId)) throw new ApiError("CONFIG", "검사 유형 ID 형식이 올바르지 않습니다.");
   const nameError = validateExamTypeName(name);
   if (nameError) throw new ApiError("CONFIG", nameError);
@@ -269,7 +261,6 @@ function isAdminExamType(value: unknown): value is AdminExamTypeDto {
 
 /** 기관 등록 `POST /api/v1/institutions` (201). 요양기관기호 중복은 409 DUPLICATE_CARE_INSTITUTION_CODE */
 export async function createInstitution(input: InstitutionCreateInput, options: RequestOptions = {}): Promise<InstitutionDto> {
-  requireApiMode();
   assertCreateInput(input);
   const body = { name: input.name.trim(), type: input.type, address: input.address.trim(), careInstitutionCode: input.careInstitutionCode };
   const data = await apiRequestData<unknown>("/api/v1/institutions", { ...options, method: "POST", body });
@@ -283,7 +274,6 @@ export async function updateInstitution(
   input: InstitutionUpdateInput,
   options: RequestOptions = {},
 ): Promise<InstitutionDto> {
-  requireApiMode();
   assertId(institutionId, "기관 ID");
   assertNameAddress(input.name, input.address);
   const data = await apiRequestData<unknown>(`/api/v1/institutions/${encodeURIComponent(institutionId)}`, {
@@ -297,7 +287,6 @@ export async function updateInstitution(
 
 /** 기관 삭제 `DELETE /api/v1/institutions/{institutionId}`. 진행 중 협약·소속 사용자가 있으면 409 */
 export async function deleteInstitution(institutionId: string, options: RequestOptions = {}): Promise<void> {
-  requireApiMode();
   assertId(institutionId, "기관 ID");
   const data = await apiRequestData<unknown>(`/api/v1/institutions/${encodeURIComponent(institutionId)}`, { ...options, method: "DELETE" });
   if (data !== null && data !== undefined) throw parseError(data);
@@ -305,9 +294,6 @@ export async function deleteInstitution(institutionId: string, options: RequestO
 
 // ── 입력 확인 (계약과 다른 값은 보내지 않는다) ──
 
-function requireApiMode() {
-  if (getApiMode() !== "api") throw new ApiError("CONFIG", "관리자 기능은 API 모드에서만 사용할 수 있습니다.");
-}
 
 function assertId(value: string, label: string) {
   if (!isAdminEntityId(value)) throw new ApiError("CONFIG", `${label} 형식이 올바르지 않습니다.`);

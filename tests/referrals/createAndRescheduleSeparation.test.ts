@@ -134,12 +134,12 @@ describe("일반 검색: 새 검사 의뢰", () => {
     const wizardSource = fullSource.slice(wizardStart, mainStart);
     assert.match(wizardSource, /<ApiRescheduleConfirm[\s\S]*?inline/);
     assert.doesNotMatch(wizardSource, /<ApiReferralCreateForm/);
-    // 기존 모달 분기 (모바일·일반 검색): API 재조정 → API 의뢰 생성 → Mock 순서
+    // 기존 모달 분기 (모바일·일반 검색): API 재조정 → API 의뢰 생성
     const source = fullSource.slice(mainStart);
     const rescheduleModal = source.indexOf("<ApiRescheduleConfirm");
     const createModal = source.indexOf("<ApiReferralCreateForm");
-    const mockModal = source.indexOf("<RescheduleSlotConfirm");
-    assert.ok(rescheduleModal > 0 && createModal > rescheduleModal && mockModal > createModal, "API 재조정 → API 의뢰 생성 → Mock 순서의 분기");
+    assert.ok(rescheduleModal > 0 && createModal > rescheduleModal, "API 재조정 → API 의뢰 생성 순서의 분기");
+    assert.equal(source.includes("<RescheduleSlotConfirm"), false);
   });
 });
 

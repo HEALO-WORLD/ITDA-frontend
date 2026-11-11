@@ -18,7 +18,7 @@ import type { PagedResponseDto } from "@/lib/api/types";
  * 호출 실패는 ApiError 그대로, 응답 형태가 계약과 다르면 PARSE 오류로 던진다 (화면 문구는 getNotificationErrorMessage).
  */
 
-/** 알림 API를 쓰는 기능 (의뢰기관 / 검사기관). 각자의 NEXT_PUBLIC_API_FEATURES 값으로 켠다 */
+/** 알림 API 호출자 식별자 (의뢰기관 / 검사기관) */
 export type NotificationApiFeature = Extract<ApiFeature, "notifications" | "examining-notifications">;
 
 export const NOTIFICATION_API_FEATURES: readonly NotificationApiFeature[] = ["notifications", "examining-notifications"];

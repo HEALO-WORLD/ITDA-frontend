@@ -5,8 +5,6 @@ import { useEffect, useRef, useState, useTransition, type FormEvent } from "reac
 
 import { notifySessionChanged } from "@/features/auth/authChannel";
 import type { LoginResult } from "@/features/auth/types";
-import { getApiMode } from "@/lib/api/config";
-import { isDemoModeEnabled } from "@/lib/dev/demoMode";
 
 interface LoginFormValues {
   loginId: string;
@@ -49,7 +47,6 @@ const inputClass =
  * API 모드: Next 서버의 `POST /auth/login`을 거쳐 백엔드에 로그인하고, 토큰은 서버가 HttpOnly 쿠키에 저장한다
  * (이 컴포넌트는 토큰을 받지도 저장하지도 않는다). 서버가 사용자 정보로 확인한 역할별 화면(redirectTo)으로 이동하고,
  * 화면이 없는 역할(ADMIN)은 안내만 한다.
- * Mock 모드: 요청을 보내지 않고 데모 체험 바로가기를 안내한다.
  */
 export default function LoginForm() {
   const [values, setValues] = useState<LoginFormValues>({ loginId: "", password: "" });
@@ -82,22 +79,6 @@ export default function LoginForm() {
     const nextErrors = validate(values);
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
-
-    let isApiMode: boolean;
-    try {
-      isApiMode = getApiMode() === "api";
-    } catch {
-      setFormMessage("로그인 기능을 사용할 수 없는 환경입니다. (API 모드 설정 확인)");
-      return;
-    }
-    if (!isApiMode) {
-      setFormMessage(
-        isDemoModeEnabled()
-          ? "Mock 모드에서는 실제 로그인을 하지 않습니다. 아래 데모 체험 바로가기를 이용해 주세요."
-          : "Mock 모드에서는 실제 로그인을 하지 않습니다. (데모 체험이 꺼져 있습니다)",
-      );
-      return;
-    }
 
     submittingRef.current = true;
     setIsSubmitting(true);

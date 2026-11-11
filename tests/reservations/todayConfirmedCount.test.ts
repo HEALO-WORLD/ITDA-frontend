@@ -130,8 +130,6 @@ beforeEach(() => {
   state.calls = [];
   state.connections = 0;
   rows = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "reservations,referrals";
   console.error = () => {};
 });
 

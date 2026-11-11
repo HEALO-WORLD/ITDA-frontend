@@ -1,21 +1,11 @@
-import { AlertTriangle, CopyCheck, Info } from "lucide-react";
-import { useRef, useState, type FormEvent } from "react";
+import { CopyCheck } from "lucide-react";
+
 
 import { WEEKDAYS } from "@/lib/format/date";
 
-import { updateMockOperatingHours } from "../mockEquipmentStore";
 import { WEEK_ORDER } from "../operatingHours";
 import { hasErrors, validateOperatingDay, type OperatingDayErrors, type OperatingDayInput } from "../rules";
 import type { DailyOperatingHours } from "../types";
-
-interface OperatingHoursFormProps {
-  organizationId: string;
-  equipmentId: string;
-  equipmentName: string;
-  operatingHours: DailyOperatingHours[];
-  onCancel: () => void;
-  onSaved: (message: string) => void;
-}
 
 const timeClass =
   "h-10 w-full min-w-0 rounded-lg border bg-white px-2 text-sm text-gray-900 outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:bg-gray-50 disabled:text-gray-400";
@@ -148,93 +138,6 @@ export function OperatingHoursFields({ days, onChange, showErrors, disabled = fa
         })}
       </fieldset>
     </div>
-  );
-}
-
-/**
- * 요일별 운영 시간 수정 (⚠️ Mock: 이 브라우저에만 저장된다).
- * 이미 만들어진 슬롯·예약은 바꾸지 않으며, 새 운영 시간은 이후 슬롯 생성에만 적용된다.
- */
-export default function OperatingHoursForm({
-  organizationId,
-  equipmentId,
-  equipmentName,
-  operatingHours,
-  onCancel,
-  onSaved,
-}: OperatingHoursFormProps) {
-  const [days, setDays] = useState<OperatingDayInput[]>(() => toOperatingDayInputs(operatingHours));
-  const [showErrors, setShowErrors] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const submittingRef = useRef(false);
-
-  const isValid = isOperatingDaysValid(days);
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setShowErrors(true);
-    if (submittingRef.current || !isValid) return;
-    submittingRef.current = true;
-    setIsSubmitting(true);
-    setSubmitError(null);
-    try {
-      const result = await updateMockOperatingHours(organizationId, equipmentId, days);
-      if (result.ok) {
-        onSaved(`${equipmentName} 운영 시간을 저장했습니다. 이미 만든 슬롯·예약은 바뀌지 않습니다.`);
-        return;
-      }
-      setSubmitError(result.message);
-    } catch {
-      setSubmitError("저장하지 못했습니다. 잠시 후 다시 시도해 주세요.");
-    }
-    submittingRef.current = false;
-    setIsSubmitting(false);
-  };
-
-  return (
-    <form onSubmit={handleSubmit} noValidate aria-busy={isSubmitting}>
-      {submitError && (
-        <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg bg-red-50 px-4 py-3 text-[15px] text-red-700">
-          <AlertTriangle className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
-          <p>{submitError}</p>
-        </div>
-      )}
-      {showErrors && !isValid && (
-        <p role="alert" className="mb-3 text-sm text-red-600">
-          표시된 요일의 운영 시간을 확인해 주세요.
-        </p>
-      )}
-
-      <OperatingHoursFields days={days} onChange={setDays} showErrors={showErrors} disabled={isSubmitting} />
-
-      <div className="mt-4 flex items-start gap-2 rounded-lg border border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-        <p>
-          <strong className="mr-1 font-semibold">[API 미연동]</strong>
-          이 브라우저에만 저장됩니다. 운영 시간을 바꿔도 이미 만든 슬롯·예약은 지우거나 바꾸지 않으며, 새 운영 시간은
-          이후 슬롯 생성에 적용됩니다. (기존 슬롯 처리 정책은 백엔드 확정 필요)
-        </p>
-      </div>
-
-      <div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={isSubmitting}
-          className="h-12 rounded-lg border border-line bg-white px-6 text-[15px] font-semibold text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          취소
-        </button>
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="h-12 rounded-lg bg-primary px-6 text-[15px] font-bold text-white transition-colors hover:bg-primary-hover disabled:cursor-not-allowed disabled:bg-gray-200 disabled:text-gray-400"
-        >
-          {isSubmitting ? "저장 중" : "운영 시간 저장"}
-        </button>
-      </div>
-    </form>
   );
 }
 

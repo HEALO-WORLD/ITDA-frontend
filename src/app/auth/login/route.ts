@@ -1,6 +1,5 @@
 import { getLoginFailureReason, LOGIN_FAILURE_MESSAGES, requestLogin } from "@/features/auth/remote";
 import type { LoginFailureReason, LoginResult } from "@/features/auth/types";
-import { getApiMode } from "@/lib/api/config";
 import { isSameOriginRequest } from "@/lib/auth/csrf";
 import { setAccessTokenCookie, setRefreshTokenCookie, startLoginSession, verifyAccessToken } from "@/lib/auth/session";
 import { getHomeRouteForUserRole } from "@/constants/navigation";
@@ -10,7 +9,6 @@ import { getHomeRouteForUserRole } from "@/constants/navigation";
  *
  * 브라우저는 토큰을 받지 않는다: 서버가 받은 Access·Refresh 토큰을 각각 HttpOnly 쿠키에 저장하고 결과(LoginResult)만 돌려준다.
  * 토큰을 받으면 `GET /api/v1/users/me`로 사용자를 확인하고, 확인된 경우에만 쿠키를 저장해 역할별 첫 화면 경로를 돌려준다.
- * API 모드에서만 동작한다. Mock 모드에서는 백엔드를 부르지 않고 거부한다 (Mock 로그인을 만들지 않는다).
  */
 
 const STATUS_BY_REASON: Record<LoginFailureReason, number> = {
@@ -18,7 +16,6 @@ const STATUS_BY_REASON: Record<LoginFailureReason, number> = {
   INVALID_CREDENTIALS: 401,
   NOT_APPROVED: 403,
   FORBIDDEN_ORIGIN: 403,
-  MOCK_MODE: 409,
   CONFIG: 500,
   SERVER_ERROR: 502,
   USER_INFO_FAILED: 502,
@@ -49,14 +46,6 @@ export async function POST(request: Request) {
   if (!(request.headers.get("content-type") ?? "").toLowerCase().includes("application/json")) {
     return fail("INVALID_INPUT");
   }
-
-  let mode: ReturnType<typeof getApiMode>;
-  try {
-    mode = getApiMode();
-  } catch {
-    return fail("CONFIG");
-  }
-  if (mode !== "api") return fail("MOCK_MODE");
 
   let body: unknown = null;
   try {

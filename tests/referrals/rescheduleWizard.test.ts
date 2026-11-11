@@ -17,12 +17,9 @@ const EXAM_TYPE = "66666666-6666-4666-8666-666666666666";
 
 const calls: string[] = [];
 
-process.env.NEXT_PUBLIC_API_MODE = "mock";
-
 let Confirm: typeof import("@/features/referrals/components/ApiRescheduleConfirm");
 let Steps: typeof import("@/features/referrals/components/RescheduleWizardSteps");
 let SlotSearch: typeof import("@/features/slots/components/SlotSearch").default;
-let mockReferrals: typeof import("@/lib/dev/mockReferrals");
 
 before(async () => {
   mock.module("@/features/referrals/rescheduleActions", {
@@ -38,7 +35,6 @@ before(async () => {
   Confirm = await import("@/features/referrals/components/ApiRescheduleConfirm");
   Steps = await import("@/features/referrals/components/RescheduleWizardSteps");
   SlotSearch = (await import("@/features/slots/components/SlotSearch")).default;
-  mockReferrals = await import("@/lib/dev/mockReferrals");
 });
 
 const target = {
@@ -181,19 +177,14 @@ describe("SlotSearch 재조정: PC 한 모달 3단계 / 모바일 기존 구조"
     if (original === undefined) Reflect.deleteProperty(globalThis, "window");
     else globalThis.window = original;
   });
-  const referral = () => {
-    const found = mockReferrals.MOCK_REFERRAL_SUMMARIES.find((item) => item.status === "RESCHEDULE_REQUIRED");
-    assert.ok(found, "Mock 재조정 대상 의뢰");
-    return found;
-  };
   const renderSearch = (pc: boolean) => {
     if (pc) globalThis.window = { matchMedia: () => ({ matches: true }) } as unknown as Window & typeof globalThis;
     else Reflect.deleteProperty(globalThis, "window");
     try {
       return renderToStaticMarkup(
         createElement(SlotSearch, {
-          organizations: [{ id: "org-a", name: "A 영상센터" }],
-          rescheduleTarget: referral(),
+          organizations,
+          apiReschedule: { ok: true, target },
           embedded: true,
           rescheduleWizard: {
             existing: createElement("section", { "aria-label": "기존 예약" }, "EXISTING-CARD"),

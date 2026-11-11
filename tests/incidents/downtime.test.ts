@@ -69,8 +69,6 @@ function reset() {
   state.order = [];
   state.refreshCount = 0;
   state.sameOrigin = true;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "incidents,equipment";
   process.env.NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION = "true";
 }
 
@@ -82,7 +80,6 @@ let remote: typeof import("@/features/incidents/remote");
 let server: typeof import("@/features/incidents/downtimeServer");
 let actions: typeof import("@/features/incidents/downtimeActions");
 let incidentServer: typeof import("@/features/incidents/server");
-let mockRules: typeof import("@/features/incidents/rules");
 let Register: typeof import("@/features/incidents/components/IncidentDowntimeRegister").default;
 let registerModule: typeof import("@/features/incidents/components/IncidentDowntimeRegister");
 let config: typeof import("@/features/incidents/downtimeConfig");
@@ -146,7 +143,6 @@ before(async () => {
   server = await import("@/features/incidents/downtimeServer");
   actions = await import("@/features/incidents/downtimeActions");
   incidentServer = await import("@/features/incidents/server");
-  mockRules = await import("@/features/incidents/rules");
   config = await import("@/features/incidents/downtimeConfig");
   tracking = await import("@/features/incidents/downtimeTracking");
   registerModule = await import("@/features/incidents/components/IncidentDowntimeRegister");
@@ -287,11 +283,6 @@ describe("createEquipmentDowntime (remote)", () => {
     assert.equal((await remote.createEquipmentDowntime(body)).conflictedSlots[0].reservationId, null);
   });
 
-  it("incidents가 API 대상이 아니면 요청하지 않는다", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    await assert.rejects(remote.createEquipmentDowntime(body), { kind: "CONFIG" });
-    assert.equal(posts().length, 0);
-  });
 });
 
 describe("getDowntimeCreateFailure", () => {
@@ -370,8 +361,6 @@ describe("submitEquipmentDowntime", () => {
       if (!result.ok) assert.equal(result.reason, "NOT_AVAILABLE");
     }
     process.env.NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION = "true";
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    assert.equal(config.isDowntimeRegistrationEnabled(), false, "Mock 모드에서는 꺼짐");
     assert.deepEqual(state.order, []);
   });
 
@@ -523,21 +512,6 @@ describe("IncidentDowntimeRegister 버튼", () => {
 });
 
 describe("회귀", () => {
-  it("Mock 장애 등록 규칙(occurredAt 모델)은 그대로다", () => {
-    const now = "2026-11-05T12:00";
-    const ok = mockRules.validateIncidentRegister(
-      { equipmentId: "eq-1", occurredAt: "2026-11-05T11:00", reason: "고장" },
-      { organizationEquipmentIds: new Set(["eq-1"]), activeEquipmentIds: new Set(), nowDateTime: now },
-    );
-    assert.deepEqual(ok, {});
-    const future = mockRules.validateIncidentRegister(
-      { equipmentId: "eq-1", occurredAt: "2026-11-05T13:00", reason: "x".repeat(201) },
-      { organizationEquipmentIds: new Set(["eq-1"]), activeEquipmentIds: new Set(), nowDateTime: now },
-    );
-    assert.ok(future.occurredAt && future.reason);
-    assert.equal(mockRules.INCIDENT_REASON_MAX_LENGTH, 200);
-  });
-
   it("장애 목록 조회는 GET /api/v1/equipment-incidents 그대로 (기관 ID를 보내지 않음)", async () => {
     state.incidentPage = {
       contents: [
@@ -675,15 +649,11 @@ describe("장애 등록 대화상자 레이아웃", () => {
       }),
     );
 
-  it("모달은 form2(980px)이고 버튼 줄은 Modal footer에 둔다 (다른 모달 크기는 그대로)", async () => {
+  it("모달은 form2(980px)이고 버튼 줄은 Modal footer에 둔다", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync("src/features/incidents/components/IncidentDowntimeRegister.tsx", "utf8");
     assert.match(source, /<Modal\b[^>]*\btitle="장비 장애 등록"[^>]*\bsize="form2"/);
     assert.match(source, /footer=\{[^}]*<DowntimeRegisterActions /);
-    // Mock 장애 화면(IncidentBoard)의 등록·상세 모달은 바꾸지 않는다
-    const board = readFileSync("src/features/incidents/components/IncidentBoard.tsx", "utf8");
-    assert.match(board, /<Modal\s+open=\{isRegisterOpen\}\s+title="장비 장애 등록"/);
-    assert.doesNotMatch(board, /size="form2"/);
   });
 
   it("860px 이상 2단(왼쪽 장애 장비·사유 5 : 오른쪽 시작·종료 예정 일시 7), 좁으면 1단", () => {

@@ -187,11 +187,9 @@ describe("빈 상태·집계·요청", () => {
 });
 
 describe("레이아웃·DaySlotList", () => {
-  it("API 일정 영역만 달력 40% : 목록 60% (Mock 워크스페이스 레이아웃은 그대로)", () => {
+  it("API 일정 영역은 달력 40% : 목록 60%", () => {
     const api = readFileSync(new URL("../../src/features/equipment/components/ApiSlotSchedule.tsx", import.meta.url), "utf8");
     assert.match(api, /min-\[900px\]:grid-cols-\[minmax\(0,2fr\)_minmax\(0,3fr\)\]/);
-    const mock = readFileSync(new URL("../../src/features/equipment/components/EquipmentSlotWorkspace.tsx", import.meta.url), "utf8");
-    assert.equal(mock.includes("minmax(0,2fr)_minmax(0,3fr)"), false);
   });
 
   it("API: 필터 영역·건수 요약·필터 0건 문구·페이지 영역을 그린다", async () => {

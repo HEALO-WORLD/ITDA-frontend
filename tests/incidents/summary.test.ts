@@ -45,8 +45,6 @@ beforeEach(() => {
   state.response = validSummary();
   state.error = null;
   state.calls = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "incidents";
 });
 
 const expectParse = async (response: unknown) => {
@@ -71,11 +69,6 @@ describe("fetchIncidentSummary: 요청", () => {
     assert.deepEqual(state.calls[0].options, { headers, signal: controller.signal });
   });
 
-  it("incidents가 API 대상이 아니면 요청하지 않고 CONFIG 오류", async () => {
-    process.env.NEXT_PUBLIC_API_FEATURES = "slots";
-    await assert.rejects(remote.fetchIncidentSummary(), (error: unknown) => error instanceof ApiError && error.kind === "CONFIG");
-    assert.equal(state.calls.length, 0);
-  });
 });
 
 describe("fetchIncidentSummary: 정상 응답", () => {

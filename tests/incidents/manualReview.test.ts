@@ -62,8 +62,6 @@ const state = { referralPage: pageOf(referralJson()) as unknown };
 
 function reset() {
   state.referralPage = pageOf(referralJson());
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "incidents,equipment";
 }
 
 let remote: typeof import("@/features/incidents/remote");

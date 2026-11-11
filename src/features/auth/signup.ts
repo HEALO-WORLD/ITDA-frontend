@@ -12,7 +12,6 @@ import type { PublicInstitution, SignupFailureReason, SignupInstitutionType } fr
  * 백엔드 InstitutionController·AuthController·SignupRequest/Response·PublicInstitutionResponse·ErrorCode를 기준으로 옮겼다
  * (ITDA 저장소 origin/dev b315532 기준 확인).
  * 서버 전용: 회원가입 화면(서버 컴포넌트)과 회원가입 Route Handler(`app/auth/signup/route.ts`)에서만 부른다.
- * Mock 모드에서는 공통 API Client가 요청을 보내지 않고 설정 오류를 낸다 (Mock 기관 목록·Mock 가입을 만들지 않는다).
  * 가입 성공 시 계정은 승인 대기(active=false)이고 토큰을 발급하지 않는다 (자동 로그인 없음).
  */
 
@@ -99,7 +98,7 @@ function isSignupResponse(value: unknown): value is SignupResponseDto {
   );
 }
 
-type RemoteSignupFailureReason = Exclude<SignupFailureReason, "MOCK_MODE" | "FORBIDDEN_ORIGIN">;
+type RemoteSignupFailureReason = Exclude<SignupFailureReason, "FORBIDDEN_ORIGIN">;
 
 /** 회원가입 실패 원인. 상태 코드를 우선하고, 같은 상태 코드 안에서는 백엔드 오류 코드로 확인한다 */
 export function getSignupFailureReason(error: unknown): RemoteSignupFailureReason {
@@ -132,6 +131,5 @@ export const SIGNUP_FAILURE_MESSAGES: Record<SignupFailureReason, string> = {
   NETWORK: "회원가입 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
   SERVER_ERROR: "회원가입 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.",
   CONFIG: "회원가입 기능을 사용할 수 없는 환경입니다. (API 모드·주소 설정 확인)",
-  MOCK_MODE: "회원가입은 실제 서버 연동(API 모드)에서만 이용할 수 있습니다.",
   FORBIDDEN_ORIGIN: "허용되지 않은 요청입니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.",
 };

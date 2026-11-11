@@ -8,12 +8,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createSubmitLock } from "@/features/slots/submitLock";
 
 /**
- * 슬롯 생성 화면: 연속 클릭 방지, API 대화상자 첫 화면(서버 기능에 없는 입력이 없는지), Mock 화면이 실제 생성을 부르지 않는지.
+ * 슬롯 생성 화면: 연속 클릭 방지, API 대화상자 첫 화면(서버 기능에 없는 입력이 없는지).
  * 클릭·키보드 흐름은 브라우저에서 확인한다 (이 저장소에는 DOM 테스트 도구가 없다).
  */
 
-process.env.NEXT_PUBLIC_API_MODE = "api";
-process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment";
 
 const { default: ApiSlotGenerationDialog } = await import("@/features/equipment/components/ApiSlotGenerationDialog");
 const { default: Modal } = await import("@/components/ui/Modal");
@@ -122,20 +120,6 @@ describe("ApiSlotGenerationDialog 첫 화면", () => {
   });
 });
 
-describe("Mock 화면 회귀", () => {
-  it("Mock 슬롯 생성 폼은 그대로 Mock 저장소만 쓰고 실제 생성 Server Function을 부르지 않는다", () => {
-    const source = readFileSync(new URL("../../src/features/equipment/components/SlotGenerationForm.tsx", import.meta.url), "utf8");
-    assert.equal(source.includes("generateSlotsAction"), false);
-    assert.equal(source.includes("slots/generateActions"), false);
-  });
-
-  it("장비 페이지: API 모드(equipment)가 아니면 Mock 워크스페이스를 쓰고, API 생성 대화상자는 API 워크스페이스에서만 연다", () => {
-    const page = readFileSync(new URL("../../src/app/examining/equipment/page.tsx", import.meta.url), "utf8");
-    assert.match(page, /isApiFeature\("equipment"\)[\s\S]*EquipmentApiSection[\s\S]*EquipmentSlotWorkspace/);
-    const mockWorkspace = readFileSync(new URL("../../src/features/equipment/components/EquipmentSlotWorkspace.tsx", import.meta.url), "utf8");
-    assert.equal(mockWorkspace.includes("ApiSlotGenerationDialog"), false);
-  });
-});
 
 describe("슬롯 생성 화면: 로그인 세션 정합성 (STEP 3-2-2B-5)", () => {
   it("렌더링 시점 로그인 세션을 기간 생성 Action에 보내고, SESSION_CHANGED면 안내를 남기고 생성 버튼을 잠근다 (입력값 유지·재조회 없음)", () => {

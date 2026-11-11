@@ -1,4 +1,4 @@
-import { DEFAULT_API_TIMEOUT_MS, getApiBaseUrl, getApiMode } from "./config";
+import { DEFAULT_API_TIMEOUT_MS, getApiBaseUrl } from "./config";
 import { ApiError, getErrorCode, getHttpErrorMessage } from "./errors";
 import type { ApiResponseDto } from "./types";
 
@@ -8,7 +8,6 @@ import type { ApiResponseDto } from "./types";
  * - JSON 요청·응답, 제한 시간, 오류 정규화(ApiError)만 맡는다. 재시도·캐시 정책은 두지 않는다.
  * - 인증 정보를 직접 붙이지 않는다. 인증 방식(JWT 헤더·HttpOnly 쿠키)이 확정되면
  *   서버 전용 모듈(`import "server-only"`)에서 `headers`·`credentials`로 넘긴다. 이 파일에 토큰을 두지 않는다.
- * - Mock 모드에서는 요청을 보내지 않고 설정 오류를 낸다 (데모 환경에서 실수로 외부 호출하지 않도록).
  * - 응답 타입은 검증하지 않는다. 기능별 매핑 함수에서 서버 DTO를 화면 타입으로 바꾸며 확인한다.
  */
 
@@ -46,9 +45,6 @@ export function buildApiUrl(path: string, query?: Record<string, QueryValue>): s
  * TODO(api): 응답 공통 포맷(예: 감싼 data 필드)이 확정되면 여기서 벗기지 말고 기능별 매핑에서 처리할지 함께 정한다.
  */
 export async function apiRequest<T = unknown>(path: string, options: ApiRequestOptions = {}): Promise<T> {
-  if (getApiMode() !== "api") {
-    throw new ApiError("CONFIG", "Mock 모드에서는 실제 API를 호출하지 않습니다. (NEXT_PUBLIC_API_MODE=api)");
-  }
   const { method = "GET", query, body, headers, credentials, timeoutMs = DEFAULT_API_TIMEOUT_MS, signal } = options;
   const url = buildApiUrl(path, query);
 

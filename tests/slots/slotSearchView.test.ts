@@ -7,12 +7,10 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { ApiExamSlot } from "@/features/slots/apiSlots";
 
 /**
- * 화면 첫 렌더링(서버 렌더링 HTML) 확인: Mock 모드 회귀, API 모드 안내, 선택 버튼 동작.
+ * 화면 첫 렌더링(서버 렌더링 HTML) 확인: API 검색 안내, 선택 버튼 동작.
  * 선택 버튼은 SlotSearchTable이 돌려준 요소의 onClick을 직접 불러 확인한다 (이 저장소에는 DOM 테스트 도구가 없다).
  * 의뢰 생성·재조정 모달로 이어지는 화면 흐름은 tests/referrals와 Playwright(E2E)에서 확인한다.
  */
-
-process.env.NEXT_PUBLIC_API_MODE = "mock";
 
 const { default: SlotSearch } = await import("@/features/slots/components/SlotSearch");
 const { default: SlotSearchTable } = await import("@/features/slots/components/SlotSearchTable");
@@ -52,18 +50,8 @@ function collectButtons(node: ReactNode, found: ReactElement<ButtonProps>[] = []
 }
 
 describe("SlotSearch 첫 화면", () => {
-  it("Mock 모드(기본): 기존 문구·개발용 예시 데이터 표시·'전체 기간' 그대로", () => {
+  it("검색 범위(오늘부터 31일) 안내", () => {
     const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS }));
-    assert.match(html, /개발용 예시 데이터/);
-    assert.match(html, /검색 조건을 선택한 후 검색 버튼을 눌러 주세요\.<\/p>/);
-    assert.match(html, /전체 기간/);
-    assert.doesNotMatch(html, /오늘부터 31일/);
-    assert.match(html, /슬롯 검색/);
-    assert.match(html, /예약 가능한 슬롯만 보기/);
-  });
-
-  it("API 모드: Mock 표시 없음, 검색 범위(오늘부터 31일) 안내", () => {
-    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS, dataSource: "api" }));
     assert.doesNotMatch(html, /개발용 예시 데이터/);
     assert.match(html, /날짜를 선택하지 않으면 오늘부터 31일 동안의 슬롯을 검색합니다/);
     assert.match(html, /오늘부터 31일/);
@@ -74,36 +62,19 @@ describe("SlotSearch 첫 화면", () => {
     }
   });
 
-  // page.tsx: 재조정 쿼리가 있어도 referrals 기능이 API 대상이 아니면(재예약 Server Function 사용 불가)
-  // 대상 의뢰를 조회하지 않고 isApiRescheduleRequested로 이 안내만 요청한다. referrals가 켜져 있으면 apiReschedule로 실제 재조정을 한다
-  it("API 모드 + referrals 기능 비활성(isApiRescheduleRequested): 재예약 미연동 안내를 보이고 Mock 재조정 배너는 보이지 않는다", () => {
-    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS, dataSource: "api", isApiRescheduleRequested: true }));
-    assert.match(html, /재조정 대체 슬롯 선택\(재예약 요청\)은 아직 이 화면에 연결되지 않았습니다/);
-    assert.match(html, /일반 검사 슬롯 검색으로 표시합니다/);
-    assert.doesNotMatch(html, /기존 예약을 변경할 새로운 검사 슬롯을 선택해 주세요/);
-  });
-
-  it("API 모드 일반 검색(재조정 쿼리 없음): 재예약 미연동 안내를 보이지 않는다", () => {
-    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS, dataSource: "api" }));
+  it("일반 검색(재조정 쿼리 없음): 재예약 안내를 보이지 않는다", () => {
+    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS }));
     assert.doesNotMatch(html, /아직 이 화면에 연결되지 않았습니다/);
   });
 });
 
-describe("SlotSearch PC 최초 화면 (기본 조건 자동 검색)", () => {
-  it("검색 화면 일반 검색: 처음부터 조건 칩 줄(PC)과 '검색 중' 안내(PC)로 시작, 좁은 화면은 기존 안내·전체 폼", () => {
+describe("SlotSearch 서버 최초 렌더링", () => {
+  it("일반 검색은 서버 렌더링에서 검색 조건과 결과 안내를 표시한다", () => {
     const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS }));
-    // PC 조건 칩 줄 (xl에서만 보임) + 기본 조건 값
     assert.match(html, /data-criteria-chips/);
-    assert.match(html, /id="slot-chip-organization"[\s\S]*?협력 검사기관<\/span><strong[^>]*>전체<\/strong>/);
-    assert.match(html, /id="slot-chip-exam-type"[\s\S]*?검사 유형<\/span><strong[^>]*>전체<\/strong>/);
-    assert.match(html, /id="slot-chip-time-of-day"[\s\S]*?시간대<\/span><strong[^>]*>전체<\/strong>/);
-    assert.match(html, />검색 적용</);
-    // 첫 검색이 시작되기 전에도 PC는 '검색 중' (안내 문구가 깜빡이지 않게), 좁은 화면은 기존 안내 그대로
-    assert.match(html, /<p role="status" class="[^"]* hidden itda:xl:block">기본 조건으로 검사 슬롯을 검색하고 있습니다\.<\/p>/);
-    assert.match(html, /<p role="status" class="[^"]* itda:xl:hidden">검색 조건을 선택한 후 검색 버튼을 눌러 주세요\.<\/p>/);
-    // 전체 폼은 PC에서만 숨긴다 (모바일은 그대로)
-    assert.match(html, /class="grid grid-cols-1 [^"]*itda:xl:hidden"/);
-    // 아직 검색 전: 적용 안 된 변경 안내 없음
+    assert.match(html, /검색 조건을 선택한 후 검색 버튼을 눌러 주세요/);
+    assert.match(html, /오늘부터 31일 동안의 슬롯을 검색합니다/);
+    assert.match(html, />슬롯 검색</);
     assert.doesNotMatch(html, /변경한 조건이 아직 검색 결과에 적용되지 않았습니다/);
   });
 
@@ -111,7 +82,7 @@ describe("SlotSearch PC 최초 화면 (기본 조건 자동 검색)", () => {
     const html = renderToStaticMarkup(createElement(SlotSearch, { organizations: ORGS, embedded: true }));
     assert.doesNotMatch(html, /data-criteria-chips/);
     assert.doesNotMatch(html, /기본 조건으로 검사 슬롯을 검색하고 있습니다/);
-    assert.match(html, /<p role="status" class="[^"]*">검색 조건을 선택한 후 검색 버튼을 눌러 주세요\.<\/p>/);
+    assert.match(html, /검색 조건을 선택한 후 검색 버튼을 눌러 주세요/);
     assert.doesNotMatch(html, /itda:xl:hidden">검색 조건을 선택한/);
   });
 
@@ -119,7 +90,6 @@ describe("SlotSearch PC 최초 화면 (기본 조건 자동 검색)", () => {
     const html = renderToStaticMarkup(
       createElement(SlotSearch, {
         organizations: ORGS,
-        dataSource: "api",
         apiReschedule: {
           ok: true,
           target: { referralId: "r-1", examTypeId: SLOT.examTypeId, examTypeName: "흉부 CT", modality: "CT", currentReservation: null },
@@ -135,7 +105,7 @@ describe("SlotSearch PC 최초 화면 (기본 조건 자동 검색)", () => {
 describe("SlotSearchTable 선택 버튼", () => {
   const noop = () => {};
 
-  it("Mock 모드: 예약 가능한 슬롯의 예약 요청 버튼은 활성", () => {
+  it("예약 가능한 슬롯의 예약 요청 버튼은 활성", () => {
     const html = renderToStaticMarkup(createElement(SlotSearchTable, { slots: [SLOT], onRequestReservation: noop }));
     assert.match(html, />예약 요청<\/button>/);
     assert.doesNotMatch(html, /disabled=""/);

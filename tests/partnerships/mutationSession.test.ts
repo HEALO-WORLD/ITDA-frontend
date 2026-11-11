@@ -45,8 +45,6 @@ const partnership = (status: string) => ({
 let actions: typeof import("@/features/partnerships/actions");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "partnerships";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async () => state.access,

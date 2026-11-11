@@ -15,8 +15,6 @@ export type LoginFailureReason =
   | "SERVER_ERROR"
   /** API 주소 미설정 등 서버 설정 오류 */
   | "CONFIG"
-  /** Mock 모드라 실제 로그인을 하지 않음 */
-  | "MOCK_MODE"
   /** 다른 출처에서 온 요청 (CSRF 방어) */
   | "FORBIDDEN_ORIGIN"
   /** 로그인은 됐지만 사용자 정보(users/me) 확인 실패 → 쿠키를 저장하지 않는다 */
@@ -34,8 +32,6 @@ export type LoginResult =
 export type ReissueFailureReason =
   /** 다른 출처에서 온 요청 (요청하지 않음) */
   | "FORBIDDEN_ORIGIN"
-  /** Mock 모드 (요청하지 않음) */
-  | "MOCK_MODE"
   /** API 모드·주소 설정 오류 */
   | "CONFIG"
   /** Refresh 쿠키 없음 (요청하지 않음) → 다시 로그인 */
@@ -90,8 +86,6 @@ export type SignupFailureReason =
   | "SERVER_ERROR"
   /** API 주소 미설정 등 서버 설정 오류 */
   | "CONFIG"
-  /** Mock 모드라 회원가입을 하지 않음 */
-  | "MOCK_MODE"
   /** 다른 출처에서 온 요청 (CSRF 방어) */
   | "FORBIDDEN_ORIGIN";
 

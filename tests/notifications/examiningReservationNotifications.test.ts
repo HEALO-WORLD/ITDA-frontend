@@ -73,8 +73,6 @@ beforeEach(() => {
   state.response = null;
   state.refreshCount = 0;
   state.role = "EXAMINING";
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "notifications,examining-notifications,reservations";
   console.error = () => {};
 });
 

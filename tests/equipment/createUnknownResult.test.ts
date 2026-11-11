@@ -39,8 +39,6 @@ const state = {
 let actions: typeof import("@/features/equipment/actions");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "equipment,slots";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async () => OK_ACCESS,

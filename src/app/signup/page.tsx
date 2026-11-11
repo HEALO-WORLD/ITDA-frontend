@@ -6,7 +6,6 @@ import { Suspense, type ReactNode } from "react";
 import AppHeader from "@/components/layout/AppHeader";
 import { ROUTES } from "@/constants/navigation";
 import { loadPublicInstitutions } from "@/features/auth/signup";
-import { getApiMode } from "@/lib/api/config";
 
 import SignupForm from "./SignupForm";
 
@@ -16,17 +15,9 @@ export const metadata: Metadata = {
 
 /**
  * 회원가입 (로그인 화면과 같은 구성).
- * - API 모드: 가입 가능 기관을 요청 시점에 실제 API로 조회해(Suspense) 폼에 넘긴다. 실패·빈 목록은 안내만 하고 Mock으로 대체하지 않는다
- * - Mock 모드: Mock 기관 목록·Mock 가입이 없으므로 API 모드에서만 가입할 수 있다는 안내만 표시한다
+ * 가입 가능 기관을 요청 시점에 실제 API로 조회해(Suspense) 폼에 넘긴다.
  */
 export default function SignupPage() {
-  let mode: "api" | "mock" | "invalid";
-  try {
-    mode = getApiMode();
-  } catch {
-    mode = "invalid";
-  }
-
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader subtitle="의료기관 검사 의뢰·예약 플랫폼" />
@@ -36,17 +27,9 @@ export default function SignupPage() {
           <p className="mt-3 text-center text-base text-gray-600 sm:text-lg">소속 기관을 선택하고 계정을 만드세요.</p>
 
           <div className="mt-10">
-            {mode === "api" ? (
-              <Suspense fallback={<Notice>가입 가능한 기관 목록을 불러오고 있습니다.</Notice>}>
-                <SignupFormWithInstitutions />
-              </Suspense>
-            ) : (
-              <Notice title={mode === "mock" ? "회원가입은 실제 서버 연동(API 모드)에서만 이용할 수 있습니다." : "회원가입 기능을 사용할 수 없는 환경입니다."}>
-                {mode === "mock"
-                  ? "Mock 모드에서는 계정을 만들지 않습니다. 로그인 화면의 데모 체험 바로가기를 이용해 주세요."
-                  : "API 모드 설정(NEXT_PUBLIC_API_MODE)을 확인해 주세요."}
-              </Notice>
-            )}
+            <Suspense fallback={<Notice>가입 가능한 기관 목록을 불러오고 있습니다.</Notice>}>
+              <SignupFormWithInstitutions />
+            </Suspense>
           </div>
 
           <p className="mt-8 border-t border-line pt-6 text-center text-[15px] text-gray-600">
