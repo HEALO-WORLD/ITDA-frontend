@@ -11,6 +11,7 @@ import { toBackendWeek } from "./operatingHours";
 import {
   createEquipment,
   createEquipmentExamType,
+  fetchEquipmentPage,
   isEquipmentEntityId,
   isEquipmentModality,
   replaceEquipmentOperatingHours,
@@ -51,9 +52,17 @@ export type EquipmentActionResult =
   | { ok: true; message: string }
   | {
       ok: false;
-      /** SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분) */
-      reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "SESSION_CHANGED" | "NETWORK" | "ERROR";
+      /**
+       * SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분)
+       * UNCERTAIN: 장비 등록 POST의 결과를 알 수 없음 (응답 없음·시간 초과·응답 형식 오류·5xx). 서버에 이미 등록됐을 수 있어 다시 보내지 않는다
+       */
+      reason: "INVALID" | "CONFLICT" | "NOT_FOUND" | "FORBIDDEN" | "UNAUTHORIZED" | "SIGNED_OUT" | "SESSION_CHANGED" | "UNCERTAIN" | "NETWORK" | "ERROR";
       message: string;
+      /**
+       * UNCERTAIN일 때 장비 목록 재조회 결과 (확정 근거가 아니라 정황):
+       * FOUND 같은 이름·종류의 장비가 있음(이번 요청일 수도, 같은 기관의 동시 등록일 수도 있다) · NOT_FOUND 아직 없음(처리 중일 수 있다) · LOOKUP_FAILED 재조회 실패
+       */
+      uncertain?: { lookup: "FOUND" | "NOT_FOUND" | "LOOKUP_FAILED"; equipmentId: string | null };
       fieldErrors?: Partial<Record<"name" | "modality" | "examTypeId" | "durationMinutes" | "operatingHours", string | null>>;
     };
 
@@ -103,14 +112,16 @@ export async function createEquipmentAction(input: unknown, expectedLoginSession
   const { name, modality } = asRecord(input);
   const fieldErrors = { name: validateEquipmentName(name), modality: isEquipmentModality(modality) ? null : "장비 종류를 선택해 주세요." };
   if (Object.values(fieldErrors).some(Boolean)) return { ok: false, reason: "INVALID", message: "입력값을 확인해 주세요.", fieldErrors };
-  return run(
-    expectedLoginSession,
-    "create",
-    "장비를 등록했습니다.",
-    (requestHeaders, institutionId) =>
-      createEquipment(institutionId, { name: name as string, modality: modality as "CT" | "MRI" }, { headers: requestHeaders }),
-    "장비 등록에 실패했습니다.",
-  );
+  const access = await requireRoleMutationAccess("EXAMINING", expectedLoginSession);
+  if (!access.ok) return toAccessFailure(access);
+  try {
+    await createEquipment(access.user.institutionId, { name: name as string, modality: modality as "CT" | "MRI" }, { headers: access.headers });
+  } catch (error) {
+    if (isCreateResultUnknown(error)) return checkUncertainCreate(error, access.headers, access.user.institutionId, name as string, modality as "CT" | "MRI");
+    return toActionFailure(error, "create", "장비 등록에 실패했습니다.");
+  }
+  refresh();
+  return { ok: true, message: "장비를 등록했습니다." };
 }
 
 export async function updateEquipmentAction(equipmentId: unknown, input: unknown, expectedLoginSession?: unknown): Promise<EquipmentActionResult> {
@@ -226,6 +237,51 @@ function toActionFailure(error: unknown, action: string, fallback: string, overr
   };
 }
 
+/**
+ * 장비 등록 POST의 결과를 알 수 없는 실패인지 (서버가 이미 등록했을 수 있어 다시 보내면 안 된다).
+ * 응답 없음(연결 실패·시간 초과·중단)·응답 형식 오류·5xx(처리 뒤 응답 단계에서 실패했을 수 있다)·알 수 없는 오류.
+ * 400·401·403·404·409(같은 이름 장비가 이미 있음)는 서버가 거부한 확실한 실패다
+ */
+function isCreateResultUnknown(error: unknown): boolean {
+  if (!isApiError(error)) return true;
+  if (error.kind === "NETWORK" || error.kind === "TIMEOUT" || error.kind === "ABORTED" || error.kind === "PARSE") return true;
+  return error.kind === "HTTP" && error.status !== null && error.status >= 500;
+}
+
+const UNCERTAIN_CREATE_MESSAGES = {
+  FOUND:
+    "장비 등록 응답을 받지 못했습니다. 장비 목록에 같은 이름·종류의 장비가 있어 이번 요청으로 등록되었을 가능성이 큽니다(같은 기관의 다른 사용자가 동시에 등록했을 수도 있습니다). 지원 검사 유형과 운영 시간은 저장하지 않았습니다. 다시 등록하지 말고 장비 목록에서 확인한 뒤 장비 상세·운영시간 설정에서 이어서 설정해 주세요.",
+  NOT_FOUND:
+    "장비 등록 결과를 확인하지 못했습니다. 지금 장비 목록에는 같은 이름의 장비가 없지만 서버에서 아직 처리 중일 수 있습니다. 잠시 후 장비 목록에서 먼저 확인하고, 없을 때만 다시 등록해 주세요. 지원 검사 유형과 운영 시간은 저장하지 않았습니다.",
+  LOOKUP_FAILED:
+    "장비 등록 결과를 확인하지 못했고 장비 목록도 불러오지 못했습니다. 장비가 등록되었을 수 있으니 창을 닫고 장비 목록에서 먼저 확인해 주세요. 확인하기 전에는 같은 요청을 다시 보내지 마세요. 지원 검사 유형과 운영 시간은 저장하지 않았습니다.",
+} as const;
+
+/**
+ * 장비 등록 결과 불명 처리: 장비 등록 POST는 다시 보내지 않고, 우리 기관 장비 목록을 한 번 조회(GET)해 같은 이름·종류의 장비가 있는지 알린다.
+ * 목록 조회가 됐을 때만 화면을 서버 값으로 다시 그린다(refresh): 조회도 실패하는 상황에서 다시 그리면 장비 화면이 오류로 바뀌어
+ * 결과 불명 안내가 있는 등록 창까지 사라진다.
+ * 백엔드에 멱등 키가 없고 장비 응답에 생성 시각·요청 구분 값이 없어, 찾더라도 이번 요청의 결과라고 확정하지 않는다
+ * (같은 기관의 동시 등록일 수 있다). 같은 이름 재등록은 백엔드가 409(DUPLICATE_EQUIPMENT_NAME)로 막는다.
+ */
+async function checkUncertainCreate(error: unknown, requestHeaders: HeadersInit, institutionId: string, name: string, modality: "CT" | "MRI"): Promise<ActionFailure> {
+  const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
+  console.error("[equipment] create 결과 불명:", isApiError(error) ? `${error.kind} ${status ?? ""} ${error.code ?? ""}`.trim() : "unknown");
+  let lookup: "FOUND" | "NOT_FOUND" | "LOOKUP_FAILED" = "LOOKUP_FAILED";
+  let equipmentId: string | null = null;
+  try {
+    const page = await fetchEquipmentPage(institutionId, { modality }, { headers: requestHeaders });
+    const match = page.contents.find((item) => item.name.trim() === name.trim() && item.modality === modality);
+    // 한 페이지(최대 100대) 안에서 못 찾았는데 장비가 더 있으면 '없음'으로 단정하지 않는다
+    lookup = match ? "FOUND" : page.totalPages > 1 ? "LOOKUP_FAILED" : "NOT_FOUND";
+    equipmentId = match?.id ?? null;
+    refresh();
+  } catch (lookupError) {
+    toFailure(lookupError, "create-uncertain-lookup", "장비 목록을 확인하지 못했습니다.");
+  }
+  return { ok: false, reason: "UNCERTAIN", message: UNCERTAIN_CREATE_MESSAGES[lookup], uncertain: { lookup, equipmentId } };
+}
+
 /** 검사기관·로그인 세션 확인 실패 → 결과 (SESSION_CHANGED는 FORBIDDEN으로 바꾸지 않는다) */
 function toAccessFailure(access: Extract<Awaited<ReturnType<typeof requireRoleMutationAccess>>, { ok: false }>): ActionFailure {
   if (access.reason === "SESSION_CHANGED") return { ok: false, reason: "SESSION_CHANGED", message: access.message };
@@ -280,7 +336,8 @@ export type CreateEquipmentResult =
 /**
  * 장비 등록 + 지원 검사 유형 연결(유형별 소요 시간) + 운영시간 설정 (2단계 등록 대화상자).
  * 1) POST 장비(장비명·종류만) → 2) 검사 유형마다 POST {examTypeId, durationMinutes} → 3) PUT 운영시간.
- * 입력은 요청 전에 모두 검사한다. 장비 등록이 실패하면 아무것도 만들지 않은 것이다.
+ * 입력은 요청 전에 모두 검사한다. 장비 등록이 서버에서 거부되면(400·403·409 등) 아무것도 만들지 않은 것이다.
+ * 장비 등록 결과를 알 수 없으면(응답 없음·5xx 등) 2·3을 진행하지 않고 UNCERTAIN으로 끝낸다 (checkUncertainCreate, 장비 등록 POST 재전송 없음).
  * 2·3이 실패해도 장비 등록은 성공으로 두고, 무엇이 저장되지 않았는지 구분해 알린다.
  */
 export async function createEquipmentWithExamTypesAction(input: unknown, expectedLoginSession?: unknown): Promise<CreateEquipmentResult> {
@@ -318,6 +375,8 @@ export async function createEquipmentWithExamTypesAction(input: unknown, expecte
     const created = await createEquipment(access.user.institutionId, { name: name as string, modality: modality as "CT" | "MRI" }, { headers: access.headers });
     equipmentId = created.id;
   } catch (error) {
+    // 등록됐는지 모르는 장비에 검사 유형·운영시간을 이어서 저장하지 않는다
+    if (isCreateResultUnknown(error)) return checkUncertainCreate(error, access.headers, access.user.institutionId, name as string, modality as "CT" | "MRI");
     return toActionFailure(error, "create", "장비 등록에 실패했습니다.");
   }
 

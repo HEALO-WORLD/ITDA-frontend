@@ -195,7 +195,8 @@ describe("장비 관리 변경 Action: 로그인 세션 정합성 (STEP 3-2-2B-6
     assert.equal((dialogs.match(/markEquipmentSessionChanged\(\)/g) ?? []).length, 3, "정보 수정·등록, 검사 유형 추가, 소요 시간 수정");
     assert.equal((workspace.match(/markEquipmentSessionChanged\(\)/g) ?? []).length, 3, "등록, 등록 뒤 운영시간 다시 저장, 운영시간 수정");
     assert.equal((dialogs.match(/disabled=\{pending \|\| sessionChanged\}/g) ?? []).length, 3);
-    assert.equal((workspace.match(/disabled=\{pending \|\| sessionChanged\}/g) ?? []).length, 2);
+    // 장비 등록 버튼은 결과 불명(uncertain)에도 잠근다 (P1-B). 세션 잠금 조건은 그대로 두 버튼 모두에 있어야 한다
+    assert.equal((workspace.match(/disabled=\{pending \|\| sessionChanged( \|\| uncertain !== null)?\}/g) ?? []).length, 2);
     assert.doesNotMatch(dialogs + workspace, /\/auth\/session/);
   });
 });
