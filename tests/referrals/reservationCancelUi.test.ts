@@ -89,7 +89,7 @@ describe("예약 취소 버튼 표시", () => {
   });
 });
 
-describe("배치: API 상세 모달에만 (목록·Mock 화면은 그대로)", () => {
+describe("배치: API 상세 모달에만", () => {
   const read = (path: string) => readFileSync(new URL(`../../src/${path}`, import.meta.url), "utf8");
 
   it("상세 대화상자 하단에 두고, 성공·409 뒤 상세를 직접 다시 불러온다", () => {
@@ -99,8 +99,8 @@ describe("배치: API 상세 모달에만 (목록·Mock 화면은 그대로)", (
     assert.match(source, /preventClose=\{cancelPending\}/);
   });
 
-  it("의뢰 목록·Mock 상세에는 취소 버튼을 두지 않는다", () => {
-    for (const path of ["features/referrals/components/ReferralApiTable.tsx", "features/referrals/components/ReferralApiSection.tsx", "features/referrals/components/ReferralDetailDialog.tsx", "features/referrals/components/ReferralHistoryTable.tsx"]) {
+  it("의뢰 목록에는 취소 버튼을 두지 않는다", () => {
+    for (const path of ["features/referrals/components/ReferralApiTable.tsx", "features/referrals/components/ReferralApiSection.tsx"]) {
       assert.doesNotMatch(read(path), /ReservationCancelControl|cancelReservationAction|예약 취소/, path);
     }
   });

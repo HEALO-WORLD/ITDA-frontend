@@ -9,10 +9,10 @@ import type { ExamProgressStatus } from "./types";
  * 검사 실제 API (referral-service, Gateway 경유).
  *
  * 백엔드 ExaminationController와 요청·응답 DTO를 기준으로 옮겼다 (ITDA 저장소 origin/dev a963fc5 기준 확인).
- * API 연결 상태 (NEXT_PUBLIC_API_FEATURES=examinations 기준, API 모드 화면에서만 호출)
+ * API 전용 화면에서 호출한다.
  * - 검사 목록 조회 `fetchExaminationPage`
  * - 검사 상태 변경 `changeExaminationStatus`, 검사 결과 등록 `createExaminationResult` (actions.ts에서 호출)
- * - Mock 모드 화면은 api.ts·progress.ts·register.ts를 그대로 쓴다. 의뢰 ID나 Mock ID를 검사 ID 대신 보내지 않는다.
+ * - 의뢰 ID나 형식이 다른 값을 검사 ID 대신 보내지 않는다.
  * - 검사 결과 조회 `fetchExaminationResult` (상세 대화상자에서 결과가 등록된 검사만, resultActions.ts에서 호출)
  *
  * 인증: Gateway가 `Authorization: Bearer <JWT>`를 검증하고 X-Institution-Id·X-Role을 붙인다.

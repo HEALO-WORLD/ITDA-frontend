@@ -41,8 +41,6 @@ const link = (equipmentId: string, examTypeId: string, durationMinutes: number) 
 let actions: typeof import("@/features/equipment/actions");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "equipment,slots";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async () => state.access,

@@ -237,7 +237,7 @@ describe("SlotSearch 모드 분리", () => {
   const organizations = [{ id: EXAM_ORG, name: "A 영상센터" }];
 
   it("API 재조정 모드: 안내 배너 + 검사 종류 고정(CT), Mock 배너·미연결 안내 없음", () => {
-    const html = renderToStaticMarkup(createElement(SlotSearch, { dataSource: "api", organizations, apiReschedule: { ok: true, target } }));
+    const html = renderToStaticMarkup(createElement(SlotSearch, { organizations, apiReschedule: { ok: true, target } }));
     assert.match(html, /기존 예약을 변경할 새로운 검사 슬롯을 선택해 주세요/);
     assert.match(html, /흉부 CT \(CT\)/);
     assert.doesNotMatch(html, /아직 이 화면에 연결되지 않았습니다/);
@@ -247,21 +247,17 @@ describe("SlotSearch 모드 분리", () => {
 
   it("API 재조정 대상 조회 실패: 서버 안내 + 일반 검색 (Mock 대상 없음)", () => {
     const html = renderToStaticMarkup(
-      createElement(SlotSearch, { dataSource: "api", organizations, apiReschedule: { ok: false, reason: "NOT_RESCHEDULABLE", message: "재조정이 필요한 상태의 의뢰가 아닙니다." } }),
+      createElement(SlotSearch, { organizations, apiReschedule: { ok: false, reason: "NOT_RESCHEDULABLE", message: "재조정이 필요한 상태의 의뢰가 아닙니다." } }),
     );
     assert.match(html, /재조정이 필요한 상태의 의뢰가 아닙니다\. 일반 검사 슬롯 검색으로 표시합니다/);
     assert.doesNotMatch(html, /기존 예약을 변경할 새로운 검사 슬롯을/);
   });
 
-  it("일반 API 검색(재조정 없음)·Mock 모드는 기존 그대로", () => {
-    const api = renderToStaticMarkup(createElement(SlotSearch, { dataSource: "api", organizations }));
+  it("일반 API 검색은 재조정 안내를 노출하지 않는다", () => {
+    const api = renderToStaticMarkup(createElement(SlotSearch, { organizations }));
     assert.doesNotMatch(api, /기존 예약을 변경할/);
     // 검사 유형은 고정하지 않는다 (지원 장비 칸은 장비 목록을 넘기지 않아 비활성일 수 있다)
     assert.doesNotMatch(api, /<select id="slot-exam-type"[^>]*disabled=""/);
-    const notLinked = renderToStaticMarkup(createElement(SlotSearch, { dataSource: "api", organizations, isApiRescheduleRequested: true }));
-    assert.match(notLinked, /아직 이 화면에 연결되지 않았습니다/);
-    const mockInvalid = renderToStaticMarkup(createElement(SlotSearch, { organizations, rescheduleTarget: "INVALID" }));
-    assert.match(mockInvalid, /재조정 대상 예약을 찾을 수 없습니다/);
     assert.equal(calls.includes("request"), false);
   });
 });
@@ -327,6 +323,6 @@ describe("결과 불명 화면 (P1-A)", () => {
     const source = readFileSync(new URL("../../src/features/slots/components/SlotSearch.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
     assert.match(source, /const \[heldApiTarget, setHeldApiTarget\] = useState\(latestApiTarget\);/);
     assert.match(source, /const apiTarget = latestApiTarget \?\? heldApiTarget;/);
-    assert.match(source, /\{isApi && apiReschedule && !apiReschedule\.ok && !heldApiTarget && \(/);
+    assert.match(source, /\{apiReschedule && !apiReschedule\.ok && !heldApiTarget && \(/);
   });
 });

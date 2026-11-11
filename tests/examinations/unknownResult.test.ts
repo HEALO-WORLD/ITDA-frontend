@@ -113,8 +113,6 @@ beforeEach(() => {
   state.resultLookupError = null;
   state.examPage = 0;
   state.refreshCount = 0;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "examinations";
 });
 
 const quiet = async <T>(fn: () => Promise<T>) => {

@@ -1,9 +1,8 @@
 import { Suspense } from "react";
 
-import { isApiAuthMode } from "@/components/auth/ApiRoleGate";
 import PageHeader from "@/components/layout/PageHeader";
 import AdminInstitutionManager from "@/features/admin/components/AdminInstitutionManager";
-import { AdminApiOnlyNotice, AdminFailureNotice, AdminLoading } from "@/features/admin/components/AdminNotices";
+import { AdminFailureNotice, AdminLoading } from "@/features/admin/components/AdminNotices";
 import { loadInstitutions } from "@/features/admin/server";
 
 /** 기관 관리 (관리자). 의뢰기관·검사기관을 등록하고 이름·주소를 수정하거나 삭제한다 */
@@ -11,13 +10,9 @@ export default function AdminInstitutionsPage() {
   return (
     <>
       <PageHeader title="기관 관리" description="플랫폼에 등록된 의뢰기관·검사기관을 관리합니다." />
-      {isApiAuthMode() ? (
-        <Suspense fallback={<AdminLoading label="기관 목록을 불러오고 있습니다." />}>
-          <InstitutionsSection />
-        </Suspense>
-      ) : (
-        <AdminApiOnlyNotice />
-      )}
+      <Suspense fallback={<AdminLoading label="기관 목록을 불러오고 있습니다." />}>
+        <InstitutionsSection />
+      </Suspense>
     </>
   );
 }

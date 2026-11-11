@@ -26,8 +26,6 @@ const page = <T>(contents: T[]) => ({ contents, totalElements: contents.length, 
 let loadApiSlotSearch: typeof import("@/features/slots/server").loadApiSlotSearch;
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "slots,partnerships,equipment";
 
   mock.module("@/lib/auth/session", {
     namedExports: {
@@ -169,14 +167,4 @@ describe("loadApiSlotSearch 인증·인가", () => {
     assert.equal(state.gatewayCalls.some((call) => call.startsWith("equipment-exam-types:")), false);
   });
 
-  it("Mock 모드면 아무 요청 없이 NOT_AVAILABLE (Mock 결과로 대신하지 않는다)", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    try {
-      const result = await loadApiSlotSearch(input());
-      assert.equal(!result.ok && result.reason, "NOT_AVAILABLE");
-      assert.deepEqual(state.gatewayCalls, []);
-    } finally {
-      process.env.NEXT_PUBLIC_API_MODE = "api";
-    }
-  });
 });

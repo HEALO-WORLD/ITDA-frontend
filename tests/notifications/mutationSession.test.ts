@@ -75,8 +75,6 @@ beforeEach(() => {
   state.calls = [];
   state.error = null;
   state.refreshCount = 0;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "notifications,examining-notifications";
   console.error = () => {};
 });
 

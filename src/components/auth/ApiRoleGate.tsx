@@ -7,7 +7,6 @@ import AdminShell from "@/components/layout/AdminShell";
 import AppHeader from "@/components/layout/AppHeader";
 import AppShell from "@/components/layout/AppShell";
 import { ADMIN_HOME_ROUTE, HOME_ROUTE_BY_ROLE, ORGANIZATION_ROLE_BY_USER_ROLE, ROUTES } from "@/constants/navigation";
-import { getApiMode } from "@/lib/api/config";
 import { getAuthState, readLoginSessionTag, readRefreshToken, type AuthFailureReason } from "@/lib/auth/session";
 import type { OrganizationRole, SessionUser } from "@/types/auth";
 
@@ -30,15 +29,6 @@ import SessionRestore from "./SessionRestore";
  * - 403·404·네트워크·그 밖의 실패 → 권한을 허용하지 않고 안내 (네트워크·오류는 다시 시도)
  * 화면 데이터 API의 권한은 이와 별개로 Gateway·백엔드와 각 Server Function이 다시 확인한다.
  */
-
-/** API 모드인지 (설정 값이 잘못되면 API 모드로 보고 접근 확인을 한다: 설정 오류로 보호가 꺼지지 않게) */
-export function isApiAuthMode(): boolean {
-  try {
-    return getApiMode() === "api";
-  } catch {
-    return true;
-  }
-}
 
 const ROLE_LABELS: Record<OrganizationRole, string> = {
   REFERRING: "의뢰기관 담당자",

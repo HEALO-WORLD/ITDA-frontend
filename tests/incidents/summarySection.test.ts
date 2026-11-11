@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { before, beforeEach, describe, it, mock } from "node:test";
 
 import { renderToStaticMarkup } from "react-dom/server";
@@ -81,8 +80,6 @@ beforeEach(() => {
   state.summary = okSummary();
   state.listCalls = [];
   state.summaryCalls = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "incidents";
 });
 
 const render = async (params: Record<string, string> = {}) => renderToStaticMarkup(await Section({ searchParams: Promise.resolve(params) }));
@@ -206,15 +203,5 @@ describe("집계는 목록 필터·페이지와 독립", () => {
     assert.match(html, new RegExp(`장비 <code[^>]*>${EQUIPMENT}</code>의 장애만 표시합니다`));
     assert.match(html, /장비 필터 해제/);
     assert.match(html, new RegExp(`href="[^"]*equipmentId=${EQUIPMENT}[^"]*page=|href="[^"]*page=[^"]*equipmentId=${EQUIPMENT}`));
-  });
-});
-
-describe("Mock 화면 회귀", () => {
-  it("Mock 요약(IncidentSummary)은 그대로 기존 세 항목을 쓰고, 집계 API·API 요약을 쓰지 않는다", () => {
-    const mockSummary = readFileSync(new URL("../../src/features/incidents/components/IncidentSummary.tsx", import.meta.url), "utf8");
-    for (const label of ["장애 진행 중 장비", "복구 완료 이력", "재조정 필요 예약"]) assert.ok(mockSummary.includes(label), label);
-    const board = readFileSync(new URL("../../src/features/incidents/components/IncidentBoard.tsx", import.meta.url), "utf8");
-    assert.equal(board.includes("IncidentApiSummary"), false);
-    assert.equal(board.includes("loadIncidentSummary"), false);
   });
 });

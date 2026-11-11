@@ -21,7 +21,6 @@ import { clearSessionCookies, extendLoginSession, readRefreshToken, setAccessTok
 
 export const REISSUE_FAILURE_MESSAGES: Record<ReissueFailureReason, string> = {
   FORBIDDEN_ORIGIN: "허용되지 않은 요청입니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.",
-  MOCK_MODE: "Mock 모드에서는 로그인 연장을 하지 않습니다.",
   CONFIG: "로그인 연장 기능을 사용할 수 없는 환경입니다. (API 모드·주소 설정 확인)",
   NO_REFRESH_TOKEN: "로그인이 필요합니다. 다시 로그인해 주세요.",
   INVALID_REFRESH_TOKEN: "로그인 정보가 만료되었습니다. 다시 로그인해 주세요.",

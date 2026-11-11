@@ -9,7 +9,7 @@ import { ApiError } from "@/lib/api/errors";
 import { addDays, addMonths, getSeoulNow } from "@/lib/date/seoulDate";
 
 /**
- * 검사기관 슬롯 관리 조회 (view=MANAGEMENT): 월 캐시·달력 상태·상태 표시·통신 계층·서버 인증/매핑·Mock 회귀.
+ * 검사기관 슬롯 관리 조회 (view=MANAGEMENT): 월 캐시·달력 상태·상태 표시·통신 계층·서버 인증/매핑.
  * users/me와 Gateway는 가짜로 바꾼다 (실제 네트워크·DB 변경 없음).
  */
 
@@ -109,8 +109,6 @@ let remote: typeof import("@/features/slots/remote");
 let server: typeof import("@/features/slots/managementServer");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async (role: string) => {
@@ -381,12 +379,11 @@ describe("서버 월 조회 (loadManagementMonthSlots)", () => {
   });
 });
 
-describe("슬롯 생성 후 갱신·Mock 분리", () => {
+describe("슬롯 생성 후 갱신", () => {
   // 렌더링으로 확인: 시각(useSeoulNow)만 고정한다. 서버 렌더링이라 월 조회 effect는 실행되지 않는다 (Gateway 요청 없음)
   // (ApiSlotSchedule은 .tsx라 mock.module로 바꿀 수 없어 실제 컴포넌트가 그린 문구로 구분한다)
-  it("API 워크스페이스: slots 기능이 켜져 있으면 API 슬롯 일정(ApiSlotSchedule)을, 꺼져 있으면 기존 준비 중 달력을 그린다", async () => {
+  it("API 워크스페이스: 슬롯 일정(ApiSlotSchedule)을 표시한다", async () => {
     const nowMock = mock.module("@/lib/date/useSeoulNow", { namedExports: { useSeoulNow: () => ({ dateKey: today, dateTime: NOW }) } });
-    const features = process.env.NEXT_PUBLIC_API_FEATURES;
     try {
       const { default: EquipmentApiWorkspace } = await import("@/features/equipment/components/EquipmentApiWorkspace");
       const equipments = [
@@ -398,7 +395,6 @@ describe("슬롯 생성 후 갱신·Mock 분리", () => {
           createElement(EquipmentApiWorkspace, { equipments: [...equipments], totalElements: 2, truncated: false, counts: { CT: 1, MRI: 1 } }),
         );
 
-      process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment";
       const on = render();
       // ApiSlotSchedule: 월 캐시 상태로 달력·날짜 목록을 그린다 (날짜 선택 전 안내), 오늘 예약 가능 수는 월 캐시 조회 중
       assert.match(on, /달력에서 날짜를 선택하면 그날 슬롯을 보여 줍니다/);
@@ -406,34 +402,22 @@ describe("슬롯 생성 후 갱신·Mock 분리", () => {
       assert.doesNotMatch(on, /슬롯 목록 조회 기능이 서버에 아직 없어/);
       assert.equal(dataCalls().length, 0, "렌더링만으로 Gateway 요청을 보내지 않는다");
 
-      process.env.NEXT_PUBLIC_API_FEATURES = "equipment";
-      const off = render();
-      // 기존 준비 중 달력: 날짜별 현황·선택 날짜 슬롯 모두 미연동 안내, 오늘 예약 가능 수는 준비 중
-      assert.match(off, /슬롯 목록 조회 기능이 서버에 아직 없어 날짜별 슬롯 현황을 표시할 수 없습니다/);
-      assert.match(off, /슬롯 목록 조회 기능이 서버에 아직 없어 선택 날짜의 슬롯\(시간·장비·상태\)을 표시할 수 없습니다/);
-      assert.match(off, /조회 준비 중/);
-      assert.doesNotMatch(off, /달력에서 날짜를 선택하면 그날 슬롯을 보여 줍니다/);
-      assert.equal(dataCalls().length, 0);
     } finally {
-      process.env.NEXT_PUBLIC_API_FEATURES = features;
       nowMock.restore();
     }
   });
 
   // 슬롯 생성 창 닫기는 클릭이 필요해 서버 렌더링으로 확인할 수 없다 (DOM 테스트 도구 없음). 소스의 JSX 연결만 확인한다
-  it("API 워크스페이스(소스): 슬롯 생성 창의 onClose가 월 캐시를 invalidate한다. Mock 워크스페이스는 API 일정·조회를 쓰지 않는다", async () => {
+  it("API 워크스페이스: 슬롯 생성 창의 onClose가 월 캐시를 invalidate한다", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync(new URL("../../src/features/equipment/components/EquipmentApiWorkspace.tsx", import.meta.url), "utf8");
     // onClose 본문({ ... }) 안에서 invalidate()를 부른다 (저장소 변수 이름에는 의존하지 않는다)
     assert.match(source, /<ApiSlotGenerationDialog[^>]*?onClose=\{\(\) => \{[^}]*\.invalidate\(\);/);
-    const mockWorkspace = readFileSync(new URL("../../src/features/equipment/components/EquipmentSlotWorkspace.tsx", import.meta.url), "utf8");
-    assert.equal(mockWorkspace.includes("ApiSlotSchedule"), false);
-    assert.equal(mockWorkspace.includes("managementActions"), false);
   });
 });
 
-describe("DaySlotList: Mock 회귀와 API 표시", () => {
-  it("Mock(기본): 기존 상태 판정·소요 시간으로 종료 시각", async () => {
+describe("DaySlotList: API 표시", () => {
+  it("서버 상태 판정·소요 시간으로 종료 시각", async () => {
     const { default: DaySlotList } = await import("@/features/equipment/components/DaySlotList");
     const slot = { ...apiSlot(nextMonth, 9, "AVAILABLE") };
     const html = renderToStaticMarkup(

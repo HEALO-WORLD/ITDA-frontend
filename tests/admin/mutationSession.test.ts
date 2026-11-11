@@ -42,7 +42,6 @@ const institution = (id: string, body: Record<string, unknown>) => ({
 let actions: typeof import("@/features/admin/actions");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async () => state.access,

@@ -80,8 +80,6 @@ function reset() {
   state.order = [];
   state.refreshCount = 0;
   state.sameOrigin = true;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "referrals,partnerships,equipment";
 }
 
 const httpError = (status: number, code: string | null = null) => new ApiError("HTTP", `HTTP ${status}`, { status, code });
@@ -225,15 +223,9 @@ describe("예약 취소 API 함수와 오류 안내", () => {
 });
 
 describe("cancelReservationAction: 인증·인가", () => {
-  it("다른 출처·Mock 모드·로그아웃·다른 역할은 아무 요청도 보내지 않는다", async () => {
+  it("다른 출처·로그아웃·다른 역할은 아무 요청도 보내지 않는다", async () => {
     state.sameOrigin = false;
     assert.equal((await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN)).ok, false);
-    assert.deepEqual(state.order, []);
-
-    reset();
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    const mockMode = await actions.cancelReservationAction(REFERRAL, TARGET, LOGIN);
-    assert.equal(!mockMode.ok && mockMode.reason, "NOT_AVAILABLE");
     assert.deepEqual(state.order, []);
 
     for (const [reason, expected] of [

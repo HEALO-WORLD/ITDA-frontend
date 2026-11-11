@@ -82,8 +82,6 @@ beforeEach(() => {
   state.response = statusResponse("IN_PROGRESS", "COMPLETED");
   state.error = null;
   state.refreshCount = 0;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "examinations";
   console.error = () => {};
 });
 
@@ -212,15 +210,6 @@ describe("Server Function: 검사 완료 확정 요청", () => {
   });
 });
 
-describe("Mock 화면 회귀", () => {
-  it("Mock 검사 화면(ExaminationBoard·ExaminationTable)은 API 확인 창·Server Function을 쓰지 않는다", () => {
-    for (const file of ["ExaminationBoard.tsx", "ExaminationTable.tsx"]) {
-      const source = readFileSync(new URL(`../../src/features/examinations/components/${file}`, import.meta.url), "utf8");
-      assert.equal(source.includes("ExaminationApiActions"), false, file);
-      assert.equal(source.includes("changeExaminationStatusAction"), false, file);
-    }
-  });
-});
 
 describe("Server Function: 로그인 세션 정합성 (STEP 3-2-2B-3)", () => {
   const SESSION_CHANGED = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };

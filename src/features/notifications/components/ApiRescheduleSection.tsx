@@ -40,11 +40,11 @@ const loadReschedule = cache(async (page: number) => {
   return { result, examTypes };
 });
 
-/** 상단 재조정 안내 배너 (Mock과 같은 RescheduleAlert). 원인(장애 장비)은 API에 없어 표시하지 않는다 */
+/** 상단 재조정 안내 배너. 원인(장애 장비)은 API에 없어 표시하지 않는다 */
 export async function ApiRescheduleAlert({ searchParams }: { searchParams: Promise<SearchParams> }) {
   const { result } = await loadReschedule(parsePage((await searchParams)[RESCHEDULE_PAGE_PARAM]));
   if (!result.ok) return null;
-  return <RescheduleAlert count={result.totalElements} failureExamTypes={null} isMockData={false} />;
+  return <RescheduleAlert count={result.totalElements} failureExamTypes={null} />;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

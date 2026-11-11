@@ -39,8 +39,6 @@ let remote: typeof import("@/features/referrals/remote");
 let time: typeof import("@/features/referrals/rescheduleTime");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "referrals";
   mock.module("@/lib/api/client", {
     namedExports: {
       apiRequestData: async (path: string, options: { method?: string; body?: unknown } = {}) => {

@@ -12,7 +12,6 @@ import type { LoginFailureReason } from "./types";
  * 내 정보 조회(fetchMyInfo)는 토큰이 필요하다 (lib/auth/session.ts의 getAuthState·로그인 Route Handler에서만 부른다).
  * 서버 전용: 로그인·로그아웃·재발급 Route Handler(`app/auth/{login,logout,reissue}/route.ts`)에서만 부른다.
  * 발급받은 토큰(Access·Refresh)은 브라우저로 돌려주지 않고 HttpOnly 쿠키(lib/auth/session.ts)에만 저장한다.
- * Mock 모드에서는 공통 API Client가 요청을 보내지 않고 설정 오류를 낸다 (Mock 로그인을 만들지 않는다).
  */
 
 /** 로그인 요청 본문 (백엔드 LoginRequest: 둘 다 @NotBlank) */
@@ -34,8 +33,8 @@ export interface TokenResponseDto {
   refreshExpiresIn: number;
 }
 
-/** 백엔드 호출 실패에서 나올 수 있는 구분 (MOCK_MODE·FORBIDDEN_ORIGIN은 Route Handler가 직접 정한다) */
-type RemoteLoginFailureReason = Exclude<LoginFailureReason, "MOCK_MODE" | "FORBIDDEN_ORIGIN" | "USER_INFO_FAILED">;
+/** 백엔드 호출 실패에서 나올 수 있는 구분 */
+type RemoteLoginFailureReason = Exclude<LoginFailureReason, "FORBIDDEN_ORIGIN" | "USER_INFO_FAILED">;
 
 /**
  * 로그인 `POST /api/v1/auth/login`.
@@ -150,7 +149,6 @@ export const LOGIN_FAILURE_MESSAGES: Record<LoginFailureReason, string> = {
   NOT_APPROVED: "관리자 승인 전인 계정입니다. 승인 후 다시 로그인해 주세요.",
   SERVER_ERROR: "로그인 서버에 문제가 있습니다. 잠시 후 다시 시도해 주세요.",
   CONFIG: "로그인 기능을 사용할 수 없는 환경입니다. (API 모드·주소 설정 확인)",
-  MOCK_MODE: "Mock 모드에서는 실제 로그인을 하지 않습니다. 데모 체험 바로가기를 이용해 주세요.",
   FORBIDDEN_ORIGIN: "허용되지 않은 요청입니다. 페이지를 새로고침한 뒤 다시 시도해 주세요.",
   USER_INFO_FAILED: "사용자 정보를 확인하지 못해 로그인을 완료하지 못했습니다. 잠시 후 다시 시도해 주세요.",
 };

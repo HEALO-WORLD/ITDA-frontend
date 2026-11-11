@@ -60,16 +60,10 @@ let client: typeof import("@/features/slots/apiSearchClient");
 let route: typeof import("@/features/slots/searchRoute");
 let server: typeof import("@/features/slots/server");
 let availability: typeof import("@/features/slots/availability");
-let mockApi: typeof import("@/features/slots/api");
-let mockExam: typeof import("@/features/slots/mockSlotExamTypes");
-let store: typeof import("@/features/equipment/mockEquipmentStore");
 let SlotSearchFilter: typeof import("@/features/slots/components/SlotSearchFilter").default;
 let SlotSearchTable: typeof import("@/features/slots/components/SlotSearchTable").default;
-let RescheduleTable: typeof import("@/features/notifications/components/RescheduleTable").default;
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "slots,partnerships,equipment";
   // 다른 모듈이 쓰는 나머지 내보내기는 실제 구현을 그대로 두고, 이 테스트가 부르는 조회 함수만 가짜로 바꾼다
   const realPartnerships = await import("@/features/partnerships/remote");
   const realEquipment = await import("@/features/equipment/remote");
@@ -164,12 +158,8 @@ before(async () => {
   route = await import("@/features/slots/searchRoute");
   server = await import("@/features/slots/server");
   availability = await import("@/features/slots/availability");
-  mockApi = await import("@/features/slots/api");
-  mockExam = await import("@/features/slots/mockSlotExamTypes");
-  store = await import("@/features/equipment/mockEquipmentStore");
   SlotSearchFilter = (await import("@/features/slots/components/SlotSearchFilter")).default;
   SlotSearchTable = (await import("@/features/slots/components/SlotSearchTable")).default;
-  RescheduleTable = (await import("@/features/notifications/components/RescheduleTable")).default;
 });
 
 after(() => mock.reset());
@@ -179,7 +169,6 @@ beforeEach(() => {
   state.examTypeLinkFails = false;
   state.calls = [];
   state.slotQueries = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
 });
 
 const tomorrow = addDays(getSeoulNow().dateKey, 1);
@@ -328,39 +317,13 @@ describe("결과 수·항목별 가용 날짜", () => {
   });
 });
 
-describe("Mock 모드", () => {
-  it("Mock 슬롯마다 장비가 지원하는 Mock 검사 유형 하나 (같은 슬롯은 항상 같은 항목), 선택지는 그 항목들", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    const { MOCK_EXAM_TYPES } = await import("@/lib/dev/mockExamTypes");
-    const { MOCK_PARTNER_ORGANIZATIONS } = await import("@/lib/dev/mockSlots");
-    const criteria = { examType: "" as const, date: "", organizationId: "", timeOfDay: "" as const, availableOnly: false };
-    const all = await mockApi.searchSlots(criteria);
-    assert.ok(all.length > 0);
-    for (const slot of all) {
-      const type = MOCK_EXAM_TYPES.find((item) => item.id === slot.examTypeId);
-      assert.ok(type, `${slot.id} 항목 없음`);
-      assert.equal(type!.modality, slot.examType);
-      assert.equal(slot.examTypeName, type!.name);
-    }
-    const again = await mockApi.searchSlots(criteria);
-    assert.deepEqual(again.map((slot) => slot.examTypeId), all.map((slot) => slot.examTypeId));
-
-    const optionIds = mockExam.getMockExamTypeOptions(store.equipmentChangeStore.read(), MOCK_PARTNER_ORGANIZATIONS).map((option) => option.id);
-    assert.ok(all.every((slot) => optionIds.includes(slot.examTypeId!)));
-
-    const target = all[0].examTypeId!;
-    const only = await mockApi.searchSlots({ ...criteria, examTypeId: target });
-    assert.ok(only.length > 0 && only.length < all.length);
-    assert.ok(only.every((slot) => slot.examTypeId === target));
-  });
-});
 
 // ── 화면 ──
 
 describe("검색 조건·결과 표시", () => {
   it("세부 검사 항목 칸: 전체 검사 항목 + 항목 이름 (지원 장비 칸 없음), 실패·없음 안내", () => {
     const render = (props: Record<string, unknown>) =>
-      renderToStaticMarkup(createElement(SlotSearchFilter, { organizations, isSearching: false, onSearch: () => {}, dataSource: "api", ...props } as never));
+      renderToStaticMarkup(createElement(SlotSearchFilter, { organizations, isSearching: false, onSearch: () => {}, ...props } as never));
     const html = render({ examTypeOptions: options() });
     assert.match(html, /<label[^>]*for="slot-exam-item"[^>]*>세부 검사 항목/);
     assert.match(html, /<option value="" selected="">전체 검사 항목<\/option>/);
@@ -398,20 +361,5 @@ describe("결과 표 한 줄 표시 (일반 검색·재조정 공통 SlotSearchT
     assert.match(html, /<button[^>]*class="h-10 min-w-\[100px\] px-4 whitespace-nowrap[^"]*">대체 슬롯 선택<\/button>/);
     assert.match(html, /<ul aria-label="검사 슬롯 검색 결과" class="flex flex-col gap-3 md:hidden">/);
     assert.match(html, /<button[^>]*class="mt-3 h-11 w-full whitespace-nowrap[^"]*">대체 슬롯 선택<\/button>/);
-  });
-});
-
-describe("재조정 목록 (Mock)", () => {
-  it("기존 세부 검사 항목은 Mock 의뢰의 항목 ID로 찾는다 (없으면 확인 불가로, 이름을 만들지 않음)", () => {
-    const html = renderToStaticMarkup(
-      createElement(RescheduleTable, {
-        referrals: [
-          { id: "r1", referralNumber: "R-1", organizationId: ORG_A, organizationName: "A 영상센터", equipmentName: "MRI 1호기", examType: "MRI", examTypeId: "mock-exam-type-mri-brain", scheduledAt: `${tomorrow}T09:00`, status: "RESCHEDULE_REQUIRED" },
-        ],
-        isEquipmentFailure: true,
-      } as never),
-    );
-    assert.match(html, /<ul aria-label="예약 재조정 필요 목록"/);
-    assert.doesNotMatch(html, /href="\/referring\/slots/);
   });
 });

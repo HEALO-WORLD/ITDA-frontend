@@ -19,7 +19,7 @@ const actionClass =
 
 /**
  * 관리자 데이터 조회 실패 안내 (비로그인·세션 만료·권한 없음·네트워크·그 밖의 오류를 구분한다).
- * 401은 토큰을 지워야 다시 로그인할 수 있으므로 로그아웃(폼 POST) 후 로그인 화면으로 보낸다. Mock 데이터로 대신하지 않는다.
+ * 401은 토큰을 지워야 다시 로그인할 수 있으므로 로그아웃(폼 POST) 후 로그인 화면으로 보낸다.
  */
 export function AdminFailureNotice({ failure }: { failure: AdminLoadFailure }) {
   const isError = failure.reason === "NETWORK" || failure.reason === "ERROR" || failure.reason === "UNAUTHORIZED";
@@ -59,16 +59,6 @@ export function AdminFailureNotice({ failure }: { failure: AdminLoadFailure }) {
       <p className="text-sm text-gray-600">{message}</p>
       {action}
     </div>
-  );
-}
-
-/** Mock 모드 안내: 관리자 화면은 실제 API에서만 제공한다 (가짜 관리자 데이터를 만들지 않는다) */
-export function AdminApiOnlyNotice() {
-  return (
-    <section role="status" className="rounded-xl border border-dashed border-line-strong bg-white px-6 py-16 text-center">
-      <p className="text-[15px] font-semibold text-gray-700">관리자 기능은 실제 API 연결(API 모드)에서만 제공됩니다.</p>
-      <p className="mt-2 text-sm text-gray-500">데모(Mock) 모드에서는 관리자 데이터를 보여 주지 않습니다.</p>
-    </section>
   );
 }
 

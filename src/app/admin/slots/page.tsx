@@ -1,9 +1,8 @@
 import { Suspense } from "react";
 
-import { isApiAuthMode } from "@/components/auth/ApiRoleGate";
 import PageHeader from "@/components/layout/PageHeader";
 import AdminSlotHistorySection from "@/features/admin/components/AdminSlotHistorySection";
-import { AdminApiOnlyNotice, AdminLoading } from "@/features/admin/components/AdminNotices";
+import { AdminLoading } from "@/features/admin/components/AdminNotices";
 
 /**
  * 슬롯 상태 이력 (관리자, 조회 전용). 슬롯 ID로 상태 변경 이력을 추적한다.
@@ -11,14 +10,6 @@ import { AdminApiOnlyNotice, AdminLoading } from "@/features/admin/components/Ad
  */
 export default function AdminSlotsPage({ searchParams }: PageProps<"/admin/slots">) {
   const header = <PageHeader title="슬롯 상태 이력" description="슬롯 ID로 슬롯 상태가 언제, 왜 바뀌었는지 확인합니다." />;
-  if (!isApiAuthMode()) {
-    return (
-      <>
-        {header}
-        <AdminApiOnlyNotice />
-      </>
-    );
-  }
   return (
     <>
       {header}

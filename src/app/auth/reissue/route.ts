@@ -1,5 +1,4 @@
 import type { ReissueFailureReason, ReissueResult } from "@/features/auth/types";
-import { getApiMode } from "@/lib/api/config";
 import { isSameOriginRequest } from "@/lib/auth/csrf";
 import { reissueFailure, reissueSessionTokens } from "@/lib/auth/reissue";
 
@@ -13,7 +12,6 @@ import { reissueFailure, reissueSessionTokens } from "@/lib/auth/reissue";
 
 const STATUS_BY_REASON: Record<ReissueFailureReason, number> = {
   FORBIDDEN_ORIGIN: 403,
-  MOCK_MODE: 409,
   CONFIG: 500,
   NO_REFRESH_TOKEN: 401,
   INVALID_REFRESH_TOKEN: 401,
@@ -32,12 +30,5 @@ function respond(result: ReissueResult): Response {
 
 export async function POST(request: Request) {
   if (!isSameOriginRequest(request)) return respond(reissueFailure("FORBIDDEN_ORIGIN"));
-  let mode: ReturnType<typeof getApiMode>;
-  try {
-    mode = getApiMode();
-  } catch {
-    return respond(reissueFailure("CONFIG"));
-  }
-  if (mode !== "api") return respond(reissueFailure("MOCK_MODE"));
   return respond(await reissueSessionTokens());
 }

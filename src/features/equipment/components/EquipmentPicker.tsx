@@ -3,16 +3,11 @@ import { useState, type MouseEvent, type ReactNode } from "react";
 
 import type { ExamType } from "@/features/slots/types";
 
-import { formatOperatingHoursSummary } from "../operatingHours";
-import { getSupportedExamTypeNames } from "../supportedExamTypes";
-import type { Equipment } from "../types";
-
-import EquipmentStatusBadge from "./EquipmentStatusBadge";
 
 export type ExamTypeFilter = "ALL" | ExamType;
 
 /**
- * 장비 목록 한 행 (Mock·API 공용 표시 값). Mock은 toMockPickerRow로, API는 장비 API 응답으로 만든다.
+ * 장비 목록 한 행. API 응답으로 표시 값을 만든다.
  * - hours: set(운영시간 있음) · unset(미설정 → 설정 필요 버튼) · unavailable(아직 모름 → label, 없으면 '조회 준비 중')
  * - supported: 지원 검사 유형 이름 · 비어 있으면 '미설정' · 문자열이면 그 안내(불러오는 중 등)를 흐리게 보인다
  */
@@ -25,17 +20,6 @@ export interface EquipmentPickerRow {
   supported: string[] | null | { placeholder: string };
 }
 
-/** Mock 장비 → 행 (기존 Mock 표시 그대로) */
-export function toMockPickerRow(equipment: Equipment): EquipmentPickerRow {
-  return {
-    id: equipment.id,
-    name: equipment.name,
-    examType: equipment.examType,
-    statusBadge: <EquipmentStatusBadge status={equipment.status} />,
-    hours: equipment.operatingHours.length > 0 ? { kind: "set", summary: formatOperatingHoursSummary(equipment.operatingHours) } : { kind: "unset" },
-    supported: getSupportedExamTypeNames(equipment.supportedExamTypeIds),
-  };
-}
 /** "ALL" = 현재 목록(검색·필터 결과)의 전체 장비 */
 export type EquipmentSelection = "ALL" | string;
 
@@ -57,7 +41,7 @@ interface EquipmentPickerProps {
   onEditHours: (equipment: EquipmentPickerRow) => void;
   onRegister: () => void;
   onGenerateSlots: () => void;
-  /** 검색 줄 오른쪽 안내 (기본: Mock 개발용 안내) */
+  /** 검색 줄 오른쪽 안내 */
   note?: ReactNode;
 }
 
@@ -97,7 +81,7 @@ export default function EquipmentPicker({
   onEditHours,
   onRegister,
   onGenerateSlots,
-  note = "개발용 예시: 등록·생성 내용은 이 브라우저에만 저장됩니다.",
+  note,
 }: EquipmentPickerProps) {
   const [isExpanded, setIsExpanded] = useState(false);
   const isFiltered = query.trim() !== "" || typeFilter !== "ALL";

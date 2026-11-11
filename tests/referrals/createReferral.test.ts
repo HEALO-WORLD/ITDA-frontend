@@ -105,8 +105,6 @@ let server: typeof import("@/features/referrals/createServer");
 let tracker: typeof import("@/features/referrals/idempotency");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "referrals,slots,equipment,partnerships";
 
   mock.module("@/lib/auth/session", {
     namedExports: {
@@ -492,17 +490,6 @@ describe("submitCreateReferral", () => {
     assert.equal(posts().length, 0);
   });
 
-  it("referrals 기능이 API 대상이 아니면 아무 요청도 하지 않는다", async () => {
-    process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment,partnerships";
-    try {
-      const result = await server.submitCreateReferral(validInput(), LOGIN);
-      assert.equal(result.ok, false);
-      if (!result.ok) assert.equal(result.reason, "NOT_AVAILABLE");
-      assert.deepEqual(state.order, []);
-    } finally {
-      process.env.NEXT_PUBLIC_API_FEATURES = "referrals,slots,equipment,partnerships";
-    }
-  });
 });
 
 // ── 5. 접수 뒤 상태 확인 ──

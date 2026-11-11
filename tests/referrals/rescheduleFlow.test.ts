@@ -103,8 +103,6 @@ function reset() {
   state.order = [];
   state.refreshCount = 0;
   state.sameOrigin = true;
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "referrals,slots,equipment,partnerships";
 }
 
 const httpError = (status: number, code: string | null = null) => new ApiError("HTTP", `HTTP ${status}`, { status, code });

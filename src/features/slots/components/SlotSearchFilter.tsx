@@ -1,16 +1,14 @@
 import { CalendarDays, Check, Lock, RotateCcw, Search } from "lucide-react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import DatePicker from "@/components/ui/DatePicker";
-import { useSlotDataKey } from "@/features/equipment/useLiveEquipments";
 import { fieldLabelClass, SelectInput, type SelectOption } from "@/components/ui/FormControls";
 import type { DateKey } from "@/lib/date/seoulDate";
 
 import { getSeoulNow } from "@/lib/date/seoulDate";
 
-import { getDateAvailability } from "../api";
 import { API_SEARCH_RANGE_DAYS, countApiSlotsByDate, toMonthKey } from "../apiSearchClient";
-import type { AvailabilityFilter, DateAvailability } from "../availability";
+import type { AvailabilityFilter } from "../availability";
 import { getExamTypeChoices, reconcileExamTypeId, type SlotExamTypeOption } from "../examTypeFilter";
 import type { ExamType, PartnerOrganization, SlotSearchCriteria, TimeOfDay } from "../types";
 import { isPcViewport } from "../initialSearch";
@@ -28,17 +26,10 @@ interface SlotSearchFilterProps {
   initialCriteria?: SlotSearchCriteria;
   /** 검사 유형 변경 불가 (재조정 모드) */
   isExamTypeLocked?: boolean;
-  /** 달력 가용 날짜 계산에서 제외할 장비 ID (재조정 모드의 장애 장비) */
-  excludedEquipmentIds?: readonly string[];
-  /**
-   * 달력 데이터 출처. mock(기본): 기존 Mock 계산. api: 표시 중인 월의 실제 예약 가능 슬롯 (Route Handler 경유)
-   * API 모드에서는 Mock 함수(getDateAvailability)를 부르지 않는다
-   */
-  dataSource?: "mock" | "api";
   /** API 재조정 모드: 달력 조회를 이 검사 유형으로 고정한다 */
   apiExamTypeId?: string;
   /**
-   * 세부 검사 항목 선택지 원본 (ExamType: 협력 기관 장비가 실제 지원하는 검사 유형. Mock: 개발용 장비의 지원 검사 유형).
+   * 세부 검사 항목 선택지 원본 (협력 기관 장비가 실제 지원하는 검사 유형).
    * null = 목록을 불러오지 못함 (선택 비활성). 검사 유형(CT/MRI)·협력 검사기관 조건에 맞는 항목만 보인다
    */
   examTypeOptions?: readonly SlotExamTypeOption[] | null;
@@ -82,11 +73,6 @@ export const INITIAL_SLOT_CRITERIA: SlotSearchCriteria = {
   examTypeId: "",
 };
 
-const DISABLED_REASON = {
-  FULL: "예약 마감",
-  NONE: "검사 슬롯 없음",
-} as const;
-
 /**
  * API 모드 달력의 선택 불가 사유. SEARCH 응답은 예약 가능한 슬롯만 오므로 '마감'과 '슬롯 없음'을 구분할 수 없다:
  * 마감이라고 하지 않고 '예약 가능한 슬롯 없음'으로만 표시한다. 조회 실패는 '없음'과 따로 표시한다
@@ -121,8 +107,6 @@ export default function SlotSearchFilter({
   onReset,
   initialCriteria = INITIAL_SLOT_CRITERIA,
   isExamTypeLocked = false,
-  excludedEquipmentIds,
-  dataSource = "mock",
   apiExamTypeId,
   examTypeOptions = null,
   lockedExamTypeItem = null,
@@ -132,19 +116,14 @@ export default function SlotSearchFilter({
   appliedCriteria,
   surface = "default",
 }: SlotSearchFilterProps) {
-  const isApi = dataSource === "api";
-  const calendar = useApiSlotCalendar(isApi, apiExamTypeId);
+  const calendar = useApiSlotCalendar(true, apiExamTypeId);
   /** API 모드: 달력에 표시 중인 월 (`YYYY-MM`) */
   const [viewMonthKey, setViewMonthKey] = useState<string | null>(null);
-  // 최초 조건·제외 장비는 마운트 시점 값으로 고정한다
+  // 최초 조건은 마운트 시점 값으로 고정한다
   const [startCriteria] = useState(initialCriteria);
-  const [queryOptions] = useState(() => ({ excludedEquipmentIds }));
   const [criteria, setCriteria] = useState<SlotSearchCriteria>(startCriteria);
-  /** null = 아직 불러오지 않음 */
-  const [availability, setAvailability] = useState<DateAvailability | null>(null);
   const [dateNotice, setDateNotice] = useState<string | null>(null);
   const [examTypeNotice, setExamTypeNotice] = useState<string | null>(null);
-  const latestRequestRef = useRef(0);
   const rootRef = useRef<HTMLDivElement>(null);
   const applyButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -162,30 +141,7 @@ export default function SlotSearchFilter({
   }, [compact, isSearching]);
 
   /**
-   * 날짜별 예약 가능 여부를 다시 불러온다.
-   * 선택돼 있던 날짜가 새 조건에서 선택 불가가 되면 날짜를 초기화하고 안내한다.
-   */
-  const refreshAvailability = useCallback(
-    async (filter: AvailabilityFilter, selectedDate: DateKey | "") => {
-      if (isApi) return; // API 모드는 checkApiSelectedDate (월별 실제 데이터)
-      const requestId = ++latestRequestRef.current;
-      const next = await getDateAvailability(filter, queryOptions);
-      if (requestId !== latestRequestRef.current) return; // 더 최근 요청이 있으면 무시
-
-      setAvailability(next);
-      if (selectedDate && next[selectedDate] !== "AVAILABLE") {
-        setCriteria((prev) => (prev.date === selectedDate ? { ...prev, date: "" } : prev));
-        const timeText = filter.timeOfDay ? `${TIME_OF_DAY_LABELS[filter.timeOfDay]} ` : "";
-        setDateNotice(
-          `선택한 날짜(${selectedDate})에 바뀐 조건으로 예약 가능한 ${timeText}슬롯이 없어 날짜 선택을 초기화했습니다.`,
-        );
-      }
-    },
-    [queryOptions, isApi],
-  );
-
-  /**
-   * API 모드: 조건이 바뀌었을 때 선택한 날짜에 예약 가능한 슬롯이 없으면 날짜를 초기화한다 (Mock과 같은 안내).
+   * 조건이 바뀌었을 때 선택한 날짜에 예약 가능한 슬롯이 없으면 날짜를 초기화한다.
    * 그 월을 아직 받지 못했거나 조회에 실패했으면 '없음'으로 보지 않고 날짜를 그대로 둔다
    */
   const checkApiSelectedDate = (filter: AvailabilityFilter, selectedDate: DateKey | "") => {
@@ -197,30 +153,6 @@ export default function SlotSearchFilter({
     const timeText = filter.timeOfDay ? `${TIME_OF_DAY_LABELS[filter.timeOfDay]} ` : "";
     setDateNotice(`선택한 날짜(${selectedDate})에 바뀐 조건으로 예약 가능한 ${timeText}슬롯이 없어 날짜 선택을 초기화했습니다.`);
   };
-
-  // 최초 진입 시 최초 조건으로 한 번 불러온다 (API 모드는 달력을 열 때 표시 월만 불러온다)
-  useEffect(() => {
-    if (isApi) return;
-    const requestId = ++latestRequestRef.current;
-    getDateAvailability(startCriteria, queryOptions).then((next) => {
-      if (requestId === latestRequestRef.current) setAvailability(next);
-    });
-  }, [startCriteria, queryOptions, isApi]);
-
-  // 장애 장비나 슬롯 데이터가 바뀌면(장애 등록·복구, 슬롯 생성·운영 중단) 현재 조건으로 달력 가용 날짜를 다시 계산한다.
-  // 선택한 날짜가 더는 예약 불가면 refreshAvailability가 날짜를 비우고 안내한다
-  const slotDataKey = useSlotDataKey();
-  const latestCriteriaRef = useRef(criteria);
-  useEffect(() => {
-    latestCriteriaRef.current = criteria;
-  });
-  const refreshedKeyRef = useRef(slotDataKey);
-  useEffect(() => {
-    if (refreshedKeyRef.current === slotDataKey) return;
-    refreshedKeyRef.current = slotDataKey;
-    const current = latestCriteriaRef.current;
-    void refreshAvailability(current, current.date);
-  }, [slotDataKey, refreshAvailability]);
 
   /** 세부 검사 항목 선택지 (검사 유형·기관 조건 반영) */
   const choicesFor = (filter: Pick<SlotSearchCriteria, "examType" | "organizationId">) =>
@@ -244,8 +176,7 @@ export default function SlotSearchFilter({
     }
     setCriteria(next);
     setDateNotice(null);
-    if (isApi) checkApiSelectedDate(next, next.date);
-    else void refreshAvailability(next, next.date);
+    checkApiSelectedDate(next, next.date);
   };
 
   const handleReset = () => {
@@ -253,12 +184,11 @@ export default function SlotSearchFilter({
     setCriteria(startCriteria);
     setDateNotice(null);
     setExamTypeNotice(null);
-    void refreshAvailability(startCriteria, "");
     onReset?.();
   };
 
   /** API 모드: 표시 중인 월의 날짜 → 예약 가능 슬롯 수 (현재 조건). 렌더링마다 한 번만 센다 */
-  const viewMonthState = isApi && viewMonthKey ? calendar.months[viewMonthKey] : undefined;
+  const viewMonthState = viewMonthKey ? calendar.months[viewMonthKey] : undefined;
   const viewMonthCounts =
     viewMonthState?.status === "loaded" ? countApiSlotsByDate(viewMonthState.slots, criteria, getSeoulNow().dateTime) : null;
   const getApiDisabledReason = (dateKey: DateKey): string | null => {
@@ -273,14 +203,7 @@ export default function SlotSearchFilter({
     return (counts[dateKey] ?? 0) > 0 ? null : API_DISABLED_REASON.NONE;
   };
 
-  const getDisabledReason = (dateKey: DateKey): string | null => {
-    if (isApi) return getApiDisabledReason(dateKey);
-    // 불러오기 전에는 모든 날짜를 선택 불가로 둔다
-    if (!availability) return "예약 가능 날짜 확인 중";
-    const status = availability[dateKey];
-    if (status === "AVAILABLE") return null;
-    return status === "FULL" ? DISABLED_REASON.FULL : DISABLED_REASON.NONE;
-  };
+  const getDisabledReason = getApiDisabledReason;
 
   const organizationOptions: SelectOption[] = [
     { value: "", label: "전체" },
@@ -304,22 +227,16 @@ export default function SlotSearchFilter({
   const examItemValue = lockedExamTypeItem ? lockedExamTypeItem.id : examItemUnavailableReason ? "" : (criteria.examTypeId ?? "");
   const isExamItemDisabled = Boolean(lockedExamTypeItem) || Boolean(examItemUnavailableReason);
 
-  const datePlaceholder = isApi ? `오늘부터 ${API_SEARCH_RANGE_DAYS}일` : "전체 기간";
+  const datePlaceholder = `오늘부터 ${API_SEARCH_RANGE_DAYS}일`;
   const handleDateChange = (date: DateKey | "") => {
     setCriteria((prev) => ({ ...prev, date }));
     setDateNotice(null);
   };
-  const dateDisabledNote = isApi
-    ? getApiCalendarNote(viewMonthState, criteria.timeOfDay)
-    : criteria.timeOfDay
-      ? `${TIME_OF_DAY_LABELS[criteria.timeOfDay]}에 예약 가능한 슬롯이 있는 날짜만 선택할 수 있습니다.`
-      : "";
-  const handleViewMonthChange = isApi
-    ? (year: number, month: number) => {
-        setViewMonthKey(toMonthKey(year, month));
-        calendar.requestMonth(year, month);
-      }
-    : undefined;
+  const dateDisabledNote = getApiCalendarNote(viewMonthState, criteria.timeOfDay);
+  const handleViewMonthChange = (year: number, month: number) => {
+    setViewMonthKey(toMonthKey(year, month));
+    calendar.requestMonth(year, month);
+  };
 
   // ── 아직 검색에 적용하지 않은 변경 (마지막으로 검색한 조건과 비교) ──
   const changed = {

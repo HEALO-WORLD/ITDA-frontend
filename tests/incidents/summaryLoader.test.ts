@@ -85,8 +85,6 @@ beforeEach(() => {
   state.calls = [];
   state.order = [];
   state.logs = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "incidents";
   // 실패 로그는 화면에 찍지 않고 모아서 토큰이 없는지 확인한다
   console.error = (...args: unknown[]) => void state.logs.push(args);
 });
@@ -208,12 +206,6 @@ describe("loadIncidentSummary: 실패 결과 (0건으로 바꾸지 않는다)", 
     });
   });
 
-  it("incidents 기능이 꺼져 있으면(설정 오류) 요청하지 않고 ERROR", async () => {
-    process.env.NEXT_PUBLIC_API_FEATURES = "slots";
-    const result = await server.loadIncidentSummary();
-    assert.equal(!result.ok && result.reason, "ERROR");
-    assert.equal(state.calls.length, 0);
-  });
 
   it("실패 로그에 인증 토큰을 남기지 않는다", async () => {
     for (const error of [httpError(403, "EQUIPMENT_INCIDENT_ACCESS_DENIED"), httpError(500), new ApiError("NETWORK", "x")]) {

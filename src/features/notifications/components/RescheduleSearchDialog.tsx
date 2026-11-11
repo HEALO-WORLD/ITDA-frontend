@@ -8,14 +8,11 @@ import Modal from "@/components/ui/Modal";
 import { ROUTES } from "@/constants/navigation";
 import ReferralIdCopyButton from "@/features/referrals/components/ReferralIdCopyButton";
 import ReferralStatusBadge from "@/features/referrals/components/ReferralStatusBadge";
-import type { ReferralSummary } from "@/features/referrals/types";
 import type { ApiRescheduleTargetResult } from "@/features/referrals/rescheduleTarget";
 import SlotSearch from "@/features/slots/components/SlotSearch";
 import type { SlotExamTypeOption } from "@/features/slots/examTypeFilter";
 import type { PartnerOrganization } from "@/features/slots/types";
-import type { RescheduleCause } from "@/features/notifications/types";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
-import { MOCK_PARTNER_ORGANIZATIONS } from "@/lib/dev/mockSlots";
 import { isPcViewport } from "@/features/slots/initialSearch";
 
 import { loadRescheduleSearchAction } from "../rescheduleSearchActions";
@@ -25,14 +22,13 @@ import { loadRescheduleSearchAction } from "../rescheduleSearchActions";
  * - 대화상자 상태는 목록 전체를 감싼 Provider가 갖는다: 재예약이 접수되면 서버 목록이 다시 그려져 그 행이 사라져도
  *   대화상자(접수·상태 확인 안내)는 그대로 남는다
  * - 검색·선택·확인·재예약은 슬롯 검색 화면과 같은 SlotSearch(재조정 모드)를 그대로 쓴다 (검색 조건·결과·오류 처리 공유)
- *   API: 서버 로더(협력 기관·지원 장비·대상 의뢰)를 Server Function으로 받아 SlotSearch(dataSource="api", apiReschedule)
- *   Mock: 기존 Mock 재조정 모드 SlotSearch(rescheduleTarget, RescheduleSlotConfirm — 실제 요청 없음)
+ *   서버 로더(협력 기관·지원 장비·대상 의뢰)를 Server Function으로 받아 SlotSearch에 전달한다.
  * - 닫으면 공통 Modal이 연 버튼으로 포커스를 돌려준다
  */
 
 /** 대화상자 위에 보여 줄 기존 예약 (목록이 이미 받은 값. 추가 요청 없음) */
 export interface RescheduleSummary {
-  /** 예약번호 원본 (API: 현재 예약 ID, Mock: 예약번호). 없으면 null */
+  /** 현재 예약 ID. 없으면 null */
   reservationNumber: string | null;
   /** API 예약 ID는 축약·복사 버튼으로 보인다 */
   copyable: boolean;
@@ -45,9 +41,7 @@ export interface RescheduleSummary {
   scheduledAt: string | null;
 }
 
-export type RescheduleSearchEntry =
-  | { kind: "api"; referralId: string; summary: RescheduleSummary }
-  | { kind: "mock"; referral: ReferralSummary; failedEquipments: RescheduleCause[]; summary: RescheduleSummary };
+export type RescheduleSearchEntry = { kind: "api"; referralId: string; summary: RescheduleSummary };
 
 const Context = createContext<((entry: RescheduleSearchEntry) => void) | null>(null);
 
@@ -88,38 +82,7 @@ export function RescheduleSearchProvider({ children }: { children: ReactNode }) 
         {entry && (
           // PC: 모달 안에만 ITDA 브랜드 색 (뒤 페이지의 공통 스타일·배경은 그대로)
           <div className={pc ? "itda-brand itda-brand--embedded flex flex-col gap-5" : "flex flex-col gap-5"} data-autofocus tabIndex={-1}>
-            {entry.kind === "api" ? (
-              <ApiRescheduleSearch key={entry.referralId} referralId={entry.referralId} summary={entry.summary} wizard={pc ? bridge : null} />
-            ) : pc ? (
-              <SlotSearch
-                key={entry.referral.id}
-                organizations={MOCK_PARTNER_ORGANIZATIONS}
-                rescheduleTarget={entry.referral}
-                failedEquipments={entry.failedEquipments}
-                embedded
-                rescheduleWizard={{
-                  ...bridge,
-                  existing: (
-                    <ExistingReservationCard
-                      summary={entry.summary}
-                      equipmentName={entry.referral.equipmentName}
-                      failedEquipmentNames={entry.failedEquipments.map(({ equipmentName }) => equipmentName)}
-                    />
-                  ),
-                }}
-              />
-            ) : (
-              <>
-              <ExistingReservation summary={entry.summary} />
-              <SlotSearch
-                key={entry.referral.id}
-                organizations={MOCK_PARTNER_ORGANIZATIONS}
-                rescheduleTarget={entry.referral}
-                failedEquipments={entry.failedEquipments}
-                embedded
-              />
-              </>
-            )}
+            <ApiRescheduleSearch key={entry.referralId} referralId={entry.referralId} summary={entry.summary} wizard={pc ? bridge : null} />
           </div>
         )}
       </Modal>
@@ -175,7 +138,7 @@ export function ExistingReservation({ summary }: { summary: RescheduleSummary })
 
 /**
  * PC 재조정 모달 왼쪽의 기존 예약 카드 (슬롯을 고르는 동안 계속 보인다). 목록·대상 조회로 이미 받은 값만 쓴다.
- * 장애 장비 표시는 Mock 재조정 알림의 장애 장비와 같을 때만 (API는 장애 장비를 응답으로 확인할 수 없어 표시하지 않는다)
+ * 장애 장비 정보가 있을 때만 관련 표시를 제공한다.
  */
 export function ExistingReservationCard({
   summary,
@@ -370,7 +333,6 @@ export function ApiRescheduleSlotSearch({
 }) {
   return (
     <SlotSearch
-      dataSource="api"
       organizations={organizations}
       examTypeOptions={examTypeOptions}
       apiReschedule={reschedule}

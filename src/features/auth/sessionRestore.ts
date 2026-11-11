@@ -56,7 +56,6 @@ const BAD_RESPONSE_FAILURE = failure("SERVER_ERROR", "로그인 상태를 확인
 
 const REASONS: readonly ReissueFailureReason[] = [
   "FORBIDDEN_ORIGIN",
-  "MOCK_MODE",
   "CONFIG",
   "NO_REFRESH_TOKEN",
   "INVALID_REFRESH_TOKEN",

@@ -104,8 +104,6 @@ let remote: typeof import("@/features/slots/remote");
 let server: typeof import("@/features/slots/generateServer");
 
 before(async () => {
-  process.env.NEXT_PUBLIC_API_MODE = "api";
-  process.env.NEXT_PUBLIC_API_FEATURES = "slots,equipment";
   mock.module("@/lib/auth/session", {
     namedExports: {
       requireRoleAccess: async (role: string) => {
@@ -294,16 +292,6 @@ describe("서버 처리 (generateServer.submitSlotGeneration)", () => {
     }
   });
 
-  it("Mock 모드면 아무 요청 없이 NOT_AVAILABLE (Mock 생성으로 대신하지 않는다)", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    try {
-      const result = await server.submitSlotGeneration(input(), LOGIN);
-      assert.equal(!result.ok && result.reason, "NOT_AVAILABLE");
-      assert.deepEqual(gateway.calls, []);
-    } finally {
-      process.env.NEXT_PUBLIC_API_MODE = "api";
-    }
-  });
 
   it("생성 결과 재확인: 우리 기관 장비만, 그날 하루 equipmentId·examTypeId로 검색", async () => {
     gateway.slotDates.add(MONDAY);

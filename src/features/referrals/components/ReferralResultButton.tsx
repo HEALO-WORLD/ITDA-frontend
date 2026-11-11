@@ -9,7 +9,6 @@ import { subtleDetailButtonClass } from "@/components/ui/styles";
 import { ROUTES } from "@/constants/navigation";
 import { formatDateTimeWithWeekday } from "@/lib/format/date";
 
-import { getMockReferralResult } from "../mockResult";
 import { abbreviateReferralId } from "../referralId";
 import { loadReferralResultAction, type ResultLoadResponse } from "../resultActions";
 
@@ -18,19 +17,15 @@ import { DetailLoading } from "./ReferralDetailParts";
 /**
  * 의뢰·예약 목록(API 모드)의 [검사결과] 버튼과 결과 대화상자 (조회 전용).
  * 열 때마다 그 의뢰의 결과 한 건만 조회한다.
- * - API 모드(source="api", 기본): Server Function → `GET /api/v1/referrals/{referralId}/results`
- * - Mock 모드(source="mock"): 개발용 Mock 검사 기록에서 찾는다 (백엔드 요청 없음, mockResult.ts)
- * 두 모드 모두 같은 응답 모양을 같은 결과 화면(ResultBody)으로 보인다.
+ * Server Function → `GET /api/v1/referrals/{referralId}/results`.
  * 공통 Modal을 써서 Esc·닫기 버튼·포커스 이동·연 버튼으로 포커스 복귀를 그대로 쓴다.
  */
 export default function ReferralResultButton({
   referralId,
-  source = "api",
   label,
 }: {
   referralId: string;
-  source?: "api" | "mock";
-  /** 화면에 보일 의뢰 번호 (Mock: R-010 등). 없으면 의뢰 ID 축약 */
+  /** 화면에 보일 의뢰 번호. 없으면 의뢰 ID 축약 */
   label?: string;
 }) {
   const displayId = label ?? abbreviateReferralId(referralId);
@@ -43,7 +38,7 @@ export default function ReferralResultButton({
     loadingRef.current = true;
     setResult(null);
     try {
-      setResult(source === "mock" ? getMockReferralResult(referralId) : await loadReferralResultAction(referralId));
+      setResult(await loadReferralResultAction(referralId));
     } catch {
       setResult({ ok: false, reason: "NETWORK", message: "서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요." });
     } finally {

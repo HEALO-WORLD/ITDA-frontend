@@ -53,7 +53,6 @@ function reset() {
   state.sets = [];
   state.deletes = [];
   state.calls = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
 }
 
 const take = (value: unknown) => {
@@ -220,13 +219,6 @@ describe("로그인: Access·Refresh 토큰 쿠키 저장", () => {
     assert.equal(state.calls.length, 0);
   });
 
-  it("Mock 모드에서는 백엔드를 부르지 않는다", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    const response = await loginRoute.POST(loginRequest());
-    assert.equal((await response.json()).reason, "MOCK_MODE");
-    assert.equal(state.calls.length, 0);
-    assert.deepEqual(state.sets, []);
-  });
 });
 
 describe("로그아웃: 백엔드 Refresh Token 폐기 + 두 쿠키 삭제", () => {

@@ -44,7 +44,6 @@ function reset() {
   state.sets = [];
   state.deletes = [];
   state.calls = [];
-  process.env.NEXT_PUBLIC_API_MODE = "api";
 }
 
 const take = (value: unknown) => {
@@ -188,13 +187,6 @@ describe("POST /auth/reissue: 요청 전 거부", () => {
     expectCookiesKept("다른 출처");
   });
 
-  it("Mock 모드는 백엔드를 부르지 않는다", async () => {
-    process.env.NEXT_PUBLIC_API_MODE = "mock";
-    const { body } = await call();
-    assert.equal(body.reason, "MOCK_MODE");
-    assert.equal(state.calls.length, 0);
-    expectCookiesKept("Mock 모드");
-  });
 });
 
 describe("POST /auth/reissue: 실패 유형별 쿠키 처리", () => {
