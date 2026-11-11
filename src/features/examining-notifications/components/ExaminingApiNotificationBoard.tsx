@@ -10,7 +10,7 @@ import NotificationPagination from "@/features/notifications/components/Notifica
 import { useApiNotificationRead } from "@/features/notifications/components/useApiNotificationRead";
 import { NOTIFICATION_UNREAD_FILTER, type ApiNotificationItem } from "@/features/notifications/types";
 
-import { API_NOTIFICATION_META, FilterToggle, NotificationRow } from "./ExaminingNotificationBoard";
+import { FilterToggle, getApiNotificationLink, getApiNotificationMeta, NotificationRow } from "./ExaminingNotificationBoard";
 
 interface ExaminingApiNotificationBoardProps {
   notifications: ApiNotificationItem[];
@@ -20,13 +20,18 @@ interface ExaminingApiNotificationBoardProps {
   /** 현재 필터 조건의 전체 건수 */
   totalElements: number;
   unreadOnly: boolean;
+  /** 확정 예약 관리가 API 모드라 `?reservationId=`로 예약 상세를 열 수 있는지 (아니면 예약 이동 버튼을 두지 않는다) */
+  reservationDetailAvailable?: boolean;
 }
 
 /**
  * 검사기관 알림 목록 (API 모드). 모양은 Mock 알림 목록(ExaminingNotificationBoard)과 같다.
+ * - 백엔드가 소속 검사기관 공통 알림을 주고, 읽음 여부·읽음 처리는 로그인 사용자 기준이다 (프론트는 기관·사용자를 보내지 않는다)
+ * - 유형 배지: 예약 확정·취소·일정 변경·기관 변경 (모르는 유형은 '알림'). 제목·본문은 백엔드 값 그대로
+ * - 예약 ID가 있으면 확정 예약 관리의 예약 상세(`?reservationId=`)로 이동한다 (getApiNotificationLink)
  * - 읽음 상태 필터는 백엔드 조건(isRead=false)으로 다시 조회하고, 페이지는 백엔드 페이지 단위로 이동한다
  * - 배포 와이어프레임처럼 알림 유형 선택·초기화·모두 읽음 자리를 둔다. 백엔드에 없는 기능은 비활성으로 두고 이유를 보인다:
- *   알림 유형 필터(유형 값 미확정·조건 없음), 모두 읽음(전체 읽음 API 없음). 관련 화면 이동은 응답에 예약·장애 정보가 없어 두지 않는다
+ *   알림 유형 필터(백엔드 조건 없음), 모두 읽음(전체 읽음 API 없음)
  */
 export default function ExaminingApiNotificationBoard({
   notifications,
@@ -34,6 +39,7 @@ export default function ExaminingApiNotificationBoard({
   totalPages,
   totalElements,
   unreadOnly,
+  reservationDetailAvailable = false,
 }: ExaminingApiNotificationBoardProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -153,8 +159,8 @@ export default function ExaminingApiNotificationBoard({
               <NotificationRow
                 key={item.id}
                 item={item}
-                meta={API_NOTIFICATION_META}
-                link={null}
+                meta={getApiNotificationMeta(item.type)}
+                link={getApiNotificationLink(item, reservationDetailAvailable)}
                 pending={pendingIds.has(item.id)}
                 locked={locked}
                 onMarkAsRead={() => void handleMarkAsRead(item)}

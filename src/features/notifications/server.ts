@@ -69,6 +69,7 @@ export function toApiNotificationItem(dto: NotificationDto): ApiNotificationItem
     isRead: dto.isRead,
     occurredAt: dto.createdAt,
     readAt: dto.readAt,
+    reservationId: dto.reservationId ?? null,
   };
 }
 

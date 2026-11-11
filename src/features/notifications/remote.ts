@@ -9,12 +9,13 @@ import type { PagedResponseDto } from "@/lib/api/types";
  * 백엔드 NotificationController·NotificationResponse·NotificationReadResponse·UnreadCountResponse·
  * NotificationPageRequest를 기준으로 옮겼다 (ITDA 저장소 origin/dev 기준 확인).
  * - Gateway 권한: REQUESTER·EXAMINER (ADMIN은 403 ACCESS_DENIED)
- * - 백엔드는 Gateway가 만든 X-User-Id로 요청자 본인의 알림만 조회·처리한다. 프론트는 사용자·기관 ID를 보내지 않는다
+ * - 백엔드는 Gateway가 JWT로 채운 X-User-Id·X-Role·X-Institution-Id로 조회 범위를 정한다. 프론트는 사용자·기관·역할을 보내지 않는다
+ *   EXAMINER: 소속 검사기관 공통 알림 (읽음 여부·읽음 처리·읽지 않은 수는 요청 사용자 기준) / 그 밖: 본인 개인 알림
+ *   (검사기관 공통 알림은 백엔드 feat/exam-institution-notifications 4bff9e4 기준으로 확인)
  * - 인증 헤더는 서버 전용 모듈(server.ts·actions.ts)이 `headers`로 넘긴다
  *
  * Mock 구현으로 대신하지 않는다: 기능이 API 대상이 아니거나 입력이 계약과 다르면 요청 없이 설정 오류,
  * 호출 실패는 ApiError 그대로, 응답 형태가 계약과 다르면 PARSE 오류로 던진다 (화면 문구는 getNotificationErrorMessage).
- * ⚠️ 백엔드에는 아직 알림을 만드는 코드가 없어 실제 목록은 비어 있을 수 있다.
  */
 
 /** 알림 API를 쓰는 기능 (의뢰기관 / 검사기관). 각자의 NEXT_PUBLIC_API_FEATURES 값으로 켠다 */
@@ -36,7 +37,24 @@ export interface NotificationDto {
   createdAt: string;
   /** 읽기 전에는 null */
   readAt: string | null;
+  /**
+   * 관련 예약 ID (백엔드가 기존 필드 뒤에 추가). 예약과 연결되지 않은 알림은 null.
+   * 이 필드가 없는 응답도 받을 수 있게 검증 뒤 null로 맞춘다 (fetchNotificationPage)
+   */
+  reservationId: string | null;
 }
+
+/**
+ * 검사기관 공통 예약 알림 유형 (백엔드 InstitutionNotificationService).
+ * 이 밖의 값도 올 수 있어 NotificationDto.type은 문자열로 둔다
+ */
+export const EXAMINING_RESERVATION_NOTIFICATION_TYPES = [
+  "RESERVATION_CONFIRMED",
+  "RESERVATION_CANCELED",
+  "RESERVATION_RESCHEDULED",
+  "RESERVATION_REASSIGNED",
+] as const;
+export type ExaminingReservationNotificationType = (typeof EXAMINING_RESERVATION_NOTIFICATION_TYPES)[number];
 
 /** 읽지 않은 알림 수 (백엔드 UnreadCountResponse) */
 export interface UnreadCountDto {
@@ -97,7 +115,8 @@ export async function fetchNotificationPage(
   if (!isNotificationPage(data)) {
     throw new ApiError("PARSE", "서버 응답 형식을 확인할 수 없습니다.", { body: data });
   }
-  return data;
+  // reservationId가 없는 응답은 null로 맞춘다 (그 밖의 값은 받은 그대로)
+  return { ...data, contents: data.contents.map((item) => ({ ...item, reservationId: item.reservationId ?? null })) };
 }
 
 /** 읽지 않은 알림 수 `GET /api/v1/notifications/unread-count` */
@@ -149,7 +168,9 @@ function isNotificationItem(value: unknown): value is NotificationDto {
     typeof value.message === "string" &&
     typeof value.isRead === "boolean" &&
     isNonEmptyString(value.createdAt) &&
-    (value.readAt === null || isNonEmptyString(value.readAt))
+    (value.readAt === null || isNonEmptyString(value.readAt)) &&
+    // 선택 필드: 없거나 null이면 예약 없음. 값이 있으면 UUID여야 한다 (이동 주소에 그대로 쓰므로)
+    (value.reservationId === undefined || value.reservationId === null || isNotificationId(value.reservationId))
   );
 }
 

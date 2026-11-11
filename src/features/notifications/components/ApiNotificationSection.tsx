@@ -1,5 +1,6 @@
 import ExaminingApiNotificationBoard from "@/features/examining-notifications/components/ExaminingApiNotificationBoard";
 import { parsePageParam } from "@/features/examinations/server";
+import { isApiFeature } from "@/lib/api/config";
 
 import { loadNotificationPage, loadUnreadNotificationCount } from "../server";
 import { NOTIFICATION_UNREAD_FILTER } from "../types";
@@ -43,6 +44,7 @@ export default async function ApiNotificationSection({ variant, searchParams }: 
       totalPages={result.totalPages}
       totalElements={result.totalElements}
       unreadOnly={unreadOnly}
+      reservationDetailAvailable={isApiFeature("reservations")}
     />
   );
 }

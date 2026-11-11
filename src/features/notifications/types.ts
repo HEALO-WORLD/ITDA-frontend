@@ -53,6 +53,8 @@ export interface ApiNotificationItem {
   /** 생성 시각 (Java LocalDateTime 문자열, 시간대 표기 없음) */
   occurredAt: string;
   readAt: string | null;
+  /** 관련 예약 ID (예약과 연결되지 않은 알림·필드가 없는 응답은 null) */
+  reservationId: string | null;
 }
 
 /**
