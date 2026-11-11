@@ -457,11 +457,21 @@ const RESCHEDULE_ERROR_MESSAGES: Record<string, string> = {
 const RESCHEDULE_UNKNOWN_RESULT_MESSAGE =
   "재예약 요청 결과를 확인하지 못했습니다. 이미 접수되었을 수 있으니 목록을 새로 고쳐 확인한 뒤 다시 시도해 주세요.";
 
+/**
+ * 재예약 POST 결과를 알 수 없는 실패인지 (서버가 이미 접수했을 수 있어 다시 보내면 안 된다).
+ * 응답 없음(연결 실패·시간 초과·중단)·응답 형식 오류·5xx(500·502·503·504 등: 처리 뒤 응답 단계에서 실패했을 수 있다)·알 수 없는 오류.
+ * 400·401·403·404·409는 서버가 거부한 확실한 실패다
+ */
+export function isRescheduleResultUnknown(error: unknown): boolean {
+  if (!isApiError(error)) return true;
+  if (error.kind === "NETWORK" || error.kind === "TIMEOUT" || error.kind === "ABORTED" || error.kind === "PARSE") return true;
+  return error.kind === "HTTP" && error.status !== null && error.status >= 500;
+}
+
 /** 재예약 실패 안내. 서버 메시지 본문을 그대로 보여 주지 않고, 알려진 코드만 정해 둔 문구로 바꾼다 */
 export function getRescheduleErrorMessage(error: unknown): string {
+  if (isRescheduleResultUnknown(error)) return RESCHEDULE_UNKNOWN_RESULT_MESSAGE;
   if (!isApiError(error)) return "재예약을 요청하지 못했습니다. 잠시 후 다시 시도해 주세요.";
-  const reason = getRescheduleFailureReason(error);
-  if (reason === "NETWORK" || reason === "INVALID_RESPONSE") return RESCHEDULE_UNKNOWN_RESULT_MESSAGE;
   if (error.kind === "HTTP" && error.status !== 401 && error.code && RESCHEDULE_ERROR_MESSAGES[error.code]) return RESCHEDULE_ERROR_MESSAGES[error.code];
   return error.message;
 }

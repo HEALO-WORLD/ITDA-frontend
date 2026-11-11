@@ -17,6 +17,7 @@ import {
   getRescheduleErrorMessage,
   getRescheduleFailureReason,
   isReferralApiId,
+  isRescheduleResultUnknown,
   requestReschedule,
   validateRescheduleRequest,
   type ReferralResponseDto,
@@ -95,7 +96,8 @@ type RescheduleCandidateActionResult =
         /** 재예약 POST 실패 (request에 원인. requestRescheduleAction만) */
         | "REQUEST_FAILED";
       message: string;
-      request?: { cause: RescheduleFailureReason; status: number | null; code: string | null };
+      /** uncertain: 서버가 이미 접수했을 수 있는 실패 (응답 없음·응답 형식 오류·5xx). 다시 요청하지 않고 상태를 조회해 확인한다 */
+      request?: { cause: RescheduleFailureReason; status: number | null; code: string | null; uncertain: boolean };
       lookup?: {
         target: "REFERRAL" | "SLOT" | "EQUIPMENT";
         /** FORBIDDEN: 403 (협약 없는 검사기관 장비 등) · NOT_FOUND: 404 (없음 또는 조회 범위 밖) */
@@ -175,7 +177,8 @@ export async function checkRescheduleCandidateAction(referralId: unknown, slotId
  * - examDate: 백엔드 재예약 계약 테스트·서비스 테스트와 같이 startTime과 같은 값
  * - 백엔드는 예약을 REQUESTED로 접수하고 슬롯 확보(HOLD)는 비동기로 처리한다 → 성공은 '접수'이지 '확정'이 아니다
  * - 같은 의뢰를 다시 요청하면 백엔드가 409를 돌려준다. 이 서버 안의 동시 요청은 inFlightReferrals로 먼저 막는다
- * 접수·409·결과 불명(네트워크·응답 형식) 뒤에는 화면을 다시 불러와(refresh) 서버 상태로 맞춘다. 실패해도 화면에서 상태를 바꾸지 않는다.
+ * 접수·409·결과 불명(네트워크·시간 초과·응답 형식·5xx) 뒤에는 화면을 다시 불러와(refresh) 서버 상태로 맞춘다. 실패해도 화면에서 상태를 바꾸지 않는다.
+ * 결과 불명은 POST를 다시 보내지 않는다: 화면이 의뢰·현재 예약을 다시 조회(GET, loadRescheduleProgressAction)해 접수 여부를 확인한다
  * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (LoginSessionContext). 지금 쿠키 값과 다르면 조회·POST 없이 SESSION_CHANGED
  */
 export async function requestRescheduleAction(referralId: unknown, slotId: unknown, expectedLoginSession?: unknown): Promise<RescheduleRequestActionResult> {
@@ -216,11 +219,12 @@ async function submitReschedule(referralId: unknown, slotId: unknown, expectedLo
     const cause = getRescheduleFailureReason(error);
     const status = isApiError(error) && error.kind === "HTTP" ? error.status : null;
     const code = isApiError(error) ? error.code : null;
+    const uncertain = isRescheduleResultUnknown(error);
     if (status !== 401) console.error("[referrals] 재예약 요청 실패:", isApiError(error) ? `${error.kind} ${status ?? ""} ${code ?? ""}`.trim() : "unknown");
-    // 409(이미 처리됨·상태 바뀜)·404와 결과 불명은 서버 상태가 화면과 다를 수 있어 다시 불러온다
-    if (cause === "CONFLICT" || cause === "NOT_FOUND" || cause === "NETWORK" || cause === "INVALID_RESPONSE") refresh();
+    // 409(이미 처리됨·상태 바뀜)·404와 결과 불명은 서버 상태가 화면과 다를 수 있어 다시 불러온다 (조회만. POST는 다시 보내지 않는다)
+    if (cause === "CONFLICT" || cause === "NOT_FOUND" || uncertain) refresh();
     if (cause === "UNAUTHORIZED") return { ok: false, reason: "UNAUTHORIZED", message: UNAUTHORIZED_MESSAGE };
-    return { ok: false, reason: "REQUEST_FAILED", message: getRescheduleErrorMessage(error), request: { cause, status, code } };
+    return { ok: false, reason: "REQUEST_FAILED", message: getRescheduleErrorMessage(error), request: { cause, status, code, uncertain } };
   }
 
   refresh();

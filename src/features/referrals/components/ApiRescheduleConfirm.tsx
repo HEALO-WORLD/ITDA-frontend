@@ -39,7 +39,10 @@ export type Phase =
 /** 결과를 알 수 없는 요청 실패 (서버가 이미 접수했을 수 있다) */
 const UNCERTAIN_CAUSES = new Set(["NETWORK", "INVALID_RESPONSE", "SERVER_ERROR"]);
 const UNCERTAIN_MESSAGE = "재예약 요청 결과를 확인하지 못했습니다. 이미 접수되었을 수 있으니 다시 요청하지 말고 [현재 상태 확인]으로 확인해 주세요.";
-/** 접수 뒤 자동 상태 확인 시점 (최대 3회, 이후 수동) */
+/** 결과 불명 뒤 재조회했는데 의뢰가 아직 재조정 필요 상태: 요청이 처리 중일 수 있어 실패로 확정하지 않는다 */
+const UNCERTAIN_STILL_NEEDS_RESCHEDULE_MESSAGE =
+  "아직 재조정이 필요한 상태로 확인됩니다. 요청이 서버에서 처리 중일 수 있어 실패로 확정하지 않았습니다. 잠시 후 [현재 상태 확인]으로 다시 확인해 주세요. 계속 같은 상태이면 이 요청은 반영되지 않은 것이므로 재조정 목록에서 다시 요청할 수 있습니다.";
+/** 접수·결과 불명 뒤 자동 상태 확인 시점 (최대 3회, 이후 수동. 조회만 하고 재예약 POST는 다시 보내지 않는다) */
 const AUTO_CHECK_DELAYS_MS = [2_000, 5_000, 10_000];
 
 /** 요청 실패 → 화면 단계 (409·404·권한·만료는 확실한 실패, 네트워크·응답 형식·5xx·중복 처리 중은 결과 불명) */
@@ -47,7 +50,7 @@ export function toRequestFailurePhase(result: RequestFailure): Extract<Phase, { 
   // 다른 탭에서 계정이 바뀌어 서버가 요청하지 않았다 (확실한 실패): 전용 안내, 같은 화면에서 다시 요청하지 않는다
   if (result.reason === "SESSION_CHANGED") return { kind: "FAILED", message: result.message, showList: false };
   if (result.reason === "DUPLICATE_REQUEST") return { kind: "UNCERTAIN", message: result.message };
-  if (result.reason === "REQUEST_FAILED" && result.request && UNCERTAIN_CAUSES.has(result.request.cause)) {
+  if (result.reason === "REQUEST_FAILED" && result.request && (result.request.uncertain || UNCERTAIN_CAUSES.has(result.request.cause))) {
     return { kind: "UNCERTAIN", message: UNCERTAIN_MESSAGE };
   }
   const cause = result.request?.cause;
@@ -79,8 +82,10 @@ export interface RescheduleView {
  * 단계 + 상태 재조회 결과 → 화면 표시 (순수 함수).
  * - 접수(ACCEPTED)는 확정이 아니다: 상태 재조회가 CONFIRMED를 돌려줄 때만 '예약 재조정 완료'
  * - 안내는 배너 하나에만 (접수 안내와 현재 상태를 함께 겹쳐 보이지 않는다)
+ * - requestedSlotId: 이 화면에서 요청한 슬롯. 현재 예약이 다른 슬롯이면 '다른 예약으로 바뀜'으로 안내한다 (요청을 다시 보내지 않는다)
+ * - 결과 불명(UNCERTAIN) 뒤 의뢰가 아직 재조정 필요 상태면 실패로 확정하지 않고 다시 확인하게 한다
  */
-export function getRescheduleView(phase: Phase, progress: ProgressResult | null): RescheduleView {
+export function getRescheduleView(phase: Phase, progress: ProgressResult | null, requestedSlotId: string | null = null): RescheduleView {
   switch (phase.kind) {
     case "CHECKING":
       return { title: "예약 변경 확인", banner: { tone: "info", busy: true, message: "선택한 슬롯으로 재조정할 수 있는지 확인하고 있습니다." }, newCardLabel: "변경할 예약", actions: "REQUEST" };
@@ -97,8 +102,23 @@ export function getRescheduleView(phase: Phase, progress: ProgressResult | null)
     case "ACCEPTED": {
       const base = { title: "예약 재조정 현황" as const, newCardLabel: "변경 요청 예약" as const, statusLabel: phase.kind === "UNCERTAIN" ? ("현재 상태 확인" as const) : ("상태 새로고침" as const) };
       if (progress?.ok) {
+        const currentSlotId = progress.reservation?.slotId ?? null;
+        const otherReservation =
+          (progress.stage === "CONFIRMED" || progress.stage === "PROCESSING") && requestedSlotId !== null && currentSlotId !== null && currentSlotId.toLowerCase() !== requestedSlotId.toLowerCase();
+        if (otherReservation) {
+          const when = progress.reservation?.startTime ? ` (${localDateTime(progress.reservation.startTime)})` : "";
+          const state = progress.stage === "CONFIRMED" ? "확정된" : "처리 중인";
+          return {
+            ...base,
+            banner: { tone: "warning", message: `현재 의뢰는 요청한 슬롯이 아닌 다른 ${state} 예약${when}으로 바뀌어 있습니다. 이 요청을 다시 보내지 말고 의뢰·예약 관리에서 현재 예약을 확인해 주세요.`, showList: true },
+            actions: "CLOSE",
+          };
+        }
         if (progress.stage === "CONFIRMED") {
           return { title: "예약 재조정 완료", banner: { tone: "success", message: progress.message }, newCardLabel: "확정된 예약", actions: "CLOSE" };
+        }
+        if (progress.stage === "NEEDS_RESCHEDULE" && phase.kind === "UNCERTAIN") {
+          return { ...base, banner: { tone: "warning", message: UNCERTAIN_STILL_NEEDS_RESCHEDULE_MESSAGE, showList: true }, actions: "STATUS" };
         }
         if (progress.stage === "PROCESSING") {
           return { ...base, banner: { tone: "info", message: `재조정 요청이 접수되었습니다. ${progress.message}` }, actions: "STATUS" };
@@ -158,6 +178,8 @@ export function getRescheduleStatusSteps(phase: Phase, progress: ProgressResult 
       if (progress?.ok) {
         if (progress.stage === "CONFIRMED") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "done", "확정됨")];
         if (progress.stage === "PROCESSING") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "current", "확정 대기")];
+        // 결과 불명 뒤 아직 재조정 필요 상태: 처리 중일 수 있어 실패로 표시하지 않는다
+        if (progress.stage === "NEEDS_RESCHEDULE" && !accepted) return [step("재조정 요청", "done"), receipt, step("예약 확정", "warning", "확인 필요")];
         if (progress.stage === "FAILED" || progress.stage === "NEEDS_RESCHEDULE") {
           return [step("재조정 요청", "done"), receipt, step("예약 확정", "error", "확정 실패")];
         }
@@ -307,9 +329,9 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
     }
   };
 
-  // 접수 뒤 자동 상태 확인 (2·5·10초 뒤, 확정·실패가 보이면 멈춘다)
-  const accepted = phase.kind === "ACCEPTED";
-  const settled = progress?.ok === true && progress.stage !== "PROCESSING";
+  // 접수·결과 불명 뒤 자동 상태 확인 (2·5·10초 뒤 조회만, 확정·실패가 보이면 멈춘다). 결과 불명에서 아직 재조정 필요 상태면 처리 중일 수 있어 계속 본다
+  const accepted = phase.kind === "ACCEPTED" || phase.kind === "UNCERTAIN";
+  const settled = progress?.ok === true && progress.stage !== "PROCESSING" && !(phase.kind === "UNCERTAIN" && progress.stage === "NEEDS_RESCHEDULE");
   const checkProgressRef = useRef(checkProgress);
   useEffect(() => {
     checkProgressRef.current = checkProgress;
@@ -330,7 +352,7 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
       // 렌더링 시점 로그인 세션을 함께 보낸다 (다른 탭에서 계정이 바뀌었으면 서버가 요청하지 않는다)
       result = await requestRescheduleAction(target.referralId, slotId, renderedLoginSession);
     } catch {
-      result = { ok: false, reason: "REQUEST_FAILED", message: UNCERTAIN_MESSAGE, request: { cause: "NETWORK", status: null, code: null } };
+      result = { ok: false, reason: "REQUEST_FAILED", message: UNCERTAIN_MESSAGE, request: { cause: "NETWORK", status: null, code: null, uncertain: true } };
     } finally {
       onBusyChange(false);
     }
@@ -344,7 +366,7 @@ export default function ApiRescheduleConfirm({ open, target, slot, organizations
     setPhase(toRequestFailurePhase(result));
   };
 
-  const view = getRescheduleView(phase, progress);
+  const view = getRescheduleView(phase, progress, slotId);
   const busy = phase.kind === "SUBMITTING";
 
   const footer = (
