@@ -359,6 +359,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   FORBIDDEN: "우리 기관 장비만 조회·변경할 수 있습니다.",
   RESOURCE_NOT_FOUND: "장비 또는 검사 유형을 찾을 수 없습니다. 삭제되었을 수 있습니다.",
   INSTITUTION_NOT_AVAILABLE: "활성 검사기관에만 장비를 등록할 수 있습니다.",
+  DUPLICATE_EQUIPMENT_NAME: "같은 이름의 장비가 이미 등록되어 있습니다. 장비 목록에서 확인해 주세요.",
   DUPLICATE_EQUIPMENT_EXAM_TYPE: "이미 이 장비에 연결된 검사 유형입니다.",
   INVALID_INPUT: "요청 값이 올바르지 않습니다. 장비 종류와 같은 검사 유형인지 확인해 주세요.",
   VALIDATION_FAILED: "입력값을 확인해 주세요.",

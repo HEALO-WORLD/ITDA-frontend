@@ -397,6 +397,8 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
   const [submitError, setSubmitError] = useState<string | null>(null);
   /** 장비는 등록됐지만 운영시간 저장이 실패한 상태 (다시 제출하면 운영시간만 저장한다) */
   const [created, setCreated] = useState<{ equipmentId: string; linkFailed: number } | null>(null);
+  /** 장비 등록 결과를 알 수 없는 상태의 안내 (서버에 이미 등록됐을 수 있어 이 창에서는 다시 등록하지 않는다) */
+  const [uncertain, setUncertain] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
   const { value: options } = useDetailResult<ExamTypeOptionsResult>(modality || null, () => loadExamTypeOptionsAction(modality), NETWORK_FAILURE);
@@ -410,6 +412,11 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
 
   const close = () => {
     if (pending) return;
+    // 등록 결과를 알 수 없으면 닫을 때도 목록 위에 남겨 먼저 확인하게 한다
+    if (uncertain) {
+      onDone({ tone: "warning", message: uncertain });
+      return;
+    }
     // 장비는 이미 등록됐으므로 닫을 때 무엇이 남았는지 목록 위에 알린다
     if (created) {
       onDone({
@@ -430,7 +437,7 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
       return;
     }
     setShowHoursErrors(true);
-    if (pendingRef.current || sessionChanged || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
+    if (pendingRef.current || sessionChanged || uncertain || !hasOpenDay(days) || !isOperatingDaysValid(days)) return;
     pendingRef.current = true;
     setPending(true);
     setSubmitError(null);
@@ -457,6 +464,8 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
       );
       if (!result.ok) {
         if (result.reason === "SESSION_CHANGED") markEquipmentSessionChanged();
+        // 결과 불명: 등록 버튼을 잠근다 (자동·수동 재전송 없음. 장비 목록에서 먼저 확인하게 안내)
+        if (result.reason === "UNCERTAIN") setUncertain(result.message);
         setSubmitError(result.message);
         const fields = result.fieldErrors ?? {};
         if (fields.name || fields.modality || fields.examTypeId || fields.durationMinutes) setStep(1);
@@ -469,12 +478,15 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
       }
       onDone({ tone: result.linkFailed > 0 ? "warning" : "success", message: result.message });
     } catch {
-      // 응답을 받지 못하면 서버에서 등록됐는지 알 수 없다: 같은 장비를 두 번 만들지 않도록 목록 확인을 먼저 안내한다
-      setSubmitError(
-        created
-          ? NETWORK_ERROR_MESSAGE
-          : "서버 응답을 받지 못했습니다. 장비가 이미 등록되었을 수 있으니 창을 닫고 장비 목록을 확인한 뒤 다시 시도해 주세요.",
-      );
+      // 응답을 받지 못하면 서버에서 등록됐는지 알 수 없다: 같은 장비를 두 번 만들지 않도록 등록 버튼을 잠그고 목록 확인을 먼저 안내한다
+      // (운영시간 다시 저장은 PUT 전체 설정이라 다시 보내도 같은 결과여서 잠그지 않는다)
+      if (created) {
+        setSubmitError(NETWORK_ERROR_MESSAGE);
+      } else {
+        const message = "서버 응답을 받지 못했습니다. 장비가 이미 등록되었을 수 있으니 창을 닫고 장비 목록을 확인한 뒤 다시 시도해 주세요.";
+        setUncertain(message);
+        setSubmitError(message);
+      }
     } finally {
       pendingRef.current = false;
       setPending(false);
@@ -509,7 +521,7 @@ function CreateEquipmentDialog({ onClose, onDone }: { onClose: () => void; onDon
               <ArrowRight className="size-4" aria-hidden="true" />
             </button>
           ) : (
-            <button type="submit" form={formId} disabled={pending || sessionChanged} className={primaryButtonClass}>
+            <button type="submit" form={formId} disabled={pending || sessionChanged || uncertain !== null} className={primaryButtonClass}>
               {pending ? (created ? "저장 중" : "등록 중") : created ? "운영 시간 다시 저장" : "장비 등록"}
             </button>
           )}
