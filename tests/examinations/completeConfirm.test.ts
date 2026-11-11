@@ -254,7 +254,8 @@ describe("Server Function: 로그인 세션 정합성 (STEP 3-2-2B-3)", () => {
   });
 
   it("같은 세션의 백엔드 오류 처리 유지: 400·401·403·404·409·5xx", async () => {
-    const cases: [number, string][] = [[400, "INVALID"], [401, "UNAUTHORIZED"], [403, "FORBIDDEN"], [404, "NOT_FOUND"], [409, "CONFLICT"], [500, "ERROR"]];
+    // 5xx는 서버가 이미 반영했을 수 있어 결과 불명(UNCERTAIN)으로 바뀌었다 (P2: 변경 요청을 다시 보내지 않고 조회로 확인. 여기서는 조회도 같은 오류라 확인 실패)
+    const cases: [number, string][] = [[400, "INVALID"], [401, "UNAUTHORIZED"], [403, "FORBIDDEN"], [404, "NOT_FOUND"], [409, "CONFLICT"], [500, "UNCERTAIN"]];
     for (const [status, reason] of cases) {
       state.error = new ApiError("HTTP", "x", { status });
       const change = await actions.changeExaminationStatusAction(EXAM, "COMPLETED", LOGIN);

@@ -109,7 +109,10 @@ export type ExaminationActionResult =
   | { ok: true; message: string }
   | {
       ok: false;
-      /** SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분) */
-      reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "SESSION_CHANGED" | "NOT_FOUND" | "CONFLICT" | "INVALID" | "NETWORK" | "ERROR";
+      /**
+       * SESSION_CHANGED: 화면을 그린 뒤 다른 탭에서 로그인 계정이 바뀜(같은 계정 재로그인 포함)·렌더링 세션 값 누락 (요청하지 않음. FORBIDDEN과 구분)
+       * UNCERTAIN: 상태 변경·결과 등록 요청의 결과를 알 수 없음(응답 없음·시간 초과·응답 형식 오류·5xx). 다시 조회해도 반영을 확인하지 못함
+       */
+      reason: "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "SESSION_CHANGED" | "NOT_FOUND" | "CONFLICT" | "INVALID" | "UNCERTAIN" | "NETWORK" | "ERROR";
       message: string;
     };
