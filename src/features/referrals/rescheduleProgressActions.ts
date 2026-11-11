@@ -23,7 +23,8 @@ type RescheduleProgressResult =
       stage: RescheduleProgressStage;
       message: string;
       referralStatus: ReferralStatusDto;
-      reservation: { id: string; status: ReservationStatusDto; failureReason: FailureReasonDto | null; startTime: string | null } | null;
+      /** slotId: 요청한 슬롯과 다른 예약으로 바뀌었는지 화면이 구분하는 데 쓴다 */
+      reservation: { id: string; slotId: string | null; status: ReservationStatusDto; failureReason: FailureReasonDto | null; startTime: string | null } | null;
     }
   | { ok: false; reason: "FORBIDDEN_ORIGIN" | "NOT_AVAILABLE" | "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "INVALID_INPUT" | "NOT_FOUND" | "ERROR"; message: string };
 
@@ -43,7 +44,7 @@ export async function loadRescheduleProgressAction(referralId: unknown): Promise
     const dto = referral.currentReservationId ? await fetchReservation(referral.currentReservationId, options) : null;
     const reservation =
       dto && dto.referralId.toLowerCase() === referral.id.toLowerCase()
-        ? { id: dto.id, status: dto.reservationStatus, failureReason: dto.failureReason, startTime: dto.startTime }
+        ? { id: dto.id, slotId: dto.slotId, status: dto.reservationStatus, failureReason: dto.failureReason, startTime: dto.startTime }
         : null;
     return { ok: true, referralStatus: referral.referralStatus, reservation, ...toRescheduleProgress(referral.referralStatus, reservation) };
   } catch (error) {

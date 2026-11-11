@@ -138,7 +138,15 @@ export default function SlotSearch({
   const mockExamTypeOptions = useMockSlotExamTypes(organizations, !isApi);
   const examTypeOptions = isApi ? apiExamTypeOptions : mockExamTypeOptions;
   /** API 재조정 대상 (조회 성공일 때만) */
-  const apiTarget = isApi && apiReschedule?.ok ? apiReschedule.target : null;
+  const latestApiTarget = isApi && apiReschedule?.ok ? apiReschedule.target : null;
+  /**
+   * 이 화면에서 확인한 재조정 대상을 유지한다: 재조정 요청이 접수되면(결과 불명 포함) Server Function의 refresh()로 대상을 다시 조회하는데,
+   * 의뢰가 더 이상 재조정 필요 상태가 아니라 조회가 실패해도 일반 검색(새 검사 의뢰)으로 바꾸지 않고 진행 상태 확인 화면을 이어서 보여 준다.
+   * 같은 의뢰(key)일 때만 유지된다. 이 대상으로 다시 요청해도 서버가 후보 확인에서 다시 막는다(REFERRAL_NOT_RESCHEDULABLE)
+   */
+  const [heldApiTarget, setHeldApiTarget] = useState(latestApiTarget);
+  if (latestApiTarget && latestApiTarget !== heldApiTarget) setHeldApiTarget(latestApiTarget);
+  const apiTarget = latestApiTarget ?? heldApiTarget;
   /**
    * 재조정 시 고정할 세부 검사 항목: API는 의뢰의 examTypeId(서버 검색 조건으로도 고정), Mock은 Mock 의뢰의 항목.
    * Mock 의뢰에 항목이 없으면 기존처럼 CT·MRI만 고정한다
@@ -628,7 +636,7 @@ export default function SlotSearch({
       )}
 
       {apiTarget && !embedded && <ApiRescheduleBanner target={apiTarget} />}
-      {isApi && apiReschedule && !apiReschedule.ok && (
+      {isApi && apiReschedule && !apiReschedule.ok && !heldApiTarget && (
         <div
           role="alert"
           className="flex flex-col gap-3 rounded-xl bg-red-50 px-6 py-4 text-[15px] text-red-700 sm:flex-row sm:items-center sm:justify-between"

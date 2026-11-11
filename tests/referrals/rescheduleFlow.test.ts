@@ -496,3 +496,70 @@ describe("requestRescheduleAction: 로그인 세션 정합성 (STEP 3-2-2B-1)", 
     assert.equal(posts().length, 1);
   });
 });
+
+// ── P1-A: 재예약 POST 결과 불명 (5xx·응답 없음·응답 형식 오류) ──
+
+describe("requestRescheduleAction: 결과 불명 처리 (P1-A)", () => {
+  const unknownFailures: [string, unknown][] = [
+    ["500", httpError(500, "INTERNAL_SERVER_ERROR")],
+    ["502", httpError(502)],
+    ["503", httpError(503)],
+    ["504", httpError(504)],
+    ["NETWORK", new ApiError("NETWORK", "x")],
+    ["TIMEOUT", new ApiError("TIMEOUT", "x")],
+    ["PARSE(응답 형식 오류)", new ApiError("PARSE", "x")],
+  ];
+  for (const [label, error] of unknownFailures) {
+    it(`POST ${label} → 결과 불명(uncertain): POST 1회(자동 재전송 없음), 목록 다시 그리기, 결과 불명 안내`, async () => {
+      state.post = error as Error;
+      const result = await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN));
+      assert.equal(result.ok, false);
+      if (!result.ok) {
+        assert.equal(result.reason, "REQUEST_FAILED");
+        assert.equal(result.request?.uncertain, true, label);
+        assert.match(result.message, /확인하지 못했습니다/);
+      }
+      assert.equal(posts().length, 1);
+      assert.equal(state.refreshCount, 1);
+    });
+  }
+
+  it("확실한 실패(400·403·404·409)는 결과 불명이 아니다 (409·404만 목록 다시 그리기, 기존 처리 그대로)", async () => {
+    for (const [status, refreshes] of [[400, 0], [403, 0], [404, 1], [409, 1]] as const) {
+      reset();
+      state.post = httpError(status);
+      const result = await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN));
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.request?.uncertain, false, String(status));
+      assert.equal(state.refreshCount, refreshes, String(status));
+      assert.equal(posts().length, 1);
+    }
+  });
+
+  it("실제로는 접수됐지만 응답이 유실(500): 다시 보내지 않고 재조회하면 처리 중(요청한 슬롯) → 화면은 접수로 확인", async () => {
+    state.post = () => {
+      // 서버는 커밋했다: 의뢰 PENDING, 현재 예약 = 새 예약(요청한 슬롯, REQUESTED). 응답 단계에서 500
+      state.referral = referralDto({ referralStatus: "PENDING", currentReservationId: NEW_RESERVATION });
+      state.reservations[NEW_RESERVATION] = reservationDto({ id: NEW_RESERVATION, slotId: SLOT, reservationStatus: "REQUESTED", failureReason: null });
+      throw httpError(500);
+    };
+    const result = await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN));
+    assert.equal(!result.ok && result.request?.uncertain, true);
+    const progress = await progressActions.loadRescheduleProgressAction(REFERRAL);
+    assert.equal(progress.ok, true);
+    if (progress.ok) {
+      assert.equal(progress.stage, "PROCESSING", "REQUESTED는 확정이 아니다");
+      assert.equal(progress.reservation?.slotId, SLOT);
+    }
+    assert.equal(posts().length, 1, "재조회는 GET만");
+  });
+
+  it("결과 불명 뒤 재조회도 실패하면(503) 상태 확인 실패로 돌려준다 (화면은 결과 불명 유지)", async () => {
+    state.post = new ApiError("TIMEOUT", "x");
+    await quiet(() => actions.requestRescheduleAction(REFERRAL, SLOT, LOGIN));
+    state.referral = httpError(503);
+    const progress = await quiet(() => progressActions.loadRescheduleProgressAction(REFERRAL));
+    assert.deepEqual(progress, { ok: false, reason: "ERROR", message: "상태를 확인하지 못했습니다. 잠시 후 다시 확인해 주세요." });
+    assert.equal(posts().length, 1);
+  });
+});

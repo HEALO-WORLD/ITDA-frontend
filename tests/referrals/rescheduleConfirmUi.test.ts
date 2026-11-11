@@ -265,3 +265,68 @@ describe("SlotSearch 모드 분리", () => {
     assert.equal(calls.includes("request"), false);
   });
 });
+
+describe("결과 불명 화면 (P1-A)", () => {
+  const OTHER_SLOT = "49999999-4444-4444-8444-444444444444";
+  const progress = (stage: string, slotId: string | null, status = "REQUESTED", referralStatus = "PENDING") =>
+    ({ ok: true, stage, message: "상태 메시지", referralStatus, reservation: { id: "r", slotId, status, failureReason: null, startTime: "2099-01-10T10:00:00" } }) as never;
+  const uncertain = { kind: "UNCERTAIN", message: "결과를 확인하지 못했습니다" } as never;
+
+  it("uncertain 플래그가 있으면(5xx 포함) 결과 불명 단계", () => {
+    const phase = Confirm.toRequestFailurePhase({ ok: false, reason: "REQUEST_FAILED", message: "m", request: { cause: "SERVER_ERROR", status: 503, code: null, uncertain: true } } as never);
+    assert.equal(phase.kind, "UNCERTAIN");
+  });
+
+  it("A. 결과 불명 → 재조회: 요청한 슬롯이 처리 중이면 접수로, 확정이면 완료로 (PENDING·HELD를 확정으로 보이지 않음)", () => {
+    const processing = Confirm.getRescheduleView(uncertain, progress("PROCESSING", SLOT, "HELD"), SLOT);
+    assert.equal(processing.title, "예약 재조정 현황");
+    assert.match(processing.banner.message, /접수되었습니다/);
+    assert.equal(processing.actions, "STATUS");
+    const confirmed = Confirm.getRescheduleView(uncertain, progress("CONFIRMED", SLOT, "CONFIRMED", "CONFIRMED"), SLOT);
+    assert.equal(confirmed.title, "예약 재조정 완료");
+  });
+
+  it("B. 결과 불명 → 재조회해도 아직 재조정 필요: 실패로 확정하지 않고 결과 불명 유지 + 다시 확인 (요청 버튼 없음)", () => {
+    const view = Confirm.getRescheduleView(uncertain, progress("NEEDS_RESCHEDULE", null, "BLOCKED", "NEEDS_RESCHEDULE"), SLOT);
+    assert.equal(view.banner.tone, "warning");
+    assert.match(view.banner.message, /실패로 확정하지 않았습니다/);
+    assert.match(view.banner.message, /재조정 목록에서 다시 요청할 수 있습니다/);
+    assert.equal(view.actions, "STATUS");
+    const steps = Confirm.getRescheduleStatusSteps(uncertain, progress("NEEDS_RESCHEDULE", null, "BLOCKED", "NEEDS_RESCHEDULE"));
+    assert.equal(steps[2].state, "warning", "확정 실패가 아니라 확인 필요");
+    // 접수가 확인된 뒤(ACCEPTED)에 재조정 필요로 돌아간 것은 기존과 같이 실패
+    assert.equal(Confirm.getRescheduleView({ kind: "ACCEPTED", message: "m" } as never, progress("NEEDS_RESCHEDULE", null, "BLOCKED", "NEEDS_RESCHEDULE"), SLOT).banner.tone, "error");
+  });
+
+  it("C. 다른 예약(다른 슬롯)으로 바뀌어 있으면 그 상태를 안내하고 닫기만 (요청 다시 보내지 않음)", () => {
+    for (const phase of [uncertain, { kind: "ACCEPTED", message: "m" } as never]) {
+      for (const [stage, status] of [["PROCESSING", "REQUESTED"], ["CONFIRMED", "CONFIRMED"]] as const) {
+        const view = Confirm.getRescheduleView(phase, progress(stage, OTHER_SLOT, status, stage === "CONFIRMED" ? "CONFIRMED" : "PENDING"), SLOT);
+        assert.equal(view.banner.tone, "warning");
+        assert.match(view.banner.message, /요청한 슬롯이 아닌 다른/);
+        assert.equal(view.actions, "CLOSE");
+        assert.notEqual(view.title, "예약 재조정 완료");
+      }
+    }
+  });
+
+  it("D. 재조회 실패: 결과 불명 유지 + 상태 다시 확인", () => {
+    const view = Confirm.getRescheduleView(uncertain, { ok: false, reason: "ERROR", message: "상태를 확인하지 못했습니다." } as never, SLOT);
+    assert.equal(view.banner.tone, "warning");
+    assert.equal(view.actions, "STATUS");
+  });
+
+  it("화면: 결과 불명에서도 자동 상태 확인(조회만), 요청 버튼은 다시 열지 않는다", () => {
+    const source = readFileSync(new URL("../../src/features/referrals/components/ApiRescheduleConfirm.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /const accepted = phase\.kind === "ACCEPTED" \|\| phase\.kind === "UNCERTAIN";/);
+    assert.match(source, /getRescheduleView\(phase, progress, slotId\)/);
+    assert.match(source, /실패 뒤에도 같은 화면에서 다시 요청하지 않는다 \(submittingRef를 풀지 않는다\)/);
+  });
+
+  it("재조정 접수 뒤 refresh()로 대상 의뢰가 재조정 필요가 아니게 돼도 이 화면의 재조정 대상을 유지한다 (새 검사 의뢰로 바뀌지 않음, 기존 문제 수정)", () => {
+    const source = readFileSync(new URL("../../src/features/slots/components/SlotSearch.tsx", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+    assert.match(source, /const \[heldApiTarget, setHeldApiTarget\] = useState\(latestApiTarget\);/);
+    assert.match(source, /const apiTarget = latestApiTarget \?\? heldApiTarget;/);
+    assert.match(source, /\{isApi && apiReschedule && !apiReschedule\.ok && !heldApiTarget && \(/);
+  });
+});
