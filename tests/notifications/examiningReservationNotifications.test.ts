@@ -15,6 +15,14 @@ const REFERRAL = "cccccccc-3333-4333-8333-333333333333";
 const RESERVATION = "dddddddd-4444-4444-8444-444444444444";
 const OLD_RESERVATION = "eeeeeeee-5555-4555-8555-555555555555";
 const TOKEN_HEADERS = { Authorization: "Bearer test" };
+/** 화면이 렌더링된 로그인 세션 구분 값 (RTR 세션 정합성: 변경 요청은 requireRoleMutationAccess로 확인) */
+const LOGIN = "loginSessionTagA";
+/**
+ * 읽음 처리 호출 (렌더링 세션 인자 포함). RTR 브랜치(feat/refresh-token-rotation-fe)는 세 번째 인자 expectedLoginSession을 받고,
+ * 그 전 dev 기준 Action은 받지 않는다: 두 기준 모두에서 같은 테스트가 돌도록 선택 인자로 맞춰 부른다
+ */
+const readAction = (feature: string, id: string, expectedLoginSession: unknown) =>
+  (actions.markNotificationAsReadAction as (feature: string, id: string, expectedLoginSession?: unknown) => ReturnType<typeof actions.markNotificationAsReadAction>)(feature, id, expectedLoginSession);
 
 const state = {
   calls: [] as { path: string; method?: string; headers?: HeadersInit; query?: unknown }[],
@@ -35,6 +43,12 @@ before(async () => {
         role === state.role
           ? { ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } }
           : { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." },
+      requireRoleMutationAccess: async (role: string, expected: unknown) =>
+        expected !== LOGIN
+          ? { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." }
+          : role === state.role
+            ? { ok: true, headers: TOKEN_HEADERS, user: { userId: "u", institutionId: "i" } }
+            : { ok: false, reason: "FORBIDDEN_ROLE", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다." },
       toRoleAccessFailure: () => ({ reason: "FORBIDDEN", message: "이 화면의 정보에 접근할 권한이 없는 계정입니다.", code: null }),
     },
   });
@@ -177,7 +191,7 @@ describe("응답 계약: reservationId (선택·null 허용)", () => {
 describe("F~H: 읽음 처리 (기존 Server Function 재사용, 사용자별 읽음은 백엔드 기준)", () => {
   it("F: 검사기관 사용자 A가 읽으면 PATCH 1회 후 refresh로 목록·미읽음 배지를 서버 값으로 다시 그린다", async () => {
     state.response = { notificationId: EXAM_NOTIFICATION, isRead: true, readAt: "2026-11-11T10:00:00" };
-    const result = await actions.markNotificationAsReadAction("examining-notifications", EXAM_NOTIFICATION);
+    const result = await readAction("examining-notifications", EXAM_NOTIFICATION, LOGIN);
     assert.deepEqual(result, { ok: true, notificationId: EXAM_NOTIFICATION, readAt: "2026-11-11T10:00:00" });
     assert.deepEqual(state.calls, [{ path: `/api/v1/notifications/${EXAM_NOTIFICATION}/read`, method: "PATCH", headers: TOKEN_HEADERS, query: undefined }]);
     assert.equal(state.refreshCount, 1);
@@ -192,7 +206,7 @@ describe("F~H: 읽음 처리 (기존 Server Function 재사용, 사용자별 읽
 
   it("H: 의뢰기관 계정은 검사기관 알림 읽음 처리를 요청하지 않는다 (역할 확인 후에만 요청)", async () => {
     state.role = "REFERRING";
-    const result = await actions.markNotificationAsReadAction("examining-notifications", EXAM_NOTIFICATION);
+    const result = await readAction("examining-notifications", EXAM_NOTIFICATION, LOGIN);
     assert.equal(result.ok, false);
     assert.equal(state.calls.length, 0);
     assert.equal(state.refreshCount, 0);
