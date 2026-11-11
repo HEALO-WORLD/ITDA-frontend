@@ -1,5 +1,5 @@
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react";
 
 import {
   addDays,
@@ -29,6 +29,35 @@ interface DatePickerProps {
   placeholder?: string;
   /** 범례 아래 선택 불가 사유 안내 */
   disabledNote?: string;
+  /**
+   * 달력을 열었을 때와 표시 월이 바뀔 때(월 이동 버튼·키보드 이동) 표시 중인 월을 알린다.
+   * 날짜별 가용 정보를 월 단위로 불러오는 화면에서 쓴다 (달력 동작·포커스에는 영향 없음)
+   */
+  onViewMonthChange?: (year: number, month: number) => void;
+  /**
+   * 달력 팝업을 화면 기준(position: fixed)으로 띄운다. 스크롤되는 모달 본문 안에서 팝업이 잘리거나
+   * 본문에 스크롤을 만들지 않게 할 때 쓴다 (아래 공간이 부족하면 위로 연다). 기본값(false)은 기존과 같은 absolute 배치
+   */
+  floating?: boolean;
+  /**
+   * 칩 모양 트리거 (슬롯 검색 PC 조건 칩). 주면 위쪽 라벨·입력칸 대신 이 모양·내용의 버튼을 쓴다 (버튼 내용이 이름이 된다).
+   * 달력 팝업·선택 동작은 같다. 기본값(없음)은 기존 입력칸 모양
+   */
+  chip?: { className: string; content: ReactNode };
+}
+
+/** floating 팝업 크기 (w-[320px]와 대략의 높이). 위·아래 배치를 고르는 데만 쓴다 */
+const POPUP_WIDTH = 320;
+const POPUP_HEIGHT_ESTIMATE = 430;
+const POPUP_GAP = 8;
+
+/** 트리거 위치 → 팝업 위치 (화면 안쪽으로 맞춘다) */
+function getFloatingStyle(trigger: HTMLElement): CSSProperties {
+  const rect = trigger.getBoundingClientRect();
+  const left = Math.max(POPUP_GAP, Math.min(rect.left, window.innerWidth - POPUP_WIDTH - POPUP_GAP));
+  const below = window.innerHeight - rect.bottom;
+  if (below >= POPUP_HEIGHT_ESTIMATE + POPUP_GAP || below >= rect.top) return { left, top: rect.bottom + POPUP_GAP };
+  return { left, bottom: window.innerHeight - rect.top + POPUP_GAP };
 }
 
 interface MonthView {
@@ -67,6 +96,9 @@ export default function DatePicker({
   disablePast = false,
   placeholder = "날짜 선택",
   disabledNote,
+  onViewMonthChange,
+  floating = false,
+  chip,
 }: DatePickerProps) {
   const labelId = useId();
   const dialogId = useId();
@@ -79,6 +111,8 @@ export default function DatePicker({
   const [todayKey, setTodayKey] = useState<DateKey>("");
   const [focusedKey, setFocusedKey] = useState<DateKey>("");
   const [view, setView] = useState<MonthView>({ year: 0, month: 0 });
+  /** floating일 때 팝업 위치 */
+  const [floatingStyle, setFloatingStyle] = useState<CSSProperties | null>(null);
 
   const getReason = (key: DateKey): string | null => {
     if (disablePast && key < todayKey) return "지난 날짜";
@@ -92,6 +126,7 @@ export default function DatePicker({
     setTodayKey(today);
     setFocusedKey(start);
     setView(toMonthView(start));
+    if (floating && triggerRef.current) setFloatingStyle(getFloatingStyle(triggerRef.current));
     setIsOpen(true);
     shouldFocusGridRef.current = true;
   };
@@ -127,6 +162,27 @@ export default function DatePicker({
     gridRef.current?.querySelector<HTMLButtonElement>(`[data-date="${focusedKey}"]`)?.focus();
   }, [isOpen, focusedKey, view]);
 
+  // floating: 열려 있는 동안 창 크기·스크롤이 바뀌면 트리거 기준으로 위치를 다시 잡는다
+  useEffect(() => {
+    if (!floating || !isOpen) return;
+    const update = () => triggerRef.current && setFloatingStyle(getFloatingStyle(triggerRef.current));
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [floating, isOpen]);
+
+  // 표시 월 알림 (열려 있을 때만). 콜백이 렌더링마다 바뀌어도 같은 월을 다시 알리지 않도록 최신 콜백은 ref로 읽는다
+  const onViewMonthChangeRef = useRef(onViewMonthChange);
+  useEffect(() => {
+    onViewMonthChangeRef.current = onViewMonthChange;
+  });
+  useEffect(() => {
+    if (isOpen) onViewMonthChangeRef.current?.(view.year, view.month);
+  }, [isOpen, view.year, view.month]);
+
   // 바깥 클릭 시 닫기
   useEffect(() => {
     if (!isOpen) return;
@@ -153,11 +209,24 @@ export default function DatePicker({
   }
 
   return (
-    <div ref={containerRef} className="relative">
-      <label id={labelId} htmlFor={id} className={fieldLabelClass}>
-        {label}
-      </label>
-      <div className="relative">
+    <div
+      ref={containerRef}
+      className="relative"
+      // 열려 있을 때만 Esc를 여기서 처리한다 (트리거·팝업 어디에 포커스가 있어도).
+      // preventDefault: 부모 <dialog>가 Esc를 닫기 요청으로 처리하지 않게 한다 (stopPropagation만으로는 네이티브 모달이 닫힌다).
+      // 닫혀 있을 때는 아무것도 막지 않아 부모 모달의 Esc 닫기는 그대로다
+      onKeyDown={
+        isOpen
+          ? (event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              event.stopPropagation();
+              close();
+            }
+          : undefined
+      }
+    >
+      {chip ? (
         <button
           ref={triggerRef}
           id={id}
@@ -165,27 +234,42 @@ export default function DatePicker({
           aria-haspopup="dialog"
           aria-expanded={isOpen}
           aria-controls={isOpen ? dialogId : undefined}
-          aria-labelledby={`${labelId} ${id}`}
           onClick={() => (isOpen ? close() : open())}
-          className={`${controlClass} text-left`}
+          className={chip.className}
         >
-          {value || <span className="text-gray-500">{placeholder}</span>}
+          {chip.content}
         </button>
-        <CalendarDays className={iconClass} aria-hidden="true" />
-      </div>
+      ) : (
+        <>
+          <label id={labelId} htmlFor={id} className={fieldLabelClass}>
+            {label}
+          </label>
+          <div className="relative">
+            <button
+              ref={triggerRef}
+              id={id}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={isOpen}
+              aria-controls={isOpen ? dialogId : undefined}
+              aria-labelledby={`${labelId} ${id}`}
+              onClick={() => (isOpen ? close() : open())}
+              className={`${controlClass} text-left`}
+            >
+              {value || <span className="text-gray-500">{placeholder}</span>}
+            </button>
+            <CalendarDays className={iconClass} aria-hidden="true" />
+          </div>
+        </>
+      )}
 
       {isOpen && (
         <div
           id={dialogId}
           role="dialog"
           aria-label={`${label} 선택`}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              close();
-            }
-          }}
-          className="absolute left-0 top-full z-30 mt-2 w-[320px] rounded-xl border border-line bg-white p-4 shadow-lg"
+          style={floating ? (floatingStyle ?? undefined) : undefined}
+          className={`${floating ? "fixed" : "absolute left-0 top-full mt-2"} z-30 w-[320px] rounded-xl border border-line bg-white p-4 shadow-lg`}
         >
           <div className="mb-3 flex items-center justify-between">
             <button

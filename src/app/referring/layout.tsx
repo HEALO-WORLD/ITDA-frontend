@@ -1,17 +1,39 @@
-import AppShell from "@/components/layout/AppShell";
-import { getNotifications } from "@/features/notifications/api";
-import NotificationReadProvider from "@/features/notifications/components/NotificationReadProvider";
-import { getMockSession } from "@/lib/dev/mockSession";
+import { Suspense, type ReactNode } from "react";
+import { connection } from "next/server";
 
+import ApiRoleGate, { AuthChecking } from "@/components/auth/ApiRoleGate";
+import ApiNotificationUnreadProvider from "@/features/notifications/components/ApiNotificationUnreadProvider";
+import { loadUnreadNotificationCount } from "@/features/notifications/server";
+
+
+/**
+ * 의뢰기관 화면 공통 레이아웃.
+ * 사용자 정보 API로 확인한 의뢰기관(REQUESTER) 사용자만 연다.
+ */
 export default async function ReferringLayout({ children }: LayoutProps<"/referring">) {
-  // TODO(auth): 인증 연동 시 서버 세션으로 교체하고, 의뢰기관 권한이 없으면 접근을 차단한다.
-  const user = getMockSession("REFERRING");
-  // 헤더 알림 표시와 재조정·알림 화면이 같은 알림 목록·읽음 상태를 공유한다
-  const notifications = await getNotifications();
+  return (
+    <Suspense fallback={<AuthChecking />}>
+      <ReferringApiNotifications>
+        <Suspense fallback={<AuthChecking />}>
+          <ApiRoleGate role="REFERRING">{children}</ApiRoleGate>
+        </Suspense>
+      </ReferringApiNotifications>
+    </Suspense>
+  );
+}
+
+async function ReferringApiNotifications({
+  children,
+}: {
+  children: ReactNode;
+}) {
+  await connection();
 
   return (
-    <NotificationReadProvider initialNotifications={notifications}>
-      <AppShell user={user}>{children}</AppShell>
-    </NotificationReadProvider>
+    <ApiNotificationUnreadProvider
+      unreadCount={loadUnreadNotificationCount("notifications")}
+    >
+      {children}
+    </ApiNotificationUnreadProvider>
   );
 }

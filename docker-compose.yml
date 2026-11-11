@@ -1,0 +1,40 @@
+# ITDA 프론트엔드 (production, Docker)
+#
+# 백엔드(C:\sparta\final project\itda, Compose 프로젝트 "itda")와 별도 Compose 프로젝트다.
+# 백엔드 기본 네트워크(itda_default)에 external로 붙어 Gateway(서비스명 gateway-service:8080)를 서버에서 부른다.
+#   - 브라우저 → 프론트(localhost:FRONTEND_PORT) → Next 서버(Server Component·Server Action·Route Handler) → gateway-service:8080
+#   - 브라우저는 Gateway를 직접 부르지 않는다 (NEXT_PUBLIC_API_BASE_URL 미설정). 내부 주소를 브라우저에 노출하지 않는다
+#
+# 값은 이 폴더의 .env에서 읽는다 (Compose 변수 치환). 없으면 아래 기본값.
+#   NEXT_PUBLIC_*        : 빌드 시점 고정 (바꾸면 `docker compose up -d --build`)
+#   DOCKER_API_BASE_URL  : 실행 시점, 서버 전용 Gateway 주소 (기본 http://gateway-service:8080)
+#   FRONTEND_PORT        : 호스트 포트 (기본 3001 next dev가 3001을 쓰고 있으면 다른 값으로)
+#   ITDA_BACKEND_NETWORK : 백엔드 네트워크 이름 (기본 itda_default. 백엔드를 먼저 띄워야 있다)
+name: itda-frontend
+
+services:
+  frontend:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_API_MODE: ${NEXT_PUBLIC_API_MODE:-mock}
+        NEXT_PUBLIC_API_FEATURES: ${NEXT_PUBLIC_API_FEATURES:-}
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-}
+        NEXT_PUBLIC_ENABLE_DEMO_SHORTCUTS: ${NEXT_PUBLIC_ENABLE_DEMO_SHORTCUTS:-}
+        NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION: ${NEXT_PUBLIC_ENABLE_EQUIPMENT_DOWNTIME_REGISTRATION:-}
+    image: itda/frontend:local
+    container_name: itda-frontend
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3001}:3001"
+    environment:
+      TZ: Asia/Seoul
+      # .env의 API_BASE_URL(localhost:8080, 로컬 next dev용)은 컨테이너 안에서 쓸 수 없어 따로 받는다
+      API_BASE_URL: ${DOCKER_API_BASE_URL:-http://gateway-service:8080}
+    networks:
+      - itda-backend
+
+networks:
+  itda-backend:
+    external: true
+    name: ${ITDA_BACKEND_NETWORK:-itda_default}

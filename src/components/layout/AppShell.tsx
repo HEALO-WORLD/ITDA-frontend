@@ -8,21 +8,26 @@ import RoleSidebar from "./RoleSidebar";
 
 interface AppShellProps {
   user: SessionUser;
+  /** 헤더에 로그아웃 버튼 표시 (API 모드 로그인 세션에서만) */
+  showLogout?: boolean;
   children: ReactNode;
 }
 
 /** 로그인 이후 화면의 공통 틀: 헤더 + 역할별 사이드바 + 본문 */
-export default function AppShell({ user, children }: AppShellProps) {
+export default function AppShell({ user, showLogout = false, children }: AppShellProps) {
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader
         subtitle={user.organizationName}
         user={user}
         notificationHref={NOTIFICATION_ROUTE_BY_ROLE[user.role]}
+        showLogout={showLogout}
       />
-      <div className="flex flex-1">
+      <div className="flex flex-1 flex-col md:flex-row">
         <RoleSidebar role={user.role} />
-        <main className="min-w-0 flex-1 px-10 py-8">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-8">
+          <div className="mx-auto w-full max-w-[1320px]">{children}</div>
+        </main>
       </div>
     </div>
   );

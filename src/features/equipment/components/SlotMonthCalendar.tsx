@@ -108,7 +108,7 @@ export default function SlotMonthCalendar({
   const weeks = Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
 
   return (
-    <section aria-labelledby="slot-calendar-title" className="min-w-0 rounded-xl border border-line bg-white px-3 pb-4 pt-5 sm:px-5">
+    <section aria-labelledby="slot-calendar-title" className="@container min-w-0 rounded-xl border border-line bg-white px-3 pb-4 pt-5 sm:px-5">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
         <div className="min-w-0">
           <h2 id="slot-calendar-title" className="text-lg font-bold text-gray-900">
@@ -201,7 +201,7 @@ export default function SlotMonthCalendar({
                       // 선택할 수 없는 날짜는 클릭·Enter·Space 모두 무시하고 기존 선택을 유지한다
                       onClick={() => selectable && onSelectDate(key)}
                       onFocus={() => setFocusedDate(key)}
-                      className={`flex h-[60px] w-full flex-col items-center justify-start rounded-lg pt-1.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary sm:h-[68px] ${
+                      className={`flex h-[60px] w-full flex-col items-center justify-start overflow-hidden rounded-lg px-0.5 pt-1.5 text-sm focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-primary @min-[400px]:h-[68px] ${
                         isSelected ? "bg-primary text-white" : meta.cellClass
                       } ${isToday && !isSelected ? "ring-1 ring-inset ring-primary" : ""}`}
                     >
@@ -219,7 +219,7 @@ export default function SlotMonthCalendar({
       </table>
 
       <ul className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 px-1 text-xs text-gray-500" aria-label="달력 표시 안내">
-        <LegendItem swatchClass={DAY_META.AVAILABLE.cellClass} label="예약 가능 (가능 n)" />
+        <LegendItem swatchClass={DAY_META.AVAILABLE.cellClass} label="예약 가능 (숫자: 가능 건수)" />
         <LegendItem swatchClass={DAY_META.UNAVAILABLE.cellClass} label="예약 불가 · 조회만 가능" />
         <LegendItem swatchClass="bg-white ring-1 ring-inset ring-line" label="휴무 · 슬롯 없음 (선택 불가)" />
         <LegendItem swatchClass={DAY_META.PAST_DAY.cellClass} label="지난 날짜 · 조회 범위 밖" />
@@ -236,6 +236,7 @@ const DAY_META: Record<DayStatus["kind"], { cellClass: string }> = {
   NO_SLOTS: { cellClass: "cursor-not-allowed text-gray-300" },
   CLOSED: { cellClass: "cursor-not-allowed text-gray-300" },
   LOADING: { cellClass: "cursor-wait text-gray-300" },
+  UNKNOWN: { cellClass: "cursor-not-allowed text-gray-400" },
   PAST_DAY: { cellClass: "cursor-not-allowed bg-gray-50 text-gray-300" },
   OUT_OF_RANGE: { cellClass: "cursor-not-allowed bg-gray-50 text-gray-300" },
 };
@@ -255,6 +256,8 @@ function describeStatus(status: DayStatus): string {
       return "슬롯 없음, 선택 불가";
     case "LOADING":
       return "불러오는 중";
+    case "UNKNOWN":
+      return "슬롯을 불러오지 못함, 선택 불가";
     case "PAST_DAY":
       return "지난 날짜, 선택 불가";
     case "OUT_OF_RANGE":
@@ -262,15 +265,23 @@ function describeStatus(status: DayStatus): string {
   }
 }
 
-/** 날짜 숫자 아래 짧은 표시. 좁은 화면에서는 더 짧은 문구를 쓴다 */
+/**
+ * 날짜 숫자 아래 짧은 표시. 달력 폭(컨테이너 기준)이 좁아 칸이 작으면 문구를 빼고 숫자만 보여
+ * 세 자리 건수도 잘리지 않게 한다 (전체 정보는 날짜 버튼의 title·aria-label에 있다)
+ */
 function DayBadge({ status, isSelected }: { status: DayStatus; isSelected: boolean }) {
   if (status.kind === "AVAILABLE") {
     return (
       <>
-        <span className={`mt-0.5 text-xs font-semibold ${isSelected ? "text-white" : "text-primary"}`}>
-          가능 {status.available}
+        <span
+          className={`mt-0.5 max-w-full truncate text-xs font-semibold tabular-nums ${isSelected ? "text-white" : "text-primary"}`}
+        >
+          <span className="hidden @min-[400px]:inline">가능 </span>
+          {status.available}
         </span>
-        <span className={`hidden text-[11px] sm:block ${isSelected ? "text-white/85" : "text-gray-500"}`}>
+        <span
+          className={`hidden max-w-full truncate text-[11px] @min-[400px]:block ${isSelected ? "text-white/85" : "text-gray-500"}`}
+        >
           총 {status.total}건
         </span>
       </>
@@ -280,13 +291,13 @@ function DayBadge({ status, isSelected }: { status: DayStatus; isSelected: boole
     const text = status.allPast ? "지난 시간" : "예약 불가";
     return (
       <>
-        <span className={`mt-0.5 hidden text-[11px] font-medium sm:block ${isSelected ? "text-white" : "text-gray-500"}`}>
+        <span className={`mt-0.5 hidden text-[11px] font-medium @min-[400px]:block ${isSelected ? "text-white" : "text-gray-500"}`}>
           {text}
         </span>
-        <span className={`mt-0.5 text-[11px] font-medium sm:hidden ${isSelected ? "text-white" : "text-gray-500"}`}>
+        <span className={`mt-0.5 text-[11px] font-medium @min-[400px]:hidden ${isSelected ? "text-white" : "text-gray-500"}`}>
           {status.allPast ? "지남" : "불가"}
         </span>
-        <span className={`hidden text-[11px] sm:block ${isSelected ? "text-white/85" : "text-gray-400"}`}>
+        <span className={`hidden text-[11px] @min-[400px]:block ${isSelected ? "text-white/85" : "text-gray-400"}`}>
           {status.total}건
         </span>
       </>

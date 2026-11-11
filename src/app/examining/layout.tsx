@@ -1,9 +1,19 @@
-import AppShell from "@/components/layout/AppShell";
-import { getMockSession } from "@/lib/dev/mockSession";
+import { Suspense } from "react";
 
-export default function ExaminingLayout({ children }: LayoutProps<"/examining">) {
-  // TODO(auth): 인증 연동 시 서버 세션으로 교체하고, 검사기관 권한이 없으면 접근을 차단한다.
-  const user = getMockSession("EXAMINING");
+import ApiRoleGate, { AuthChecking } from "@/components/auth/ApiRoleGate";
+import ApiNotificationUnreadProvider from "@/features/notifications/components/ApiNotificationUnreadProvider";
+import { loadUnreadNotificationCount } from "@/features/notifications/server";
 
-  return <AppShell user={user}>{children}</AppShell>;
+/**
+ * 검사기관 화면 공통 레이아웃.
+ * 사용자 정보 API로 확인한 검사기관(EXAMINER) 사용자만 연다.
+ */
+export default async function ExaminingLayout({ children }: LayoutProps<"/examining">) {
+  return (
+    <ApiNotificationUnreadProvider unreadCount={loadUnreadNotificationCount("examining-notifications")}>
+      <Suspense fallback={<AuthChecking />}>
+        <ApiRoleGate role="EXAMINING">{children}</ApiRoleGate>
+      </Suspense>
+    </ApiNotificationUnreadProvider>
+  );
 }

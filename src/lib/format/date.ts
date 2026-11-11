@@ -11,6 +11,11 @@ export function formatDateTimeWithWeekday(value: string): string {
   return `${date} (${WEEKDAYS[getWeekday(date)]}) ${time.slice(0, 5)}`;
 }
 
+/** `YYYY-MM-DDTHH:mm` → `YYYY-MM-DD HH:mm` (표 등 요일이 필요 없는 곳) */
+export function formatDateTime(value: string): string {
+  return value.slice(0, 16).replace("T", " ");
+}
+
 /** `YYYY-MM-DDTHH:mm` → `MM/DD HH:mm` (좁은 목록용, 연도 생략) */
 export function formatShortDateTime(value: string): string {
   const [date, time = ""] = value.split("T");

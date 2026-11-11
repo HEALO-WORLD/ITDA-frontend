@@ -33,6 +33,11 @@ export function formatOperatingHoursSummary(hours: DailyOperatingHours[]): strin
     .join(" · ");
 }
 
+/** 화면 요일(0=일 ~ 6=토) → 백엔드 week(1=월 ~ 7=일, java.time.DayOfWeek) */
+export const toBackendWeek = (weekday: number) => (weekday === 0 ? 7 : weekday);
+/** 백엔드 week(1=월 ~ 7=일) → 화면 요일(0=일 ~ 6=토) */
+export const fromBackendWeek = (week: number) => (week === 7 ? 0 : week);
+
 /** `HH:mm` + 분 → `HH:mm` (슬롯 종료 시각 계산용) */
 export function addMinutesToTime(time: string, minutes: number): string {
   const [hour, minute] = time.split(":").map(Number);
