@@ -220,7 +220,11 @@ export type RoleAccess =
  * - 확인에 실패하면 헤더를 주지 않는다 → 호출한 쪽은 요청을 보내지 않는다
  */
 export async function requireRoleAccess(role: OrganizationRole | "ADMIN"): Promise<RoleAccess> {
-  const state = await getAuthState();
+  return toRoleAccess(await getAuthState(), role);
+}
+
+/** 확인한 인증 상태 → 역할 접근 결과 (requireRoleAccess와 인증 복구 뒤 다시 확인할 때 공용) */
+function toRoleAccess(state: AuthState, role: OrganizationRole | "ADMIN"): RoleAccess {
   if (state.status === "signed-out") return { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." };
   if (state.status === "unverified") {
     return { ok: false, reason: state.reason === "UNAUTHORIZED" ? "UNAUTHORIZED" : "UNVERIFIED", message: state.message };
@@ -246,26 +250,61 @@ const LOGIN_SESSION_TAG = /^[A-Za-z0-9_-]{16}$/;
  *
  * expectedLoginSession: 화면이 렌더링될 때의 로그인 세션 구분 값 (클라이언트가 보낸 값. 인증·인가 근거가 아니라 사전 조건으로만 쓴다)
  * 1. 형식 확인: undefined·문자열/null이 아님·형식 오류 → 거부 (fail-closed)
- * 2. 기존 requireRoleAccess(role): 로그인·토큰·역할 확인 결과(SIGNED_OUT·UNAUTHORIZED 등)를 그대로 돌려준다
- * 3. 현재 HttpOnly 쿠키의 구분 값과 비교: 다르면 SESSION_CHANGED (다른 탭의 계정 전환·같은 계정 재로그인). 읽기 실패도 거부
+ * 2. 현재 HttpOnly 쿠키의 구분 값과 먼저 비교: 다르면 users/me·재발급 없이 SESSION_CHANGED (다른 탭의 계정 전환·같은 계정 재로그인.
+ *    전환한 계정의 역할이 달라도 권한 부족이 아니라 세션 변경으로 안내한다). 읽기 실패도 거부.
+ *    단, 토큰·구분 값 쿠키가 모두 없으면(다른 탭 로그아웃) 기존과 같이 SIGNED_OUT
  *    토큰 재발급(회전)은 구분 값을 바꾸지 않으므로 통과한다. 명시적인 null/null(구분 값 쿠키가 없던 기존 세션)은 허용한다
+ * 3. 같은 로그인 세션이면 기존 requireRoleAccess(role): 로그인·토큰·역할 확인 결과(UNAUTHORIZED·FORBIDDEN_ROLE 등)를 그대로 돌려준다
  * 거부하면 헤더를 주지 않는다 → 호출한 쪽은 백엔드 변경 요청을 보내지 않는다. 권한 판단은 그대로 백엔드가 한다.
+ *
+ * 인증 복구 (같은 화면에 머무는 동안 Access가 만료된 경우): 3에서 Access 쿠키가 없거나(SIGNED_OUT) users/me가 401(UNAUTHORIZED)이고
+ * Refresh 쿠키가 있으면, 기존 재발급 처리(rotateSessionTokens, `/auth/reissue`와 같은 함수)로 두 쿠키를 교체한 뒤
+ * 새 토큰으로 users/me·역할 확인을 다시 한다 (권한 확인을 건너뛰지 않는다). 2를 통과한 같은 세션에서만 하므로 다른 계정 토큰은 회전·삭제하지 않는다.
+ * - Refresh 만료·재사용으로 복구할 수 없으면 쿠키를 정리하고 `/login?reason=expired`로 보낸다 (Server Function 리다이렉트, 변경 요청 0회)
+ * - 일시 장애(네트워크·5xx)는 쿠키를 그대로 두고 거부한다 · 백엔드 변경 API의 401·403은 다시 시도하지 않는다 (이 함수는 변경 요청 전에만 실행된다)
+ * - 쿠키를 쓰므로 Server Function에서만 부른다
  */
 export async function requireRoleMutationAccess(role: OrganizationRole | "ADMIN", expectedLoginSession: unknown): Promise<RoleMutationAccess> {
   const sessionChanged = { ok: false, reason: "SESSION_CHANGED", message: SESSION_CHANGED_MESSAGE } as const;
   if (expectedLoginSession !== null && (typeof expectedLoginSession !== "string" || !LOGIN_SESSION_TAG.test(expectedLoginSession))) {
     return sessionChanged;
   }
-  const access = await requireRoleAccess(role);
-  if (!access.ok) return access;
-  let current: string | null;
-  try {
-    current = await readLoginSessionTag();
-  } catch (error) {
-    unstable_rethrow(error);
-    return sessionChanged;
+  const sameLoginSession = async () => {
+    try {
+      return (await readLoginSessionTag()) === expectedLoginSession;
+    } catch (error) {
+      unstable_rethrow(error);
+      return false;
+    }
+  };
+  if (!(await sameLoginSession())) {
+    // 다른 탭에서 로그아웃해 쿠키가 모두 없어졌으면 계정 전환이 아니라 로그아웃 (기존 SIGNED_OUT 안내 그대로)
+    const signedOut = (await readLoginSessionTag().catch(() => "unreadable")) === null && !(await readAccessTokenPresence()) && (await readRefreshToken()) === null;
+    return signedOut ? { ok: false, reason: "SIGNED_OUT", message: "로그인이 필요합니다." } : sessionChanged;
   }
-  return current === expectedLoginSession ? access : sessionChanged;
+  let access = await requireRoleAccess(role);
+  if (!access.ok && (access.reason === "SIGNED_OUT" || access.reason === "UNAUTHORIZED") && (await readRefreshToken()) !== null) {
+    access = await restoreRoleAccess(role);
+  }
+  if (!access.ok) return access;
+  // 확인하는 사이 다른 탭에서 로그인했을 수 있어 한 번 더 비교한다 (회전은 구분 값을 바꾸지 않는다)
+  return (await sameLoginSession()) ? access : sessionChanged;
+}
+
+/**
+ * Refresh 쿠키로 재발급(쿠키 교체)한 뒤 새 Access Token으로 사용자·역할을 다시 확인한다.
+ * 다시 로그인해야 하는 실패(만료·재사용: rotateSessionTokens가 쿠키를 지운다)는 로그인 화면의 만료 안내로 보낸다 (보호 화면의 기존 만료 처리와 같은 주소).
+ * 일시 장애는 재시도할 수 있도록 거부만 한다
+ */
+async function restoreRoleAccess(role: OrganizationRole | "ADMIN"): Promise<RoleAccess> {
+  // reissue.ts가 이 모듈을 쓰므로 순환 참조를 피해 실행할 때 불러온다
+  const { redirectToExpiredLogin, rotateSessionTokens } = await import("./reissue");
+  const restored = await rotateSessionTokens();
+  if (!restored.ok) {
+    if (restored.reloginRequired) redirectToExpiredLogin();
+    return { ok: false, reason: restored.retryable ? "UNVERIFIED" : "UNAUTHORIZED", message: restored.message };
+  }
+  return toRoleAccess(await verifyAccessToken(restored.accessToken), role);
 }
 
 /**

@@ -1,5 +1,8 @@
 import "server-only";
 
+import { redirect } from "next/navigation";
+
+import { ROUTES } from "@/constants/navigation";
 import { requestReissue } from "@/features/auth/remote";
 import type { ReissueFailureReason, ReissueResult } from "@/features/auth/types";
 import { isApiError } from "@/lib/api/errors";
@@ -33,6 +36,14 @@ export const REISSUE_FAILURE_MESSAGES: Record<ReissueFailureReason, string> = {
 const RETRYABLE: ReadonlySet<ReissueFailureReason> = new Set(["NETWORK", "TIMEOUT", "SERVER_ERROR", "INVALID_RESPONSE"]);
 const RELOGIN_REQUIRED: ReadonlySet<ReissueFailureReason> = new Set(["NO_REFRESH_TOKEN", "INVALID_REFRESH_TOKEN", "REFRESH_TOKEN_REUSED"]);
 
+/**
+ * 재발급으로 복구할 수 없을 때(Refresh 만료·재사용) 로그인 화면의 만료 안내로 보낸다 (Server Function 안에서만. 보호 화면의 기존 만료 주소와 같다).
+ * rotateSessionTokens가 이미 쿠키를 지운 뒤에 부른다
+ */
+export function redirectToExpiredLogin(): never {
+  redirect(`${ROUTES.login}?reason=expired`);
+}
+
 export function reissueFailure(reason: ReissueFailureReason): Extract<ReissueResult, { ok: false }> {
   return { ok: false, reason, message: REISSUE_FAILURE_MESSAGES[reason], retryable: RETRYABLE.has(reason), reloginRequired: RELOGIN_REQUIRED.has(reason) };
 }
@@ -56,8 +67,17 @@ function getReissueFailureReason(error: unknown): ReissueFailureReason {
   return "REJECTED";
 }
 
-/** Refresh 쿠키로 두 토큰을 재발급받아 쿠키를 교체한다 (API 모드 확인은 호출한 쪽이 먼저 한다) */
+/** Refresh 쿠키로 두 토큰을 재발급받아 쿠키를 교체한다 (API 모드 확인은 호출한 쪽이 먼저 한다). 브라우저에는 성공 여부만 돌려준다 */
 export async function reissueSessionTokens(): Promise<ReissueResult> {
+  const result = await rotateSessionTokens();
+  return result.ok ? { ok: true } : result;
+}
+
+/**
+ * 재발급 + 쿠키 교체 (reissueSessionTokens와 같은 처리). 새 Access Token을 서버 안에서만 돌려준다:
+ * 같은 요청에서 바로 사용자 확인(users/me)을 다시 할 때 쓴다 (requireRoleMutationAccess의 인증 복구). 브라우저로 넘기지 않는다
+ */
+export async function rotateSessionTokens(): Promise<{ ok: true; accessToken: string } | Extract<ReissueResult, { ok: false }>> {
   const refreshToken = await readRefreshToken();
   if (!refreshToken) return reissueFailure("NO_REFRESH_TOKEN");
 
@@ -77,5 +97,5 @@ export async function reissueSessionTokens(): Promise<ReissueResult> {
   await setRefreshTokenCookie(tokens.refreshToken, tokens.refreshExpiresIn);
   // 회전은 같은 로그인 세션: 식별 값은 그대로 두고 수명만 맞춘다
   await extendLoginSession(tokens.refreshExpiresIn);
-  return { ok: true };
+  return { ok: true, accessToken: tokens.accessToken };
 }
