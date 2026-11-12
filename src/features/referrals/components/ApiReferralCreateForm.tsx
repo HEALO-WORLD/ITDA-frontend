@@ -221,12 +221,6 @@ function ReferralProgress({ created }: { created: Created }) {
       <p role="status" className="mt-1 text-[15px]">
         {progress === null ? created.message : progress.message}
       </p>
-      {progress?.ok && progress.reservation && (
-        <p className="mt-1 text-sm text-gray-600">
-          의뢰 상태 {progress.referralStatus} · 예약 상태 {progress.reservation.status}
-          {progress.reservation.failureReason && ` · 사유 ${progress.reservation.failureReason}`}
-        </p>
-      )}
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
           type="button"
