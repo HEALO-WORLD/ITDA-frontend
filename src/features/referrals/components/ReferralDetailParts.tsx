@@ -101,6 +101,7 @@ const HISTORY_META: Record<ReferralHistoryReasonDto, { icon: LucideIcon; classNa
   RESERVATION_BLOCKED: { icon: Ban, className: "bg-red-50 text-red-600" },
   RESCHEDULED: { icon: RotateCcw, className: "bg-info-soft text-info" },
   CANCELED_BY_REQUESTER: { icon: Ban, className: "bg-gray-100 text-gray-500" },
+  RESCHEDULE_TIMEOUT: { icon: CircleAlert, className: "bg-gray-100 text-gray-600" },
 };
 
 export interface TimelineItem {

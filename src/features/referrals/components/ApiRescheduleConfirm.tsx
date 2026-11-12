@@ -178,6 +178,7 @@ export function getRescheduleStatusSteps(phase: Phase, progress: ProgressResult 
       if (progress?.ok) {
         if (progress.stage === "CONFIRMED") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "done", "확정됨")];
         if (progress.stage === "PROCESSING") return [step("재조정 요청", "done"), step("요청 접수", "done", "접수됨"), step("예약 확정", "current", "확정 대기")];
+        if (progress.stage === "EXPIRED") return [step("재조정 요청", "done"), receipt, step("예약 확정", "error", "기한 만료")];
         // 결과 불명 뒤 아직 재조정 필요 상태: 처리 중일 수 있어 실패로 표시하지 않는다
         if (progress.stage === "NEEDS_RESCHEDULE" && !accepted) return [step("재조정 요청", "done"), receipt, step("예약 확정", "warning", "확인 필요")];
         if (progress.stage === "FAILED" || progress.stage === "NEEDS_RESCHEDULE") {

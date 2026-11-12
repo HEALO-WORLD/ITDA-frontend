@@ -73,6 +73,9 @@ export async function loadApiRescheduleTarget(referralId: unknown): Promise<ApiR
       ? { ok: false, reason: "NETWORK", message: "의뢰 서버에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요." }
       : { ok: false, reason: "ERROR", message: "재조정 대상 의뢰를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요." };
   }
+  if (referral.referralStatus === "EXPIRED") {
+    return { ok: false, reason: "NOT_RESCHEDULABLE", message: "재조정 기한이 만료되어 더 이상 새 슬롯을 선택할 수 없습니다. 의뢰·예약 관리에서 종료 내역을 확인해 주세요." };
+  }
   if (referral.referralStatus !== "NEEDS_RESCHEDULE") {
     return { ok: false, reason: "NOT_RESCHEDULABLE", message: "재조정이 필요한 상태의 의뢰가 아닙니다. 이미 재예약했거나 상태가 바뀌었을 수 있습니다." };
   }
