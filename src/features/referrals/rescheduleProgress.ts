@@ -7,11 +7,12 @@ import type { FailureReasonDto, ReferralStatusDto, ReservationStatusDto } from "
  * - PROCESSING: 의뢰 PENDING + 예약 REQUESTED·HELD (아직 확정 아님)
  * - FAILED: 현재 예약 FAILED·BLOCKED 또는 의뢰 FAILED
  * - NEEDS_RESCHEDULE: 의뢰가 아직(또는 다시) 재조정 필요 상태
+ * - EXPIRED: 재조정 기한이 만료되어 더 이상 재예약할 수 없는 상태
  * - OTHER: 취소 등 그 밖의 상태 (받은 상태 그대로 안내)
  * 화면은 이 결과만 보여 주고 상태를 바꾸지 않는다.
  */
 
-export type RescheduleProgressStage = "CONFIRMED" | "PROCESSING" | "FAILED" | "NEEDS_RESCHEDULE" | "OTHER";
+export type RescheduleProgressStage = "CONFIRMED" | "PROCESSING" | "FAILED" | "NEEDS_RESCHEDULE" | "EXPIRED" | "OTHER";
 
 const FAILURE_REASON_MESSAGES: Record<FailureReasonDto, string> = {
   SLOT_CONFLICT: "다른 요청이 먼저 이 슬롯을 확보했습니다.",
@@ -27,6 +28,10 @@ export function toRescheduleProgress(
   // 의뢰가 재조정 필요 상태면 현재 예약은 장애로 막힌 기존 예약이거나 실패한 재예약이다: 요청이 반영되지 않은 것으로 안내한다
   if (referralStatus === "NEEDS_RESCHEDULE") {
     return { stage: "NEEDS_RESCHEDULE", message: "아직 재조정이 필요한 상태입니다. 재예약 요청이 접수되지 않았거나 실패했을 수 있습니다." };
+  }
+  // 기존 예약은 BLOCKED로 남으므로 만료를 먼저 판정한다. 재예약을 다시 유도하면 안 된다.
+  if (referralStatus === "EXPIRED") {
+    return { stage: "EXPIRED", message: "재조정 기한이 만료되어 의뢰가 종료되었습니다. 더 이상 재예약할 수 없습니다." };
   }
   if (reservation && (reservation.status === "FAILED" || reservation.status === "BLOCKED")) {
     const reason = reservation.failureReason ? ` ${FAILURE_REASON_MESSAGES[reservation.failureReason]}` : "";

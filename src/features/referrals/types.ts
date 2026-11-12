@@ -11,7 +11,7 @@ import type { ExamType } from "@/features/slots/types";
  * 화면 표시용 예약 상태 (와이어프레임 기준: 확정 / 처리 중 / 재조정 필요, 알림의 예약 취소와 맞추기 위한 취소).
  * 백엔드 상태 enum(HOLD 등)이 아니며, 연동 시 서버 상태 → 이 값으로 매핑한다.
  */
-export type ReferralDisplayStatus = "CONFIRMED" | "PROCESSING" | "RESCHEDULE_REQUIRED" | "CANCELLED";
+export type ReferralDisplayStatus = "CONFIRMED" | "PROCESSING" | "RESCHEDULE_REQUIRED" | "CANCELLED" | "EXPIRED";
 
 /** 최근 의뢰·예약 내역 1건 */
 export interface ReferralSummary {

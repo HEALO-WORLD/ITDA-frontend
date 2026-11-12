@@ -11,6 +11,7 @@ export const REFERRAL_STATUS_LABELS: Record<ReferralStatusDto, string> = {
   FAILED: "예약 실패",
   CANCELED: "취소",
   NEEDS_RESCHEDULE: "재조정 필요",
+  EXPIRED: "재조정 기한 만료",
 };
 
 export const RESERVATION_STATUS_LABELS: Record<ReservationStatusDto, string> = {
@@ -36,4 +37,5 @@ export const HISTORY_REASON_LABELS: Record<ReferralHistoryReasonDto, string> = {
   RESERVATION_BLOCKED: "예약 차단",
   RESCHEDULED: "재예약 접수",
   CANCELED_BY_REQUESTER: "의뢰기관 취소",
+  RESCHEDULE_TIMEOUT: "재조정 기한 만료",
 };

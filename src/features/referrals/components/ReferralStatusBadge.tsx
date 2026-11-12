@@ -8,7 +8,7 @@ interface ReferralStatusBadgeProps {
 }
 
 /**
- * 예약 상태 배지 (확정=녹색, 처리 중=파란색, 재조정 필요=빨간색, 취소=회색 · screen-spec 2.4)
+ * 예약 상태 배지 (확정=녹색, 처리 중=파란색, 재조정 필요=빨간색, 취소·만료=회색).
  * 모양은 공통 상태 배지(StatusBadge)를 따른다. 화면 표시용 상태 기준이다.
  */
 const STATUS_META: Record<ReferralDisplayStatus, { label: string; tone: StatusTone }> = {
@@ -16,6 +16,7 @@ const STATUS_META: Record<ReferralDisplayStatus, { label: string; tone: StatusTo
   PROCESSING: { label: "처리 중", tone: "info" },
   RESCHEDULE_REQUIRED: { label: "재조정 필요", tone: "danger" },
   CANCELLED: { label: "취소", tone: "muted" },
+  EXPIRED: { label: "재조정 기한 만료", tone: "muted" },
 };
 
 /** 백엔드 FAILED(예약 실패). Mock 상태·필터 선택지(REFERRAL_STATUS_LABELS)를 바꾸지 않도록 따로 둔다 */
