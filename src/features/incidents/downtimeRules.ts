@@ -5,7 +5,7 @@ import { parseDateKey, toDateKey } from "@/lib/date/seoulDate";
  * Mock 장애 등록(rules.ts의 occurredAt 모델)과 섞지 않는다: API는 시작(startedAt)·종료 예정(endedAt) 구간을 받는다.
  *
  * 백엔드 계약 (slot-service EquipmentDowntimeCreateRequest·EquipmentDowntimeService, 로컬 feat/equipment-downtime 기준):
- * - equipmentId(UUID)·startedAt·endedAt(OffsetDateTime)·reason 모두 필수
+ * - equipmentId(UUID)·downtimeType(FAILURE/MAINTENANCE)·startedAt·endedAt(OffsetDateTime)·reason 모두 필수
  * - reason: @NotBlank, @Size(max = 500) — Java String.length(UTF-16 단위)로 센다. 서버가 strip해서 저장한다
  * - 시작 < 종료 (아니면 400 DOWNTIME_INVALID_TIME_RANGE), 종료 > 현재 (아니면 400 DOWNTIME_END_NOT_FUTURE). 시작은 과거 허용
  * 화면 입력은 한국 시간 `YYYY-MM-DDTHH:mm`이고, 요청 직전에 `:00+09:00`을 붙인다 (브라우저·서버 시간대를 쓰지 않는다).
@@ -15,8 +15,13 @@ import { parseDateKey, toDateKey } from "@/lib/date/seoulDate";
 export const DOWNTIME_REASON_MAX_LENGTH = 500;
 
 /** 화면 입력값 (한국 시간 `YYYY-MM-DDTHH:mm`) */
+export type DowntimeType = "FAILURE" | "MAINTENANCE";
+
+export const isDowntimeType = (value: unknown): value is DowntimeType => value === "FAILURE" || value === "MAINTENANCE";
+
 export interface DowntimeFormInput {
   equipmentId: string;
+  downtimeType: string;
   startedAt: string;
   endedAt: string;
   reason: string;
@@ -53,13 +58,14 @@ export const downtimeReasonLength = (reason: string) => reason.trim().length;
  * @param nowDateTime 현재 한국 시간 `YYYY-MM-DDTHH:mm`
  */
 export function validateDowntimeForm(
-  { equipmentId, startedAt, endedAt, reason }: DowntimeFormInput,
+  { equipmentId, downtimeType, startedAt, endedAt, reason }: DowntimeFormInput,
   { equipmentIds, nowDateTime }: { equipmentIds: ReadonlySet<string>; nowDateTime: string },
 ): DowntimeFormErrors {
   const errors: DowntimeFormErrors = {};
 
   if (!equipmentId) errors.equipmentId = "장애 장비를 선택해 주세요.";
   else if (!equipmentIds.has(equipmentId.toLowerCase())) errors.equipmentId = "우리 기관 장비 목록에 없는 장비입니다. 목록에서 다시 선택해 주세요.";
+  if (!isDowntimeType(downtimeType)) errors.downtimeType = "중단 유형을 선택해 주세요.";
 
   const startValid = isSeoulLocalMinute(startedAt);
   if (!startValid) errors.startedAt = "장애 시작 날짜와 시각을 입력해 주세요.";

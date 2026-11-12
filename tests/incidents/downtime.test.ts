@@ -153,6 +153,7 @@ beforeEach(reset);
 
 const form = (overrides: Record<string, unknown> = {}) => ({
   equipmentId: EQUIPMENT,
+  downtimeType: "FAILURE",
   startedAt: `${yesterday}T09:00`,
   endedAt: `${tomorrow}T18:00`,
   reason: "  MRI 장비 냉각 시스템 오류 ",
@@ -188,14 +189,19 @@ describe("downtimeRules", () => {
   });
 
   it("필수값 누락", () => {
-    const errors = rules.validateDowntimeForm({ equipmentId: "", startedAt: "", endedAt: "", reason: "   " }, ctx());
-    assert.deepEqual(Object.keys(errors).sort(), ["endedAt", "equipmentId", "reason", "startedAt"]);
+    const errors = rules.validateDowntimeForm({ equipmentId: "", downtimeType: "", startedAt: "", endedAt: "", reason: "   " }, ctx());
+    assert.deepEqual(Object.keys(errors).sort(), ["downtimeType", "endedAt", "equipmentId", "reason", "startedAt"]);
   });
 
   it("목록에 없는 장비·형식이 틀린 장비 ID는 거절", () => {
     assert.ok(rules.validateDowntimeForm(form({ equipmentId: OTHER_EQUIPMENT }), ctx()).equipmentId);
     assert.ok(rules.validateDowntimeForm(form({ equipmentId: "not-a-uuid" }), ctx()).equipmentId);
     assert.deepEqual(rules.validateDowntimeForm(form({ equipmentId: EQUIPMENT.toUpperCase() }), ctx()), {});
+  });
+
+  it("중단 유형은 FAILURE·MAINTENANCE만 허용한다", () => {
+    assert.deepEqual(rules.validateDowntimeForm(form({ downtimeType: "MAINTENANCE" }), ctx()), {});
+    assert.ok(rules.validateDowntimeForm(form({ downtimeType: "OTHER" }), ctx()).downtimeType);
   });
 
   it("종료가 시작보다 빠르거나 같으면 거절", () => {
@@ -222,7 +228,7 @@ describe("downtimeRules", () => {
 // ── 2. 요청·응답 DTO ──
 
 describe("createEquipmentDowntime (remote)", () => {
-  const body = { equipmentId: EQUIPMENT, startedAt: "2026-11-06T10:00:00+09:00", endedAt: "2026-11-06T14:00:00+09:00", reason: " 냉각 오류 " };
+  const body = { equipmentId: EQUIPMENT, downtimeType: "FAILURE" as const, startedAt: "2026-11-06T10:00:00+09:00", endedAt: "2026-11-06T14:00:00+09:00", reason: " 냉각 오류 " };
 
   it("POST /api/v1/equipment-downtimes 에 DTO 필드만 보내고(사유 trim) 응답을 그대로 돌려준다", async () => {
     const result = await remote.createEquipmentDowntime({ ...body, institutionId: ORG } as never);
@@ -234,6 +240,11 @@ describe("createEquipmentDowntime (remote)", () => {
     assert.deepEqual(result.conflictedSlots, [{ slotId: SLOT, status: "BOOKED", reservationId: RESERVATION }]);
   });
 
+  it("점검 유형도 그대로 요청에 전달한다", async () => {
+    await remote.createEquipmentDowntime({ ...body, downtimeType: "MAINTENANCE" });
+    assert.equal((posts()[0].body as { downtimeType: string }).downtimeType, "MAINTENANCE");
+  });
+
   it("응답 시각 표기가 달라도 같은 순간이면 받는다 (Z 등)", async () => {
     state.post = (b) => responseFor(b, { startedAt: "2026-11-06T01:00:00Z", endedAt: "2026-11-06T05:00:00.000Z" });
     assert.equal((await remote.createEquipmentDowntime(body)).id, DOWNTIME);
@@ -242,6 +253,8 @@ describe("createEquipmentDowntime (remote)", () => {
   it("요청 전 검증에 걸리면 보내지 않는다 (CONFIG → NOT_SENT)", async () => {
     for (const bad of [
       { equipmentId: "x" },
+      { downtimeType: undefined },
+      { downtimeType: "UNKNOWN" },
       { startedAt: "2026-11-06T10:00:00" },
       { endedAt: "2026-11-06T09:00:00+09:00" },
       { reason: "   " },
@@ -336,13 +349,14 @@ describe("submitEquipmentDowntime", () => {
     const [call] = posts();
     assert.deepEqual(call.body, {
       equipmentId: EQUIPMENT,
+      downtimeType: "FAILURE",
       startedAt: `${yesterday}T09:00:00+09:00`,
       endedAt: `${tomorrow}T18:00:00+09:00`,
       reason: "MRI 장비 냉각 시스템 오류",
     });
     assert.deepEqual(call.headers, { Authorization: "Bearer test" });
     if (result.ok) {
-      assert.equal(result.message, "장비 장애가 등록되었습니다. 영향받은 예약과 의뢰의 후속 처리는 순차적으로 반영됩니다.");
+      assert.equal(result.message, "장비 중단이 등록되었습니다. 영향받은 예약과 의뢰의 후속 처리는 순차적으로 반영됩니다.");
       assert.equal(result.downtimeId, DOWNTIME);
       assert.equal(result.affectedSlotCount, 3);
       assert.equal(result.conflictedSlotCount, 1);
@@ -502,7 +516,7 @@ describe("IncidentDowntimeRegister 버튼", () => {
   const render = (equipments: unknown) => renderToStaticMarkup(createElement(Register, { equipments } as never));
   it("장비 목록이 있으면 등록 버튼 활성", () => {
     const html = render([{ id: EQUIPMENT, name: "MRI-1", modality: "MRI" }]);
-    assert.match(html, /장비 장애 등록/);
+    assert.match(html, /장비 중단 등록/);
     assert.doesNotMatch(html, /<button[^>]*disabled=""[^>]*aria-haspopup/);
   });
   it("장비 목록 조회 실패·장비 없음이면 비활성 + 이유", () => {
@@ -602,6 +616,9 @@ describe("시각 입력 (TimeInput)", () => {
       }),
     );
     assert.doesNotMatch(html, /type="time"/);
+    assert.equal((html.match(/name="downtimeType"/g) ?? []).length, 2);
+    assert.match(html, /장비 고장/);
+    assert.match(html, /장비 점검/);
     assert.equal((html.match(/inputMode="numeric"|inputmode="numeric"/g) ?? []).length, 2);
     assert.equal((html.match(/placeholder="HH:mm"/g) ?? []).length, 2);
     // 시작 시각 기본값 = 연 시점의 한국 시각, 종료 예정은 빈 값
@@ -628,7 +645,7 @@ describe("시각 입력 (TimeInput)", () => {
 
 // ── 6-1. 등록 대화상자 레이아웃 (장비 등록 모달과 같은 form2·2단·하단 고정 버튼) ──
 
-describe("장애 등록 대화상자 레이아웃", () => {
+describe("중단 등록 대화상자 레이아웃", () => {
   type ButtonProps = { disabled?: boolean; form?: string; type?: string; onClick?: () => void; children?: unknown };
   const buttonsOf = (node: unknown, found: { props: ButtonProps }[] = []): { props: ButtonProps }[] => {
     if (Array.isArray(node)) node.forEach((child) => buttonsOf(child, found));
@@ -652,7 +669,7 @@ describe("장애 등록 대화상자 레이아웃", () => {
   it("모달은 form2(980px)이고 버튼 줄은 Modal footer에 둔다", async () => {
     const { readFileSync } = await import("node:fs");
     const source = readFileSync("src/features/incidents/components/IncidentDowntimeRegister.tsx", "utf8");
-    assert.match(source, /<Modal\b[^>]*\btitle="장비 장애 등록"[^>]*\bsize="form2"/);
+    assert.match(source, /<Modal\b[^>]*\btitle="장비 중단 등록"[^>]*\bsize="form2"/);
     assert.match(source, /footer=\{[^}]*<DowntimeRegisterActions /);
   });
 
@@ -673,12 +690,12 @@ describe("장애 등록 대화상자 레이아웃", () => {
     assert.doesNotMatch(html, />취소</);
   });
 
-  it("footer 버튼: 평소 [취소][장애 등록], 요청 중 [등록 중] 비활성 + 안내(취소는 그대로 눌러 닫을 수 있다), 결과 불확실 [닫기][목록에서 확인 필요] 비활성", () => {
+  it("footer 버튼: 평소 [취소][중단 등록], 요청 중 [등록 중] 비활성 + 안내(취소는 그대로 눌러 닫을 수 있다), 결과 불확실 [닫기][목록에서 확인 필요] 비활성", () => {
     const { DowntimeRegisterActions, DOWNTIME_FORM_ID } = registerModule;
     let cancelled = 0;
     const onCancel = () => cancelled++;
     const idle = buttonsOf(DowntimeRegisterActions({ pending: false, failure: null, onCancel }));
-    assert.deepEqual(idle.map((button) => [button.props.children, Boolean(button.props.disabled)]), [["취소", false], ["장애 등록", false]]);
+    assert.deepEqual(idle.map((button) => [button.props.children, Boolean(button.props.disabled)]), [["취소", false], ["중단 등록", false]]);
     assert.equal(idle[1].props.type, "submit");
     assert.equal(idle[1].props.form, DOWNTIME_FORM_ID);
     idle[0].props.onClick?.();
@@ -1001,7 +1018,7 @@ describe("findRegisteredIncident / checkRegisteredIncidentAction", () => {
   });
 });
 
-describe("장비 장애 등록: 로그인 세션 정합성 (STEP 3-2-2B-4)", () => {
+describe("장비 중단 등록: 로그인 세션 정합성 (STEP 3-2-2B-4)", () => {
   const SESSION_CHANGED = { ok: false, reason: "SESSION_CHANGED", message: "다른 탭에서 로그인 계정이 변경되었습니다. 화면을 새로고침한 후 다시 시도해 주세요." };
 
   it("화면을 그린 뒤 다른 탭에서 계정이 바뀌면 SESSION_CHANGED: 우리 기관 장비 확인·등록 POST 0회, 목록 다시 그리지 않음", async () => {
@@ -1034,11 +1051,11 @@ describe("장비 장애 등록: 로그인 세션 정합성 (STEP 3-2-2B-4)", () 
     assert.equal(posts().length, 1);
   });
 
-  it("화면: SESSION_CHANGED면 [장애 등록] 비활성·입력 잠금(값은 그대로)·전용 안내, 렌더링 세션을 Action에 보낸다", async () => {
+  it("화면: SESSION_CHANGED면 [중단 등록] 비활성·입력 잠금(값은 그대로)·전용 안내, 렌더링 세션을 Action에 보낸다", async () => {
     const { DowntimeRegisterActions, DowntimeRegisterForm } = registerModule;
     const failure = { ok: false as const, reason: "SESSION_CHANGED" as const, message: SESSION_CHANGED.message };
     const actionsHtml = renderToStaticMarkup(DowntimeRegisterActions({ pending: false, failure, onCancel: () => {} }));
-    assert.match(actionsHtml, /<button type="submit"[^>]*disabled=""[^>]*>장애 등록<\/button>/);
+    assert.match(actionsHtml, /<button type="submit"[^>]*disabled=""[^>]*>중단 등록<\/button>/);
     assert.match(actionsHtml, />취소<\/button>/);
     const formHtml = renderToStaticMarkup(
       createElement(DowntimeRegisterForm, { equipments: [{ id: EQUIPMENT, name: "MRI-1", modality: "MRI" }], pending: false, failure, onSubmit: () => {} }),

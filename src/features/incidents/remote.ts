@@ -4,7 +4,7 @@ import { ApiError, isApiError } from "@/lib/api/errors";
 import type { PagedResponseDto } from "@/lib/api/types";
 import { compareInstants, parseOffsetDateTime } from "@/features/referrals/offsetDateTime";
 
-import { DOWNTIME_REASON_MAX_LENGTH } from "./downtimeRules";
+import { DOWNTIME_REASON_MAX_LENGTH, isDowntimeType, type DowntimeType } from "./downtimeRules";
 
 /**
  * 장비 장애 조회 실제 API (referral-service, Gateway 경유).
@@ -315,6 +315,7 @@ export function getIncidentErrorMessage(error: unknown, action: IncidentApiActio
  */
 export interface CreateEquipmentDowntimeRequestDto {
   equipmentId: string;
+  downtimeType: DowntimeType;
   startedAt: string;
   endedAt: string;
   reason: string;
@@ -383,6 +384,7 @@ export function validateCreateDowntimeRequest(
   input: Record<keyof CreateEquipmentDowntimeRequestDto, unknown>,
 ): { ok: true; body: CreateEquipmentDowntimeRequestDto } | { ok: false; field: keyof CreateEquipmentDowntimeRequestDto; message: string } {
   if (!isUuid(input.equipmentId)) return { ok: false, field: "equipmentId", message: "장비 정보가 올바르지 않습니다." };
+  if (!isDowntimeType(input.downtimeType)) return { ok: false, field: "downtimeType", message: "중단 유형을 선택해 주세요." };
   const start = parseOffsetDateTime(input.startedAt);
   if (!start) return { ok: false, field: "startedAt", message: "장애 시작 일시 형식이 올바르지 않습니다." };
   const end = parseOffsetDateTime(input.endedAt);
@@ -391,7 +393,7 @@ export function validateCreateDowntimeRequest(
   if (typeof input.reason !== "string" || input.reason.trim() === "") return { ok: false, field: "reason", message: "장애 사유를 입력해 주세요." };
   const reason = input.reason.trim();
   if (reason.length > DOWNTIME_REASON_MAX_LENGTH) return { ok: false, field: "reason", message: `장애 사유는 ${DOWNTIME_REASON_MAX_LENGTH}자 이하로 입력해 주세요.` };
-  return { ok: true, body: { equipmentId: input.equipmentId, startedAt: input.startedAt as string, endedAt: input.endedAt as string, reason } };
+  return { ok: true, body: { equipmentId: input.equipmentId, downtimeType: input.downtimeType, startedAt: input.startedAt as string, endedAt: input.endedAt as string, reason } };
 }
 
 /**
