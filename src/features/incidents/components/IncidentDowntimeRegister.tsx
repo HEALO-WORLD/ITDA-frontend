@@ -19,6 +19,7 @@ import {
   hasDowntimeErrors,
   validateDowntimeForm,
   type DowntimeField,
+  type DowntimeType,
   type DowntimeFormErrors,
   type DowntimeFormInput,
 } from "../downtimeRules";
@@ -143,15 +144,15 @@ export default function IncidentDowntimeRegister({ equipments }: { equipments: r
         className={primaryButtonClass}
       >
         <Plus className="size-4" aria-hidden="true" />
-        {pending && !open ? "등록 처리 중" : "장비 장애 등록"}
+        {pending && !open ? "등록 처리 중" : "장비 중단 등록"}
       </button>
 
       {notice && <DowntimeNotice notice={notice} onRefresh={() => router.refresh()} onDismiss={() => setNotice(null)} />}
 
       <Modal
         open={open}
-        title="장비 장애 등록"
-        description="장애 기간과 겹치는 예약 가능 슬롯은 사용 불가로 바뀌고, 영향받은 예약·의뢰는 순차적으로 후속 처리됩니다."
+        title="장비 중단 등록"
+        description="중단 기간과 겹치는 예약 가능 슬롯은 사용 불가로 바뀌고, 영향받은 예약·의뢰는 순차적으로 후속 처리됩니다."
         size="form2"
         closeOnBackdrop={false}
         onClose={close}
@@ -224,7 +225,7 @@ function TrackingMessage({ tracking }: { tracking: Tracking }) {
   );
 }
 
-const FIELDS: readonly DowntimeField[] = ["equipmentId", "startedAt", "endedAt", "reason"];
+const FIELDS: readonly DowntimeField[] = ["equipmentId", "downtimeType", "startedAt", "endedAt", "reason"];
 
 /** 등록 폼 id (Modal footer의 제출 버튼이 form 속성으로 이 폼을 제출한다) */
 export const DOWNTIME_FORM_ID = "downtime-register-form";
@@ -242,7 +243,7 @@ export function DowntimeRegisterActions({ pending, failure, onCancel }: { pendin
         {failure?.uncertain ? "닫기" : "취소"}
       </button>
       <button type="submit" form={DOWNTIME_FORM_ID} disabled={locked} className={primaryButtonClass}>
-        {pending ? "등록 중" : failure?.uncertain ? "목록에서 확인 필요" : "장애 등록"}
+        {pending ? "등록 중" : failure?.uncertain ? "목록에서 확인 필요" : "중단 등록"}
       </button>
     </div>
   );
@@ -262,6 +263,7 @@ export function DowntimeRegisterForm({
   // 시작 기본값은 대화상자를 연 시점의 한국 시각. 종료 예정은 직접 입력한다 (필수)
   const [initialNow] = useState(() => getSeoulNow());
   const [equipmentId, setEquipmentId] = useState("");
+  const [downtimeType, setDowntimeType] = useState<DowntimeType>("FAILURE");
   const [startDate, setStartDate] = useState<DateKey | "">(initialNow.dateKey);
   const [startTime, setStartTime] = useState(initialNow.dateTime.slice(11, 16));
   const [endDate, setEndDate] = useState<DateKey | "">("");
@@ -274,6 +276,7 @@ export function DowntimeRegisterForm({
   const end = normalizeTimeInput(endTime);
   const input: DowntimeFormInput = {
     equipmentId,
+    downtimeType,
     startedAt: startDate && start ? `${startDate}T${start}` : "",
     endedAt: endDate && end ? `${endDate}T${end}` : "",
     reason,
@@ -305,6 +308,7 @@ export function DowntimeRegisterForm({
       .map(({ id, name, modality }) => ({ value: id, label: `${name} (${modality})` })),
   ];
   const equipmentError = errorOf("equipmentId");
+  const downtimeTypeError = errorOf("downtimeType");
   const startError = errorOf("startedAt");
   const endError = errorOf("endedAt");
   const reasonError = errorOf("reason");
@@ -321,14 +325,51 @@ export function DowntimeRegisterForm({
       )}
 
       <fieldset disabled={locked} className="min-w-0">
-        <legend className="sr-only">장애 정보</legend>
+        <legend className="sr-only">중단 정보</legend>
+        <fieldset className="mb-5 min-w-0">
+          <legend className={fieldLabelClass}>
+            중단 유형 <span className="text-red-600">*</span>
+          </legend>
+          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {([
+              { value: "FAILURE", label: "장비 고장", description: "장비 결함, 소프트웨어 오류 등" },
+              { value: "MAINTENANCE", label: "장비 점검", description: "정기 점검, 예방 정비 등" },
+            ] as const).map(({ value, label, description }) => (
+              <label
+                key={value}
+                className={`flex cursor-pointer items-start gap-3 rounded-lg border px-4 py-3 text-sm transition-colors ${
+                  downtimeType === value ? "border-primary bg-primary/5" : "border-line bg-white hover:bg-gray-50"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="downtimeType"
+                  value={value}
+                  checked={downtimeType === value}
+                  onChange={() => {
+                    setDowntimeType(value);
+                    touch("downtimeType");
+                  }}
+                  aria-describedby={downtimeTypeError ? "downtime-type-error" : undefined}
+                  className="mt-0.5 size-4 shrink-0 accent-primary"
+                  required
+                />
+                <span className="flex flex-col gap-0.5">
+                  <span className="font-semibold text-gray-900">{label}</span>
+                  <span className="text-xs text-gray-500">{description}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+          {downtimeTypeError && <p id="downtime-type-error" className="mt-1.5 text-sm text-red-600">{downtimeTypeError}</p>}
+        </fieldset>
         {/* 860px 이상: 왼쪽 장애 장비·사유(5) · 오른쪽 장애 시작·종료 예정 일시(7) / 좁은 화면: 1단 (장비 등록 모달과 같은 비율·간격) */}
         <div className="grid grid-cols-1 gap-x-8 gap-y-5 min-[860px]:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
           <div className="flex min-w-0 flex-col gap-5">
             <div>
               <SelectInput
                 id="downtime-equipment"
-                label="장애 장비"
+                label="대상 장비"
                 data-autofocus
                 options={options}
                 value={equipmentId}
@@ -349,7 +390,7 @@ export function DowntimeRegisterForm({
 
             <div>
               <label htmlFor="downtime-reason" className={fieldLabelClass}>
-                장애 사유 <span className="text-red-600">*</span>
+                중단 사유 <span className="text-red-600">*</span>
               </label>
               <textarea
                 id="downtime-reason"
@@ -381,7 +422,7 @@ export function DowntimeRegisterForm({
           <div className="flex min-w-0 flex-col gap-5">
             <DateTimeField
               idPrefix="downtime-start"
-              dateLabel="장애 시작 날짜"
+              dateLabel="중단 시작 날짜"
               timeLabel="시작 시각"
               date={startDate}
               time={startTime}
@@ -398,7 +439,7 @@ export function DowntimeRegisterForm({
 
             <DateTimeField
               idPrefix="downtime-end"
-              dateLabel="장애 종료 예정 날짜"
+              dateLabel="중단 종료 예정 날짜"
               timeLabel="종료 예정 시각"
               date={endDate}
               time={endTime}
