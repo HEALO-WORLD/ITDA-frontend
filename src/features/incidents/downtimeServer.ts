@@ -18,7 +18,7 @@ import { parseOffsetDateTime, toSeoulLocalDateTime } from "@/features/referrals/
  *
  * 순서: 기능 스위치 → users/me로 검사기관(EXAMINER) 확인 → 입력 검증(한국 시간 규칙)
  *   → 우리 기관 장비 목록 1회 조회(선택한 장비가 있는지. 조회 실패면 등록하지 않는다) → `+09:00` OffsetDateTime → POST 1회
- * - 브라우저 값은 장비 ID·한국 시간 문자열·사유만 받는다. 기관 ID·역할 헤더는 만들지 않는다 (Gateway가 JWT로 붙인다)
+ * - 브라우저 값은 장비 ID·중단 유형·한국 시간 문자열·사유만 받는다. 기관 ID·역할 헤더는 만들지 않는다 (Gateway가 JWT로 붙인다)
  * - 같은 사용자·장비 요청이 이 서버에서 처리 중이면 다시 보내지 않는다 (백엔드에 멱등 키가 없다. 최종 중복 방지는 409 DOWNTIME_OVERLAP)
  * - 201은 '중단 등록'까지다: 장애 목록(referral-service)·예약 BLOCKED·의뢰 NEEDS_RESCHEDULE·알림은 Outbox·Kafka로 나중에 반영된다
  * 결과에는 토큰·서버 오류 본문을 담지 않는다. 로그에는 사유를 남기지 않는다.
@@ -54,7 +54,7 @@ export type DowntimeActionResult =
       fieldErrors?: DowntimeFormErrors;
     };
 
-export const DOWNTIME_SUCCESS_MESSAGE = "장비 장애가 등록되었습니다. 영향받은 예약과 의뢰의 후속 처리는 순차적으로 반영됩니다.";
+export const DOWNTIME_SUCCESS_MESSAGE = "장비 중단이 등록되었습니다. 영향받은 예약과 의뢰의 후속 처리는 순차적으로 반영됩니다.";
 
 const inFlight = new Set<string>();
 
@@ -82,6 +82,7 @@ export async function submitEquipmentDowntime(input: unknown, expectedLoginSessi
   const data = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
   const form: DowntimeFormInput = {
     equipmentId: typeof data.equipmentId === "string" ? data.equipmentId : "",
+    downtimeType: typeof data.downtimeType === "string" ? data.downtimeType : "",
     startedAt: typeof data.startedAt === "string" ? data.startedAt : "",
     endedAt: typeof data.endedAt === "string" ? data.endedAt : "",
     reason: typeof data.reason === "string" ? data.reason : "",
@@ -117,6 +118,7 @@ export async function submitEquipmentDowntime(input: unknown, expectedLoginSessi
     const created = await createEquipmentDowntime(
       {
         equipmentId: form.equipmentId,
+        downtimeType: form.downtimeType as "FAILURE" | "MAINTENANCE",
         startedAt: toSeoulOffsetDateTime(form.startedAt),
         endedAt: toSeoulOffsetDateTime(form.endedAt),
         reason: form.reason,
