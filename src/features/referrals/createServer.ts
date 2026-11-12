@@ -246,7 +246,7 @@ export type ReferralProgressResult =
   | { ok: false; reason: "NOT_AVAILABLE" | "SIGNED_OUT" | "UNAUTHORIZED" | "FORBIDDEN" | "INVALID_INPUT" | "NOT_FOUND" | "ERROR"; message: string };
 
 const FAILURE_REASON_MESSAGES: Record<FailureReasonDto, string> = {
-  SLOT_CONFLICT: "다른 요청이 먼저 이 슬롯을 확보해 예약하지 못했습니다.",
+  SLOT_CONFLICT: "선택한 슬롯을 예약할 수 없습니다.",
   CONFIRM_FAILED: "검사기관에서 예약을 확정하지 못했습니다.",
   HOLD_EXPIRED: "슬롯 확보 시간이 지나 예약이 취소되었습니다.",
   EQUIPMENT_FAILURE: "검사 장비 장애로 예약하지 못했습니다.",
@@ -258,6 +258,9 @@ export function toReferralProgress(
   reservation: { status: ReservationStatusDto; failureReason: FailureReasonDto | null } | null,
 ): { stage: ReferralProgressStage; message: string } {
   if (reservation && (reservation.status === "FAILED" || reservation.status === "BLOCKED")) {
+    if (reservation.failureReason === "SLOT_CONFLICT") {
+      return { stage: "FAILED", message: "선택한 슬롯을 예약할 수 없습니다. 다른 시간대를 선택해 다시 시도해 주세요." };
+    }
     return { stage: "FAILED", message: `예약에 실패했습니다. ${reservation.failureReason ? FAILURE_REASON_MESSAGES[reservation.failureReason] : ""} 다른 슬롯으로 다시 요청해 주세요.`.replace("  ", " ") };
   }
   if (referralStatus === "FAILED") return { stage: "FAILED", message: "의뢰 처리에 실패했습니다. 다른 슬롯으로 다시 요청해 주세요." };

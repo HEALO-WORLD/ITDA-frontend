@@ -519,7 +519,7 @@ describe("toReferralProgress", () => {
     assert.notEqual(server.toReferralProgress("PENDING", { status: "REQUESTED", failureReason: null }).stage, "CONFIRMED");
   });
   it("실패 사유 문구를 보여 준다", () => {
-    assert.match(server.toReferralProgress("PENDING", { status: "FAILED", failureReason: "SLOT_CONFLICT" }).message, /먼저 이 슬롯/);
+    assert.equal(server.toReferralProgress("PENDING", { status: "FAILED", failureReason: "SLOT_CONFLICT" }).message, "선택한 슬롯을 예약할 수 없습니다. 다른 시간대를 선택해 다시 시도해 주세요.");
   });
 });
 
