@@ -22,10 +22,10 @@ import type { ReferralDisplayStatus } from "./types";
  */
 
 /** 백엔드 ReferralStatus. 표기를 바꾸지 않는다 (CANCELED는 L 하나) */
-export type ReferralStatusDto = "PENDING" | "CONFIRMED" | "FAILED" | "CANCELED" | "NEEDS_RESCHEDULE";
+export type ReferralStatusDto = "PENDING" | "CONFIRMED" | "FAILED" | "CANCELED" | "NEEDS_RESCHEDULE" | "EXPIRED";
 
 /** 백엔드 ReferralStatus 값 목록 (domain/enums/ReferralStatus.java) */
-export const REFERRAL_STATUSES: readonly ReferralStatusDto[] = ["PENDING", "CONFIRMED", "FAILED", "CANCELED", "NEEDS_RESCHEDULE"];
+export const REFERRAL_STATUSES: readonly ReferralStatusDto[] = ["PENDING", "CONFIRMED", "FAILED", "CANCELED", "NEEDS_RESCHEDULE", "EXPIRED"];
 
 export const isReferralStatus = (value: unknown): value is ReferralStatusDto =>
   REFERRAL_STATUSES.includes(value as ReferralStatusDto);
@@ -270,7 +270,8 @@ export type ReferralHistoryReasonDto =
   | "RESERVATION_FAILED"
   | "RESERVATION_BLOCKED"
   | "RESCHEDULED"
-  | "CANCELED_BY_REQUESTER";
+  | "CANCELED_BY_REQUESTER"
+  | "RESCHEDULE_TIMEOUT";
 const HISTORY_REASONS: readonly ReferralHistoryReasonDto[] = [
   "REFERRAL_CREATED",
   "RESERVATION_CONFIRMED",
@@ -278,6 +279,7 @@ const HISTORY_REASONS: readonly ReferralHistoryReasonDto[] = [
   "RESERVATION_BLOCKED",
   "RESCHEDULED",
   "CANCELED_BY_REQUESTER",
+  "RESCHEDULE_TIMEOUT",
 ];
 
 /** 의뢰 변경 이력 1건 (ReferralHistoryResponse 중 화면에 쓰는 필드. eventId·reservationId·changedBy는 쓰지 않는다) */
@@ -749,6 +751,8 @@ export function toReferralDisplayStatus(status: ReferralStatusDto): ReferralDisp
       return "RESCHEDULE_REQUIRED";
     case "CANCELED":
       return "CANCELLED";
+    case "EXPIRED":
+      return "EXPIRED";
     case "FAILED":
       return null;
   }

@@ -5,7 +5,8 @@ import { Suspense, use } from "react";
 import type { ApiNotificationItem, UnreadNotificationCountResult } from "../types";
 
 import { useApiNotificationUnread } from "./ApiNotificationUnreadProvider";
-import { API_NOTIFICATION_META, NotificationRow } from "./NotificationList";
+import { NotificationRow } from "./NotificationList";
+import { getApiNotificationMeta } from "../apiNotificationMeta";
 import NotificationPagination from "./NotificationPagination";
 import { useApiNotificationRead } from "./useApiNotificationRead";
 
@@ -25,7 +26,7 @@ interface ApiNotificationListProps {
  * 의뢰기관 알림 내역 (API 모드). 모양은 Mock 알림 내역(NotificationList)과 같다.
  * - 백엔드 페이지 단위로 보여 주고, 읽지 않은 알림 수는 레이아웃의 조회 결과(헤더 알림 점과 같은 값)를 쓴다
  * - 개별 읽음 처리만 한다: 백엔드에 전체 읽음 API가 없어 '모두 읽음 처리'는 두지 않는다
- * - 알림 유형별 표시·재조정 원인 장비는 응답에 없어 두지 않는다
+ * - 만료 알림은 별도로 구분하고, 백엔드에 없는 재조정 원인 장비 정보는 만들지 않는다
  */
 export default function ApiNotificationList({ notifications, page, totalPages, unreadCount: pageUnreadCount }: ApiNotificationListProps) {
   const layoutUnreadCount = useApiNotificationUnread();
@@ -70,7 +71,7 @@ export default function ApiNotificationList({ notifications, page, totalPages, u
             <NotificationRow
               key={item.id}
               item={item}
-              meta={API_NOTIFICATION_META}
+              meta={getApiNotificationMeta(item.type)}
               pending={pendingIds.has(item.id)}
               locked={locked}
               onMarkAsRead={() => void markAsRead(item)}
